@@ -23,8 +23,9 @@ concurrency:
 
 on:
   # Use pull_request_target instead of pull_request so that secrets are
-  # available even for PRs from forks. This is safe because OCR only reads
-  # the diff and does not execute any code from the PR.
+  # available even for PRs from forks. Security: we only checkout the base
+  # branch (trusted code); PR head commits are fetched as git objects for
+  # diff computation but never checked out to the working directory.
   pull_request_target:
     types: [opened]
 
@@ -39,16 +40,15 @@ jobs:
       image: node:20
     if: github.event_name == 'pull_request_target'
     steps:
-      - name: Checkout repository
+      - name: Checkout base branch (trusted code only)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history needed for merge-base diff
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Mark repository as safe directory
         run: git config --global --add safe.directory '*'
 
-      - name: Fetch PR head ref (ensures fork commits are available)
+      - name: Fetch PR head commits (git objects only, not checked out)
         run: git fetch origin pull/${{ github.event.pull_request.number }}/head
 
       - name: Install OpenCodeReview

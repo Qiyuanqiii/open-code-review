@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/agent"
@@ -77,9 +78,17 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 	}, nil
 }
 
-// resolveWorkingDir returns (absPath, isGitRepo, err). When requireGit is
+// resolveWorkingDir returns (repoDir, isGitRepo, err). When requireGit is
 // true, returns an error if the directory is not a git repo. When false,
 // returns IsGitRepo=false instead of erroring (scan path uses this).
+//
+// When requireGit is true (review path) and the directory is a git repo, the
+// returned path is the repository top level (`git rev-parse --show-toplevel`),
+// not the raw working directory. This keeps git diff/show paths consistent when
+// ocr runs from a monorepo subdirectory: otherwise the diff and the file_read
+// tool disagree on whether paths are relative to the subdir or the repo root
+// (#287). The scan path (requireGit=false) intentionally keeps the
+// working-directory scope so scanning a subdirectory stays limited to it.
 func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 	if input == "" {
 		wd, err := os.Getwd()
@@ -95,12 +104,20 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 	if _, statErr := os.Stat(absPath); statErr != nil {
 		return "", false, fmt.Errorf("stat %s: %w", absPath, statErr)
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
-	isGit := err == nil && len(out) > 0
-	if !isGit && requireGit {
-		return "", false, fmt.Errorf("%s is not a git repository", absPath)
+	out, err := runGitCmd(absPath, "rev-parse", "--show-toplevel")
+	toplevel := strings.TrimSpace(string(out))
+	isGit := err == nil && toplevel != ""
+	if !isGit {
+		if requireGit {
+			return "", false, fmt.Errorf("%s is not a git repository", absPath)
+		}
+		return absPath, false, nil
 	}
-	return absPath, isGit, nil
+	// Only the review path resolves to the repo root; scan keeps the subdir.
+	if requireGit {
+		return toplevel, true, nil
+	}
+	return absPath, true, nil
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've

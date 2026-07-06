@@ -109,6 +109,55 @@ func TestResolveWorkingDir_NonExistent(t *testing.T) {
 	}
 }
 
+// TestResolveWorkingDir_SubdirResolvesToToplevel locks in the #287 fix: when
+// ocr is invoked from a monorepo subdirectory, the resolved repo dir must be
+// the repository top level, not the subdir, so diff and file_read agree on
+// repo-root-relative paths.
+func TestResolveWorkingDir_SubdirResolvesToToplevel(t *testing.T) {
+	root := initTestGitRepo(t)
+	sub := filepath.Join(root, "subproject", "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, isGit, err := resolveWorkingDir(sub, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isGit {
+		t.Fatal("expected isGit=true for a subdir of a git repo")
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotResolved, _ := filepath.EvalSymlinks(got)
+	if gotResolved != wantRoot {
+		t.Errorf("resolveWorkingDir(subdir) = %q, want repo root %q", got, wantRoot)
+	}
+}
+
+// TestResolveWorkingDir_ScanSubdirKeepsScope guards against regressing scan's
+// scope: requireGit=false (scan path) must keep the subdirectory, not expand to
+// the whole repo, even when the subdir lives inside a git repository.
+func TestResolveWorkingDir_ScanSubdirKeepsScope(t *testing.T) {
+	root := initTestGitRepo(t)
+	sub := filepath.Join(root, "subproject", "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, isGit, err := resolveWorkingDir(sub, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isGit {
+		t.Fatal("expected isGit=true for a subdir of a git repo")
+	}
+	wantSub, _ := filepath.EvalSymlinks(sub)
+	gotResolved, _ := filepath.EvalSymlinks(got)
+	if gotResolved != wantSub {
+		t.Errorf("resolveWorkingDir(subdir, requireGit=false) = %q, want subdir %q", got, wantSub)
+	}
+}
+
 func TestResolveWorkingDir_GitRepo(t *testing.T) {
 	dir := t.TempDir()
 	gitDir := filepath.Join(dir, ".git")

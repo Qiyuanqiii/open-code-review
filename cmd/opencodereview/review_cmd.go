@@ -127,11 +127,14 @@ func resolveRepoDir(input string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve absolute path: %w", err)
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
-	if err != nil || len(out) == 0 {
+	// Resolve to the repository top level so paths stay repo-root relative
+	// when invoked from a monorepo subdirectory (#287).
+	out, err := runGitCmd(absPath, "rev-parse", "--show-toplevel")
+	toplevel := strings.TrimSpace(string(out))
+	if err != nil || toplevel == "" {
 		return "", fmt.Errorf("%s is not a git repository", absPath)
 	}
-	return absPath, nil
+	return toplevel, nil
 }
 
 // requireGitRepo validates that the given directory is part of a git repository.

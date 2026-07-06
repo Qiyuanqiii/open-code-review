@@ -104,7 +104,7 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 	if _, statErr := os.Stat(absPath); statErr != nil {
 		return "", false, fmt.Errorf("stat %s: %w", absPath, statErr)
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--show-toplevel")
+	out, err := runGitCmdStdout(absPath, "rev-parse", "--show-toplevel")
 	toplevel := strings.TrimSpace(string(out))
 	isGit := err == nil && toplevel != ""
 	if !isGit {

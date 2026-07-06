@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/config/rules"
@@ -155,6 +157,26 @@ func TestResolveWorkingDir_ScanSubdirKeepsScope(t *testing.T) {
 	gotResolved, _ := filepath.EvalSymlinks(got)
 	if gotResolved != wantSub {
 		t.Errorf("resolveWorkingDir(subdir, requireGit=false) = %q, want subdir %q", got, wantSub)
+	}
+}
+
+// TestResolveWorkingDir_BareRepoFailsLoudly ensures a bare repository (where
+// `git rev-parse --show-toplevel` yields no work tree) errors on the review
+// path instead of silently falling back to the invocation dir and reproducing
+// the #287 path mismatch.
+func TestResolveWorkingDir_BareRepoFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+
+	_, _, err := resolveWorkingDir(dir, true)
+	if err == nil {
+		t.Fatal("expected error for bare repo with requireGit=true")
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

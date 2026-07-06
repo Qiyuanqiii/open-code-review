@@ -129,7 +129,7 @@ func resolveRepoDir(input string) (string, error) {
 	}
 	// Resolve to the repository top level so paths stay repo-root relative
 	// when invoked from a monorepo subdirectory (#287).
-	out, err := runGitCmd(absPath, "rev-parse", "--show-toplevel")
+	out, err := runGitCmdStdout(absPath, "rev-parse", "--show-toplevel")
 	toplevel := strings.TrimSpace(string(out))
 	if err != nil || toplevel == "" {
 		return "", fmt.Errorf("%s is not a git repository", absPath)

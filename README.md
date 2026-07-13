@@ -775,11 +775,14 @@ Config file: `~/.opencodereview/config.json`
 | `llm.extra_headers` | string | Comma-separated `key=value` HTTP headers |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `mcp_servers.<name>.command` | string | Command to start the MCP server |
-| `mcp_servers.<name>.args` | array | Command-line arguments for the MCP server |
-| `mcp_servers.<name>.env` | array | Environment variables in `KEY=VALUE` format |
+| `mcp_servers.<name>.type` | string | `stdio` (default) or `remote` |
+| `mcp_servers.<name>.command` | string | Command to start the MCP server (stdio) |
+| `mcp_servers.<name>.args` | array | Command-line arguments for the MCP server (stdio) |
+| `mcp_servers.<name>.env` | array | Environment variables in `KEY=VALUE` format (stdio) |
+| `mcp_servers.<name>.url` | string | URL for remote MCP server (http/https) |
+| `mcp_servers.<name>.headers` | object | HTTP headers for remote server (supports `$ENV_VAR` expansion) |
 | `mcp_servers.<name>.tools` | array | Allowed tool names (empty = all tools) |
-| `mcp_servers.<name>.setup` | string | Setup command to run before starting the server |
+| `mcp_servers.<name>.setup` | string | Setup command to run before starting the server (stdio) |
 | `language` | string | Any language name, e.g. `English`, `Chinese` (default: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -790,17 +793,22 @@ Environment variables take precedence over the config file.
 
 ### MCP Server
 
-Open Code Review supports [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers, allowing the review agent to use external tools during code review via the stdio transport.
+Open Code Review supports [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers, allowing the review agent to use external tools during code review. Two transports are supported: **stdio** (local subprocess) and **remote** (Streamable HTTP).
 
 Configure MCP servers via the CLI:
 
 ```bash
-# Add an MCP server
+# Stdio MCP server (default)
 ocr config set mcp_servers.<name>.command <command>
 ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# Remote MCP server
+ocr config set mcp_servers.<name>.type remote
+ocr config set mcp_servers.<name>.url https://mcp.example.com/mcp
+ocr config set mcp_servers.<name>.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
 
 # Delete an MCP server
 ocr config unset mcp_servers.<name>
@@ -808,13 +816,18 @@ ocr config unset mcp_servers.<name>
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `command` | Yes | The executable command to start the MCP server |
+| `type` | No | `stdio` (default) or `remote` |
+| `command` | Yes (stdio) | The executable command to start the MCP server |
 | `args` | No | Command-line arguments passed to the server |
 | `env` | No | Environment variables in `KEY=VALUE` format |
+| `url` | Yes (remote) | URL of the remote MCP server (http/https) |
+| `headers` | No | HTTP headers as a JSON object; values support `$ENV_VAR` expansion at runtime |
 | `tools` | No | Allowed tool names; if empty, all tools from the server are available |
 | `setup` | No | A shell command to run before starting the server (e.g. build an index) |
 
 > **Note:** If an MCP tool's name conflicts with a built-in tool, it will be skipped with a warning. The `setup` command has a 5-minute timeout.
+
+> **Tip:** When setting headers via CLI, use **single quotes** to prevent the shell from expanding `$ENV_VAR` references. The values are expanded at runtime by OCR, not at config-save time. Alternatively, edit `~/.opencodereview/config.json` directly.
 
 **Example: Add [CodeGraph](https://github.com/nicholasgasior/codegraph) for code structure analysis**
 
@@ -823,6 +836,30 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
+**Example: Connect to a remote MCP server**
+
+```bash
+ocr config set mcp_servers.my-remote.type remote
+ocr config set mcp_servers.my-remote.url 'https://mcp.example.com/mcp'
+ocr config set mcp_servers.my-remote.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+```
+
+Or in `~/.opencodereview/config.json`:
+
+```json
+{
+  "mcp_servers": {
+    "my-remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $MCP_TOKEN"
+      }
+    }
+  }
+}
 ```
 
 ### Environment Variables

@@ -757,11 +757,14 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `llm.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `mcp_servers.<name>.command` | string | 启动 MCP 服务器的命令 |
-| `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数 |
-| `mcp_servers.<name>.env` | array | 环境变量，`KEY=VALUE` 格式 |
+| `mcp_servers.<name>.type` | string | `stdio`（默认）或 `remote` |
+| `mcp_servers.<name>.command` | string | 启动 MCP 服务器的命令（stdio） |
+| `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数（stdio） |
+| `mcp_servers.<name>.env` | array | 环境变量，`KEY=VALUE` 格式（stdio） |
+| `mcp_servers.<name>.url` | string | 远程 MCP 服务器的 URL（http/https） |
+| `mcp_servers.<name>.headers` | object | 远程服务器的 HTTP 头（支持 `$ENV_VAR` 展开） |
 | `mcp_servers.<name>.tools` | array | 允许使用的工具名称（为空则允许所有工具） |
-| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令 |
+| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令（stdio） |
 | `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -772,17 +775,22 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 
 ### MCP Server
 
-Open Code Review 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，允许评审 Agent 在代码评审过程中通过 stdio 传输协议调用外部工具。
+Open Code Review 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，允许评审 Agent 在代码评审过程中调用外部工具。支持两种传输方式：**stdio**（本地子进程）和 **remote**（Streamable HTTP）。
 
 通过 CLI 配置 MCP 服务器：
 
 ```bash
-# 添加 MCP 服务器
+# Stdio MCP 服务器（默认）
 ocr config set mcp_servers.<name>.command <command>
 ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# 远程 MCP 服务器
+ocr config set mcp_servers.<name>.type remote
+ocr config set mcp_servers.<name>.url https://mcp.example.com/mcp
+ocr config set mcp_servers.<name>.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
 
 # 删除 MCP 服务器
 ocr config unset mcp_servers.<name>
@@ -790,13 +798,18 @@ ocr config unset mcp_servers.<name>
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `command` | 是 | 启动 MCP 服务器的可执行命令 |
+| `type` | 否 | `stdio`（默认）或 `remote` |
+| `command` | 是（stdio） | 启动 MCP 服务器的可执行命令 |
 | `args` | 否 | 传递给服务器的命令行参数 |
 | `env` | 否 | 环境变量，`KEY=VALUE` 格式 |
+| `url` | 是（remote） | 远程 MCP 服务器的 URL（http/https） |
+| `headers` | 否 | HTTP 头，JSON 对象格式；值支持运行时 `$ENV_VAR` 展开 |
 | `tools` | 否 | 允许使用的工具名称；为空则服务器的所有工具均可用 |
 | `setup` | 否 | 启动服务器前运行的 shell 命令（例如构建索引） |
 
 > **注意：** 如果 MCP 工具的名称与内置工具冲突，该工具将被跳过并输出警告。`setup` 命令的超时时间为 5 分钟。
+
+> **提示：** 通过 CLI 设置 headers 时，请使用**单引号**以避免 shell 提前展开 `$ENV_VAR` 引用。OCR 会在连接时展开这些值，而不是在保存配置时。也可以直接编辑 `~/.opencodereview/config.json`。
 
 **示例：添加 [CodeGraph](https://github.com/nicholasgasior/codegraph) 增强代码结构分析能力**
 
@@ -805,6 +818,30 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
+**示例：连接远程 MCP 服务器**
+
+```bash
+ocr config set mcp_servers.my-remote.type remote
+ocr config set mcp_servers.my-remote.url 'https://mcp.example.com/mcp'
+ocr config set mcp_servers.my-remote.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+```
+
+或在 `~/.opencodereview/config.json` 中：
+
+```json
+{
+  "mcp_servers": {
+    "my-remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $MCP_TOKEN"
+      }
+    }
+  }
+}
 ```
 
 ### 环境变量

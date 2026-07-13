@@ -772,11 +772,14 @@ OCR разрешает правила ревью по цепочке приор�
 | `llm.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `mcp_servers.<name>.command` | string | Команда для запуска MCP-сервера |
-| `mcp_servers.<name>.args` | array | Аргументы командной строки для MCP-сервера |
-| `mcp_servers.<name>.env` | array | Переменные окружения в формате `KEY=VALUE` |
+| `mcp_servers.<name>.type` | string | `stdio` (по умолчанию) или `remote` |
+| `mcp_servers.<name>.command` | string | Команда для запуска MCP-сервера (stdio) |
+| `mcp_servers.<name>.args` | array | Аргументы командной строки для MCP-сервера (stdio) |
+| `mcp_servers.<name>.env` | array | Переменные окружения в формате `KEY=VALUE` (stdio) |
+| `mcp_servers.<name>.url` | string | URL удалённого MCP-сервера (http/https) |
+| `mcp_servers.<name>.headers` | object | HTTP-заголовки для удалённого сервера (поддержка `$ENV_VAR`) |
 | `mcp_servers.<name>.tools` | array | Разрешённые имена инструментов (пусто = все инструменты) |
-| `mcp_servers.<name>.setup` | string | Команда настройки перед запуском сервера |
+| `mcp_servers.<name>.setup` | string | Команда настройки перед запуском сервера (stdio) |
 | `language` | string | Любое название языка, например `English`, `Chinese` (по умолчанию: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -787,17 +790,22 @@ OCR разрешает правила ревью по цепочке приор�
 
 ### MCP-сервер
 
-Open Code Review поддерживает серверы [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), позволяя агенту ревью использовать внешние инструменты во время проверки кода через stdio-транспорт.
+Open Code Review поддерживает серверы [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), позволяя агенту ревью использовать внешние инструменты во время проверки кода. Поддерживаются два транспорта: **stdio** (локальный подпроцесс) и **remote** (Streamable HTTP).
 
 Настройка MCP-серверов через CLI:
 
 ```bash
-# Добавить MCP-сервер
+# Stdio MCP-сервер (по умолчанию)
 ocr config set mcp_servers.<name>.command <command>
 ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# Удалённый MCP-сервер
+ocr config set mcp_servers.<name>.type remote
+ocr config set mcp_servers.<name>.url https://mcp.example.com/mcp
+ocr config set mcp_servers.<name>.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
 
 # Удалить MCP-сервер
 ocr config unset mcp_servers.<name>
@@ -805,13 +813,18 @@ ocr config unset mcp_servers.<name>
 
 | Поле | Обязательно | Описание |
 |------|-------------|----------|
-| `command` | Да | Исполняемая команда для запуска MCP-сервера |
+| `type` | Нет | `stdio` (по умолчанию) или `remote` |
+| `command` | Да (stdio) | Исполняемая команда для запуска MCP-сервера |
 | `args` | Нет | Аргументы командной строки для сервера |
 | `env` | Нет | Переменные окружения в формате `KEY=VALUE` |
+| `url` | Да (remote) | URL удалённого MCP-сервера (http/https) |
+| `headers` | Нет | HTTP-заголовки в виде JSON-объекта; значения поддерживают подстановку `$ENV_VAR` во время выполнения |
 | `tools` | Нет | Разрешённые имена инструментов; если пусто — доступны все инструменты сервера |
 | `setup` | Нет | Shell-команда для выполнения перед запуском сервера (например, построение индекса) |
 
 > **Примечание:** Если имя MCP-инструмента конфликтует со встроенным инструментом, он будет пропущен с предупреждением. Таймаут команды `setup` составляет 5 минут.
+
+> **Совет:** При установке headers через CLI используйте **одинарные кавычки**, чтобы shell не раскрыл ссылки `$ENV_VAR`. Значения раскрываются OCR при подключении, а не при сохранении конфигурации. Также можно редактировать `~/.opencodereview/config.json` напрямую.
 
 **Пример: добавление [CodeGraph](https://github.com/nicholasgasior/codegraph) для усиления анализа структуры кода**
 
@@ -820,6 +833,30 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
+**Пример: подключение к удалённому MCP-серверу**
+
+```bash
+ocr config set mcp_servers.my-remote.type remote
+ocr config set mcp_servers.my-remote.url 'https://mcp.example.com/mcp'
+ocr config set mcp_servers.my-remote.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+```
+
+Или в `~/.opencodereview/config.json`:
+
+```json
+{
+  "mcp_servers": {
+    "my-remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $MCP_TOKEN"
+      }
+    }
+  }
+}
 ```
 
 ### Переменные окружения

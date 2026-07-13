@@ -768,11 +768,14 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `llm.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `mcp_servers.<name>.command` | string | MCPサーバーを起動するコマンド |
-| `mcp_servers.<name>.args` | array | MCPサーバーのコマンドライン引数 |
-| `mcp_servers.<name>.env` | array | 環境変数（`KEY=VALUE`形式） |
+| `mcp_servers.<name>.type` | string | `stdio`（デフォルト）または `remote` |
+| `mcp_servers.<name>.command` | string | MCPサーバーを起動するコマンド（stdio） |
+| `mcp_servers.<name>.args` | array | MCPサーバーのコマンドライン引数（stdio） |
+| `mcp_servers.<name>.env` | array | 環境変数（`KEY=VALUE`形式）（stdio） |
+| `mcp_servers.<name>.url` | string | リモートMCPサーバーのURL（http/https） |
+| `mcp_servers.<name>.headers` | object | リモートサーバーのHTTPヘッダー（`$ENV_VAR`展開対応） |
 | `mcp_servers.<name>.tools` | array | 許可するツール名（空の場合はすべてのツール） |
-| `mcp_servers.<name>.setup` | string | サーバー起動前に実行するセットアップコマンド |
+| `mcp_servers.<name>.setup` | string | サーバー起動前に実行するセットアップコマンド（stdio） |
 | `language` | string | 任意の言語名、例：`English`、`Chinese`（デフォルト：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -783,17 +786,22 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 
 ### MCPサーバー
 
-Open Code Reviewは[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)サーバーをサポートしており、レビューエージェントがstdioトランスポートを介してコードレビュー中に外部ツールを使用できます。
+Open Code Reviewは[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)サーバーをサポートしており、レビューエージェントがコードレビュー中に外部ツールを使用できます。**stdio**（ローカルサブプロセス）と**remote**（Streamable HTTP）の2つのトランスポートに対応しています。
 
 CLIからMCPサーバーを設定します：
 
 ```bash
-# MCPサーバーを追加
+# Stdio MCPサーバー（デフォルト）
 ocr config set mcp_servers.<name>.command <command>
 ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# リモートMCPサーバー
+ocr config set mcp_servers.<name>.type remote
+ocr config set mcp_servers.<name>.url https://mcp.example.com/mcp
+ocr config set mcp_servers.<name>.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
 
 # MCPサーバーを削除
 ocr config unset mcp_servers.<name>
@@ -801,13 +809,18 @@ ocr config unset mcp_servers.<name>
 
 | フィールド | 必須 | 説明 |
 |-----------|------|------|
-| `command` | はい | MCPサーバーを起動する実行コマンド |
+| `type` | いいえ | `stdio`（デフォルト）または `remote` |
+| `command` | はい（stdio） | MCPサーバーを起動する実行コマンド |
 | `args` | いいえ | サーバーに渡すコマンドライン引数 |
 | `env` | いいえ | 環境変数（`KEY=VALUE`形式） |
+| `url` | はい（remote） | リモートMCPサーバーのURL（http/https） |
+| `headers` | いいえ | HTTPヘッダー（JSONオブジェクト）。値は実行時に`$ENV_VAR`が展開されます |
 | `tools` | いいえ | 許可するツール名。空の場合、サーバーのすべてのツールが利用可能 |
 | `setup` | いいえ | サーバー起動前に実行するシェルコマンド（例：インデックスの構築） |
 
 > **注意：** MCPツールの名前が組み込みツールと競合する場合、そのツールは警告付きでスキップされます。`setup`コマンドのタイムアウトは5分です。
+
+> **ヒント：** CLIでheadersを設定する際は、シェルが`$ENV_VAR`を展開しないよう**シングルクォート**を使用してください。値はOCRが接続時に展開します（設定保存時ではありません）。または`~/.opencodereview/config.json`を直接編集してください。
 
 **例：[CodeGraph](https://github.com/nicholasgasior/codegraph)を追加してコード構造分析を強化**
 
@@ -816,6 +829,30 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
+**例：リモートMCPサーバーに接続**
+
+```bash
+ocr config set mcp_servers.my-remote.type remote
+ocr config set mcp_servers.my-remote.url 'https://mcp.example.com/mcp'
+ocr config set mcp_servers.my-remote.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+```
+
+または`~/.opencodereview/config.json`で：
+
+```json
+{
+  "mcp_servers": {
+    "my-remote": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $MCP_TOKEN"
+      }
+    }
+  }
+}
 ```
 
 ### 環境変数

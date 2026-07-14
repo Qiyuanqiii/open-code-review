@@ -3,11 +3,13 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -125,4 +127,21 @@ func AnyToAttr(k string, v interface{}) attribute.KeyValue {
 	default:
 		return attribute.String(k, fmt.Sprintf("%v", v))
 	}
+}
+
+// ContextFromTraceParent reads the TRACEPARENT environment variable (W3C
+// Trace Context format: "00-{traceId}-{spanId}-{flags}") and returns a
+// context carrying the extracted remote span context. This allows OCR's
+// spans to join a caller's distributed trace regardless of the upstream
+// tracing system (EagleEye, Jaeger, Datadog, etc.).
+//
+// If TRACEPARENT is unset or malformed, returns the input ctx unchanged.
+func ContextFromTraceParent(ctx context.Context) context.Context {
+	tp := os.Getenv("TRACEPARENT")
+	if tp == "" {
+		return ctx
+	}
+	prop := propagation.TraceContext{}
+	carrier := propagation.MapCarrier{"traceparent": tp}
+	return prop.Extract(ctx, carrier)
 }

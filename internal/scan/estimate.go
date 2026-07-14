@@ -118,3 +118,13 @@ func humanTokens(n int64) string {
 		return fmt.Sprintf("%d", n)
 	}
 }
+
+// EstimateItemTokens is the exported wrapper around estimateFileTokens.
+func EstimateItemTokens(item model.ScanItem, planEnabled bool) int64 {
+	return estimateFileTokens(item, planEnabled)
+}
+
+// EstimateTokens is the exported wrapper around estimateCost.
+func EstimateTokens(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnabled bool) Estimate {
+	return estimateCost(items, planEnabled, dedupEnabled, summaryEnabled)
+}

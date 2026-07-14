@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-manifest/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "root",
+    "target_hash",
+    "batch_strategy",
+    "batch_size",
+    "estimated_tokens",
+    "summary",
+    "partial",
+    "skipped_files",
+    "bundles"
+  ],
+  "properties": {
+    "schema_version": {"const": "review-manifest/v1"},
+    "manifest_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "root": {"type": "string"},
+    "target_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "batch_strategy": {"enum": ["none", "by-language", "by-directory", "diff"]},
+    "batch_size": {"type": "integer", "minimum": 1},
+    "estimated_tokens": {"type": "integer", "minimum": 0},
+    "summary": {"type": "object"},
+    "partial": {"type": "boolean"},
+    "skipped_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason"],
+        "properties": {
+          "path": {"type": "string"},
+          "reason": {"type": "string"},
+          "estimated_tokens": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "bundles": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "object"}}
+  }
+}

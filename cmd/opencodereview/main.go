@@ -58,6 +58,8 @@ func dispatch() error {
 		return runViewer(args[1:])
 	case "session", "sessions":
 		return runSession(args[1:])
+	case "delegate":
+		return runDelegate(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -79,6 +81,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  delegate     Prepare evidence and emit a host-agent review workflow
   session, sessions  List and inspect saved review sessions
   version      Show version information
 

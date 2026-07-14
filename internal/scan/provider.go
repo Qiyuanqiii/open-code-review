@@ -72,12 +72,26 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 	}
 }
 
+// SkippedItem records a discovered scan path that could not be enumerated.
+type SkippedItem struct {
+	Path   string
+	Reason string
+}
+
 // Enumerate returns one ScanItem per reviewable file. Binaries are emitted
 // with empty Content + IsBinary=true so previews can show them as excluded.
 func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
+	items, _, err := p.EnumerateDetailed(ctx)
+	return items, err
+}
+
+// EnumerateDetailed returns review candidates and explicit provider-level skips.
+func (p *Provider) EnumerateDetailed(
+	ctx context.Context,
+) ([]model.ScanItem, []SkippedItem, error) {
 	files, err := p.listFiles(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if len(p.paths) > 0 {
@@ -87,12 +101,10 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
 
 	var out []model.ScanItem
+	var skipped []SkippedItem
 	for _, rel := range files {
-		// Per-iteration cancellation check: a large repo with thousands of
-		// files may take seconds to walk, and downstream Lstat / ReadFile
-		// each cost a syscall — abort early when ctx is cancelled.
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if rel == "" {
 			continue
@@ -104,24 +116,26 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		info, err := os.Lstat(full)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot stat %s: %v\n", rel, err)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
 			continue
 		}
 		if !info.Mode().IsRegular() {
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "non_regular"})
 			continue
 		}
 		if info.Size() > p.maxFileSizeBytes {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: skipping %s (%d bytes exceeds %d-byte scan limit; raise MaxTokens if the real concern is token budget, not memory)\n",
 				rel, info.Size(), p.maxFileSizeBytes)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "file_size"})
 			continue
 		}
 		binary, err := isBinaryFile(full)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot sniff %s: %v\n", rel, err)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
 			continue
 		}
 		if binary {
-			// Emit placeholder so preview can display [B], but do not
-			// read the file body — saves memory on large binaries.
 			out = append(out, model.ScanItem{
 				Path:     rel,
 				IsBinary: true,
@@ -131,6 +145,7 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		content, err := os.ReadFile(full)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
 			continue
 		}
 		out = append(out, model.ScanItem{
@@ -140,7 +155,7 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 			LineCount: countLines(content),
 		})
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // listFiles returns all source files under repoDir. In a git repo it uses

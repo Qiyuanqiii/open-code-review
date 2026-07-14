@@ -114,3 +114,11 @@ func firstLevelDirKey(it model.ScanItem) string {
 	}
 	return it.Path[:idx]
 }
+
+// ParseBatchStrategy is the exported wrapper around parseBatchStrategy.
+func ParseBatchStrategy(value string) BatchStrategy { return parseBatchStrategy(value) }
+
+// GroupBatches is the exported wrapper around groupBatches.
+func GroupBatches(items []model.ScanItem, strategy BatchStrategy, size int) [][]model.ScanItem {
+	return groupBatches(items, strategy, size)
+}

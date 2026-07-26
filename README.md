@@ -165,11 +165,15 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 - [Review Rules](https://open-codereview.ai/docs/review-rules) — customize review rules with path filtering and targeting
 - [Configuration](https://open-codereview.ai/docs/configuration) — config keys and environment variables
 - [MCP Server](https://open-codereview.ai/docs/mcp) — extend the review agent with external tools
-- Coding Agent Integrations — integrate OCR into Claude Code, Codex, Cursor, OpenCode, etc.
-  - [Skill](https://open-codereview.ai/docs/agent-skill) — install as a reusable agent skill
-  - [Plugin](https://open-codereview.ai/docs/claude-code) — install as a Claude Code / Codex / Cursor plugin
+- Coding Agent Integrations — choose the platform you use
+  - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
+  - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
+  - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
-  - [Delegation Mode](https://open-codereview.ai/docs/delegate) — let your agent review using its own LLM
+  - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill
+- Review Execution Modes — after integration, choose which LLM performs the review
+  - [Default (OCR-managed)](https://open-codereview.ai/docs/configuration) — OCR runs the review using its configured LLM
+  - [Delegation Mode](https://open-codereview.ai/docs/delegate) — your coding agent runs the review using its own LLM; no OCR API key required
 - [CI/CD Integration](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI, and Gerrit integration
 - [Session Viewer](https://open-codereview.ai/docs/viewer) — browse and replay review sessions in browser
 - [Telemetry](https://open-codereview.ai/docs/telemetry) — OpenTelemetry integration for observability

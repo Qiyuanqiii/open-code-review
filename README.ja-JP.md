@@ -165,11 +165,15 @@ ocr delegate rule src/main.go src/handler.go
 - [レビュールール](https://open-codereview.ai/docs/review-rules) — レビュールールのカスタマイズ、パスフィルタリングとターゲティング
 - [設定](https://open-codereview.ai/docs/configuration) — 設定キーと環境変数
 - [MCP サーバー](https://open-codereview.ai/docs/mcp) — 外部ツールでレビューエージェントを拡張
-- コーディングエージェント連携 — OCR を Claude Code、Codex、Cursor、OpenCode などに統合
-  - [Skill](https://open-codereview.ai/docs/agent-skill) — 再利用可能なエージェントスキルとしてインストール
-  - [Plugin](https://open-codereview.ai/docs/claude-code) — Claude Code / Codex / Cursor プラグインとしてインストール
+- コーディングエージェント連携 — 使用するプラットフォームを選択
+  - [Claude Code](plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
+  - [Codex](plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
+  - [Cursor](plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
   - [OpenCode](plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
-  - [デリゲートモード](https://open-codereview.ai/docs/delegate) — エージェント自身の LLM でレビューを実行
+  - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール
+- レビュー実行モード — 連携後、どの LLM がレビューを実行するかを選択
+  - [デフォルト（OCR が管理）](https://open-codereview.ai/docs/configuration) — OCR が設定済みの LLM を使用してレビューを実行
+  - [デリゲートモード](https://open-codereview.ai/docs/delegate) — コーディングエージェントが自身の LLM を使用してレビューを実行。OCR の API キーは不要
 - [CI/CD 連携](https://open-codereview.ai/docs/cicd) — GitHub Actions、GitLab CI、GitFlic CI、Gerrit との統合
 - [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生
 - [テレメトリー](https://open-codereview.ai/docs/telemetry) — 可観測性のためのOpenTelemetry統合

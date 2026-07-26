@@ -165,11 +165,15 @@ ocr delegate rule src/main.go src/handler.go
 - [评审规则](https://open-codereview.ai/docs/review-rules) —— 深度定制规则进行评审，过滤路径、指定路径等
 - [配置](https://open-codereview.ai/docs/configuration) —— 配置项与环境变量
 - [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
-- 编程 Agent 集成 —— 将 OCR 集成到 Claude Code、Codex、Cursor、OpenCode 等
-  - [Skill](https://open-codereview.ai/docs/agent-skill) —— 作为可复用的 Agent Skill 安装
-  - [Plugin](https://open-codereview.ai/docs/claude-code) —— 作为 Claude Code / Codex / Cursor 插件安装
-  - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生审查工具和斜杠命令
-  - [委托模式](https://open-codereview.ai/docs/delegate) —— 让 Agent 使用自身的 LLM 进行评审
+- 编程 Agent 集成 —— 选择你使用的平台
+  - [Claude Code](plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
+  - [Codex](plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
+  - [Cursor](plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
+  - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
+  - [兼容 Skill 的 Agent](https://open-codereview.ai/docs/agent-skill) —— 安装可移植的 Agent Skill
+- 评审执行模式 —— 完成集成后，选择由哪个 LLM 执行评审
+  - [默认模式（OCR 驱动）](https://open-codereview.ai/docs/configuration) —— OCR 使用其已配置的 LLM 执行评审
+  - [委托模式](https://open-codereview.ai/docs/delegate) —— 编程 Agent 使用自身的 LLM 执行评审；无需 OCR API Key
 - [CI/CD 集成](https://open-codereview.ai/docs/cicd) —— 支持 GitHub Actions、GitLab CI、GitFlic CI、Gerrit 集成
 - [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话
 - [遥测](https://open-codereview.ai/docs/telemetry) —— OpenTelemetry 集成，用于可观测性

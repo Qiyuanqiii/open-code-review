@@ -165,11 +165,15 @@ ocr delegate rule src/main.go src/handler.go
 - [Правила ревью](https://open-codereview.ai/docs/review-rules) — кастомизация правил ревью, фильтрация и таргетинг по путям
 - [Конфигурация](https://open-codereview.ai/docs/configuration) — ключи конфигурации и переменные окружения
 - [MCP-сервер](https://open-codereview.ai/docs/mcp) — расширение агента ревью внешними инструментами
-- Интеграция с кодинг-агентами — встраивание OCR в Claude Code, Codex, Cursor, OpenCode и др.
-  - [Skill](https://open-codereview.ai/docs/agent-skill) — установка как переиспользуемый навык агента
-  - [Plugin](https://open-codereview.ai/docs/claude-code) — установка как плагин Claude Code / Codex / Cursor
+- Интеграции с кодинг-агентами — выберите используемую платформу
+  - [Claude Code](plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
+  - [Codex](plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
+  - [Cursor](plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
   - [OpenCode](plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
-  - [Режим делегирования](https://open-codereview.ai/docs/delegate) — агент ревьюит своей собственной LLM
+  - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента
+- Режимы выполнения ревью — после интеграции выберите, какая LLM выполняет ревью
+  - [По умолчанию (под управлением OCR)](https://open-codereview.ai/docs/configuration) — OCR выполняет ревью с помощью настроенной LLM
+  - [Режим делегирования](https://open-codereview.ai/docs/delegate) — кодинг-агент выполняет ревью с помощью собственной LLM; API-ключ для OCR не требуется
 - [Интеграция с CI/CD](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI и Gerrit
 - [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере
 - [Телеметрия](https://open-codereview.ai/docs/telemetry) — интеграция с OpenTelemetry для наблюдаемости

@@ -60,6 +60,10 @@ import jaFaq from './ja/faq.md';
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
 import ruReviewRules from './ru/review-rules.md';
+import ruViewer from './ru/viewer.md';
+import ruTelemetry from './ru/telemetry.md';
+import ruContributing from './ru/contributing.md';
+import ruFaq from './ru/faq.md';
 
 export type DocSlug =
   | 'quickstart'
@@ -142,6 +146,10 @@ const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
   'review-rules': ruReviewRules,
+  'viewer': ruViewer,
+  'telemetry': ruTelemetry,
+  'contributing': ruContributing,
+  'faq': ruFaq,
 };
 
 const docsMap: Record<Language, LocalizedDocs> = {

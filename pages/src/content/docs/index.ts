@@ -67,6 +67,10 @@ import ruTools from './ru/tools.md';
 import ruMcp from './ru/mcp.md';
 import ruViewer from './ru/viewer.md';
 import ruTelemetry from './ru/telemetry.md';
+import ruAgentSkill from './ru/integrations/agent-skill.md';
+import ruClaudeCode from './ru/integrations/claude-code.md';
+import ruCicd from './ru/integrations/ci.md';
+import ruDelegate from './ru/integrations/delegate.md';
 import ruContributing from './ru/contributing.md';
 import ruFaq from './ru/faq.md';
 
@@ -158,6 +162,10 @@ const ruDocs: LocalizedDocs = {
   'mcp': ruMcp,
   'viewer': ruViewer,
   'telemetry': ruTelemetry,
+  'agent-skill': ruAgentSkill,
+  'claude-code': ruClaudeCode,
+  'cicd': ruCicd,
+  'delegate': ruDelegate,
   'contributing': ruContributing,
   'faq': ruFaq,
 };

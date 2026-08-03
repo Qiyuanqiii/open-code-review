@@ -59,7 +59,12 @@ import jaFaq from './ja/faq.md';
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
+import ruConfiguration from './ru/configuration.md';
+import ruCliReference from './ru/cli-reference.md';
 import ruReviewRules from './ru/review-rules.md';
+import ruArchitecture from './ru/architecture.md';
+import ruTools from './ru/tools.md';
+import ruMcp from './ru/mcp.md';
 import ruViewer from './ru/viewer.md';
 import ruTelemetry from './ru/telemetry.md';
 import ruContributing from './ru/contributing.md';
@@ -145,7 +150,12 @@ const jaDocs: Record<DocSlug, string> = {
 const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
+  'configuration': ruConfiguration,
+  'cli-reference': ruCliReference,
   'review-rules': ruReviewRules,
+  'architecture': ruArchitecture,
+  'tools': ruTools,
+  'mcp': ruMcp,
   'viewer': ruViewer,
   'telemetry': ruTelemetry,
   'contributing': ruContributing,

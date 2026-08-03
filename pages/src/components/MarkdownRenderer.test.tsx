@@ -12,8 +12,8 @@ describe('MarkdownRenderer heading IDs', () => {
     );
 
     const heading = screen.getByRole('heading', { name: 'Что делает навык' });
-    expect(heading).toHaveAttribute('id', 'what-the-skill-does');
-    expect(heading).not.toHaveTextContent('{#what-the-skill-does}');
-    expect(screen.getByRole('heading', { name: 'Публикация', level: 4 })).toHaveAttribute('id', 'service-account');
+    expect(heading.getAttribute('id')).toBe('what-the-skill-does');
+    expect(heading.textContent).not.toContain('{#what-the-skill-does}');
+    expect(screen.getByRole('heading', { name: 'Публикация', level: 4 }).getAttribute('id')).toBe('service-account');
   });
 });

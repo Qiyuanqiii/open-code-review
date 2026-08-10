@@ -135,7 +135,7 @@ as returning `403` or `400` for rate limiting. Use `retry_codes` to make OCR
 retry these requests using the existing SDK retry mechanism.
 
 `retry_codes` is an array of integers. It can be set as `llm.retry_codes` or
-`custom_providers.<name>.retry_codes`. With `ocr config set`, pass the codes as
+`custom_providers.<name>.retry_codes`. When using `ocr config set`, pass the codes as
 a comma-separated list:
 
 ```bash

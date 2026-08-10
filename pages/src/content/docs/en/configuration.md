@@ -130,7 +130,7 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
 
 ### Additional retry status codes
 
-Some LLM gateways use non-standard 4xx status codes for transient errors, such
+Some LLM providers use non-standard 4xx status codes for transient errors, such
 as returning `403` or `400` for rate limiting. Use `retry_codes` to make OCR
 retry these requests using the existing SDK retry mechanism.
 

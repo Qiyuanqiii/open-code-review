@@ -128,6 +128,27 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
 }
 ```
 
+### Additional retry status codes
+
+Some LLM gateways use non-standard 4xx status codes for transient errors, such
+as returning `403` or `400` for rate limiting. Use `retry_codes` to make OCR
+retry these requests using the existing SDK retry mechanism.
+
+`retry_codes` is an array of integers. It can be set as `llm.retry_codes` or
+`custom_providers.<name>.retry_codes`. With `ocr config set`, pass the codes as
+a comma-separated list:
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+Only 4xx HTTP status codes are accepted. `408`, `409`, and `429` are already
+retried by the SDK. When read from the config file, these redundant codes are
+ignored. When supplied through `ocr config set`, OCR also prints a warning and
+omits them from the saved value. All 5xx responses are already retried by the
+SDK and cannot be added to `retry_codes`.
+
 ### Per-file prompt limit
 
 OCR defaults to a 58,888-token prompt ceiling for each file review. Increase

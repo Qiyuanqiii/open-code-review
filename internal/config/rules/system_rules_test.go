@@ -135,11 +135,11 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
-		{"rules/library.bzl", "BUILD File Simplicity and Abstraction"},
-		{"config.star", "BUILD File Simplicity and Abstraction"},
-		{"MODULE.bazel", "BUILD File Simplicity and Abstraction"},
-		{"pkg/BUILD", "BUILD File Simplicity and Abstraction"},
-		{"WORKSPACE", "BUILD File Simplicity and Abstraction"},
+		{"rules/library.bzl", "Starlark Code Review Guide"},
+		{"config.star", "Starlark Code Review Guide"},
+		{"MODULE.bazel", "Starlark Code Review Guide"},
+		{"pkg/BUILD", "Starlark Code Review Guide"},
+		{"WORKSPACE", "Starlark Code Review Guide"},
 	}
 
 	for _, tt := range tests {

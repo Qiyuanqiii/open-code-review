@@ -7,6 +7,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type Plugin, tool } from "@opencode-ai/plugin"
 
+// Retry cleanup long enough for transient file locks, such as antivirus scans, to clear.
+const backgroundCleanupMaxRetries = 20
+const backgroundCleanupRetryDelayMs = 50
+
 interface ReviewInput {
   commit?: string
   from?: string
@@ -133,8 +137,8 @@ async function withTemporaryBackgroundFile<T>(
     await rm(directory, {
       recursive: true,
       force: true,
-      maxRetries: 20,
-      retryDelay: 50,
+      maxRetries: backgroundCleanupMaxRetries,
+      retryDelay: backgroundCleanupRetryDelayMs,
     })
   }
 }
@@ -252,11 +256,14 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         }
         if (exitCode !== 0 || signal !== null) {
           const output = result.stderr || result.stdout
-          const termination = signal !== null
-            ? `OpenCodeReview was terminated by signal ${signal}.`
-            : exitCode !== null
-              ? `OpenCodeReview exited with code ${exitCode}.`
-              : "OpenCodeReview exited without an exit code or signal."
+          let termination: string
+          if (signal !== null) {
+            termination = `OpenCodeReview was terminated by signal ${signal}.`
+          } else if (exitCode !== null) {
+            termination = `OpenCodeReview exited with code ${exitCode}.`
+          } else {
+            termination = "OpenCodeReview exited without an exit code or signal."
+          }
           reject(new OcrExecutionError(
             signal !== null && output !== "" ? `${output}\n${termination}` : output || termination,
             result,

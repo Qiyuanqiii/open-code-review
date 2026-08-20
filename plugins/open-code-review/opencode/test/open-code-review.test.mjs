@@ -74,7 +74,7 @@ function toolContext(worktree, signal = new AbortController().signal) {
   }
 }
 
-async function waitForFile(path, timeoutMs = 1_000) {
+async function waitForFile(path, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {

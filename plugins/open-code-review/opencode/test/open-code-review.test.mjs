@@ -219,6 +219,28 @@ test("ocr_review passes multi-paragraph background through a private temporary f
   )
 })
 
+test("ocr_review treats whitespace-only background as absent", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        { background: "  \n\t " },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(output).argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+      ])
+    },
+  )
+})
+
 test("ocr_review passes suspicious-looking refs as one argv value without a shell", async () => {
   await withFakeOcr(
     "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",

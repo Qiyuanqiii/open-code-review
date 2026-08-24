@@ -388,6 +388,11 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         args: reviewArgs,
         async execute(args, context) {
           const input = args as ReviewInput
+          const { background, ...inputWithoutBackground } = input
+          const normalizedBackground = background?.trim()
+          const normalizedInput: ReviewInput = normalizedBackground
+            ? { ...inputWithoutBackground, background: normalizedBackground }
+            : inputWithoutBackground
           const cwd = context.worktree || context.directory || worktree
           const defaultOverallMs = 30 * 60 * 1000
           const options: RunOptions = {
@@ -398,11 +403,14 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
               : defaultOverallMs,
           }
           const runReview = async (backgroundFile?: string): Promise<string> => {
-            const result = await runOcr(buildReviewArgs(input, cwd, backgroundFile), options)
-            return formatReviewResult(result, input.preview === true)
+            const result = await runOcr(
+              buildReviewArgs(normalizedInput, cwd, backgroundFile),
+              options,
+            )
+            return formatReviewResult(result, normalizedInput.preview === true)
           }
-          if (input.background !== undefined && input.background !== "") {
-            return await withTemporaryBackgroundFile(input.background, runReview)
+          if (normalizedInput.background !== undefined) {
+            return await withTemporaryBackgroundFile(normalizedInput.background, runReview)
           }
           return await runReview()
         },

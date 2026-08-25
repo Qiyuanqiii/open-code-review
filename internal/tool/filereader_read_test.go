@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 func TestFileReader_Read_Workspace(t *testing.T) {
@@ -130,6 +131,51 @@ func TestFileReader_Read_CommitMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "func Hello()") {
 		t.Errorf("Read() = %q, want containing 'func Hello()'", got)
+	}
+}
+
+func TestFileReaderReadSubversionRevision(t *testing.T) {
+	var calls [][]string
+	fr := &FileReader{
+		RepoDir:        t.TempDir(),
+		RepositoryKind: vcs.Subversion,
+		Mode:           ModeCommit,
+		Ref:            "17",
+		SVNTarget:      "https://svn.example.com/project/trunk",
+		SVNOutput: func(_ context.Context, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return []byte("first\nsecond\nthird\n"), nil
+		},
+	}
+	content, err := fr.Read(context.Background(), "src/a b.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "first\nsecond\nthird\n" {
+		t.Fatalf("Read = %q", content)
+	}
+	lines, total, err := fr.ReadLines(context.Background(), "src/a b.go", 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 4 || len(lines) != 1 || lines[0] != "second" {
+		t.Fatalf("ReadLines = %v, %d", lines, total)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v", calls)
+	}
+	for _, call := range calls {
+		joined := strings.Join(call, " ")
+		if !strings.Contains(joined, "cat --revision 17") || !strings.Contains(joined, "a%20b.go@17") {
+			t.Errorf("svn call is not pinned: %s", joined)
+		}
+	}
+}
+
+func TestFileReaderSubversionRevisionRequiresTarget(t *testing.T) {
+	fr := &FileReader{RepositoryKind: vcs.Subversion, Mode: ModeCommit, Ref: "17"}
+	if _, err := fr.Read(context.Background(), "main.go"); err == nil {
+		t.Fatal("missing SVN target was accepted")
 	}
 }
 

@@ -99,7 +99,7 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 ### 사전 요구 사항
 
 - **Git >= 2.41** — Git working copy, commit 및 range 리뷰에 필요합니다.
-- **Subversion >= 1.7(선택 사항)** — SVN working copy 리뷰에만 필요하며 commit 및 range 모드는 계속 Git 전용입니다.
+- **Subversion >= 1.7(선택 사항)** — SVN workspace, revision 및 revision range 리뷰에 필요합니다.
 
 ### CLI
 
@@ -142,10 +142,14 @@ ocr review
 cd your-svn-working-copy
 ocr review
 
-# 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
+# 변경되지 않는 Subversion 이력: 단일 revision 또는 명시적인 revision range
+ocr review --commit 128
+ocr review --from 120 --to 128
+
+# Git 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
 ocr review --from main --to feature-branch
 
-# 단일 commit
+# 단일 Git commit
 ocr review --commit abc123
 
 # 중단된 range 또는 단일 commit review 재개

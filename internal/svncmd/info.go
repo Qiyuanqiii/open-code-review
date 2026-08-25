@@ -6,12 +6,16 @@
 package svncmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+var svnURLUserinfoRE = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
 
 // WorkingCopyInfo is the stable subset of `svn info --xml` needed by the
 // review pipeline.
@@ -19,7 +23,9 @@ type WorkingCopyInfo struct {
 	Root           string
 	URL            string
 	RepositoryRoot string
+	RepositoryUUID string
 	RelativeURL    string
+	Revision       string
 }
 
 type infoDocument struct {
@@ -27,10 +33,12 @@ type infoDocument struct {
 }
 
 type infoEntry struct {
+	Revision    string `xml:"revision,attr"`
 	URL         string `xml:"url"`
 	RelativeURL string `xml:"relative-url"`
 	Repository  struct {
 		Root string `xml:"root"`
+		UUID string `xml:"uuid"`
 	} `xml:"repository"`
 	WorkingCopy struct {
 		Root string `xml:"wcroot-abspath"`
@@ -64,7 +72,9 @@ func ParseInfo(data []byte) (WorkingCopyInfo, error) {
 		Root:           root,
 		URL:            strings.TrimSpace(entry.URL),
 		RepositoryRoot: strings.TrimSpace(entry.Repository.Root),
+		RepositoryUUID: strings.TrimSpace(entry.Repository.UUID),
 		RelativeURL:    strings.TrimSpace(entry.RelativeURL),
+		Revision:       strings.TrimSpace(entry.Revision),
 	}, nil
 }
 
@@ -73,9 +83,14 @@ func ParseInfo(data []byte) (WorkingCopyInfo, error) {
 func Output(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "svn", args...)
 	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("svn %s: %w", strings.Join(args, " "), err)
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return nil, fmt.Errorf("svn %s: %w: %s", safeCommandText(strings.Join(args, " ")), err, safeCommandText(message))
+		}
+		return nil, fmt.Errorf("svn %s: %w", safeCommandText(strings.Join(args, " ")), err)
 	}
 	return out, nil
 }
@@ -89,9 +104,13 @@ func CombinedOutput(ctx context.Context, dir string, args ...string) ([]byte, er
 	if err != nil {
 		message := strings.TrimSpace(string(out))
 		if message != "" {
-			return out, fmt.Errorf("svn %s: %w: %s", strings.Join(args, " "), err, message)
+			return out, fmt.Errorf("svn %s: %w: %s", safeCommandText(strings.Join(args, " ")), err, safeCommandText(message))
 		}
-		return out, fmt.Errorf("svn %s: %w", strings.Join(args, " "), err)
+		return out, fmt.Errorf("svn %s: %w", safeCommandText(strings.Join(args, " ")), err)
 	}
 	return out, nil
+}
+
+func safeCommandText(text string) string {
+	return svnURLUserinfoRE.ReplaceAllString(text, `${1}<redacted>@`)
 }

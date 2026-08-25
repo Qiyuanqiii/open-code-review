@@ -243,9 +243,9 @@ type ManifestRepository struct {
 
 // ManifestInput is the frozen, resolved input identity of a run. Mode is
 // mandatory and decides how the remaining fields are read. Resolved values are
-// actual commit SHAs captured before execution, not the mutable refs the user
-// typed. A child (resume) run always recomputes its own input rather than
-// copying the parent's.
+// actual Git commit SHAs or numeric SVN revisions captured before execution,
+// not the mutable refs the user typed. A child (resume) run always recomputes
+// its own input rather than copying the parent's.
 type ManifestInput struct {
 	Mode                 string `json:"mode"`
 	RequestedFrom        string `json:"requested_from,omitempty"`

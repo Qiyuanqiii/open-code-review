@@ -26,12 +26,31 @@ var (
 	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
+type diffContentReader func(context.Context, string) ([]byte, error)
+
 // ParseDiffText splits the unified diff text into per-file Diff structs.
-// ref, if non-empty, is a git ref used to read new-file content via
-// git show instead of reading from the working tree.
-// runner, if non-nil, is used to execute git subprocesses through a
-// shared concurrency limiter.
+// ref, if non-empty, is a Git ref used to read new-file content via git show
+// instead of reading from the working tree. runner, if non-nil, executes Git
+// subprocesses through a shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
+	readContent := func(ctx context.Context, path string) ([]byte, error) {
+		if ref != "" {
+			args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", ref + ":" + path}
+			if runner != nil {
+				return runner.Output(ctx, repoDir, args...)
+			}
+			cmd := exec.CommandContext(ctx, "git", args...)
+			cmd.Dir = repoDir
+			return cmd.Output()
+		}
+		return readWorkspaceFileForDiff(repoDir, path)
+	}
+	return parseDiffTextWithReader(ctx, diffText, readContent)
+}
+
+// parseDiffTextWithReader lets non-Git providers supply immutable destination
+// content while reusing the Git-compatible unified-diff parser.
+func parseDiffTextWithReader(ctx context.Context, diffText string, readContent diffContentReader) ([]model.Diff, error) {
 	lines := strings.Split(diffText, "\n")
 	var diffs []model.Diff
 	var current *model.Diff
@@ -52,7 +71,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
-				finalizeDiff(ctx, current, repoDir, ref, runner)
+				finalizeDiff(ctx, current, readContent)
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -112,40 +131,20 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// Flush last diff
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
-		finalizeDiff(ctx, current, repoDir, ref, runner)
+		finalizeDiff(ctx, current, readContent)
 		diffs = append(diffs, *current)
 	}
 
 	return diffs, nil
 }
 
-// finalizeDiff reads the new file content. When ref is non-empty it uses
-// git show to read the file at that ref; otherwise it reads from disk.
-func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
+// finalizeDiff reads destination content through the active VCS provider.
+func finalizeDiff(ctx context.Context, d *model.Diff, readContent diffContentReader) {
 	if d.IsDeleted || d.NewPath == "/dev/null" {
 		d.NewPath = "/dev/null"
 		return
 	}
-	if ref != "" {
-		args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", ref + ":" + d.NewPath}
-		var output []byte
-		var err error
-		if runner != nil {
-			output, err = runner.Output(ctx, repoDir, args...)
-		} else {
-			cmd := exec.CommandContext(ctx, "git", args...)
-			cmd.Dir = repoDir
-			output, err = cmd.Output()
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s at ref %s: %v\n",
-				d.NewPath, ref, err)
-			return
-		}
-		d.NewFileContent = string(output)
-		return
-	}
-	content, err := readWorkspaceFileForDiff(repoDir, d.NewPath)
+	content, err := readContent(ctx, d.NewPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s for review: %v\n", d.NewPath, err)
 		return

@@ -99,7 +99,7 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 ### 前置条件
 
 - **Git >= 2.41** — Git 工作区、commit 与范围评审需要此版本。
-- **Subversion >= 1.7（可选）** — 仅在审查 SVN 工作副本时需要；commit 与范围模式仍只支持 Git。
+- **Subversion >= 1.7（可选）** — SVN 工作区、revision 与 revision 范围评审需要此版本。
 
 ### CLI
 
@@ -142,10 +142,14 @@ ocr review
 cd your-svn-working-copy
 ocr review
 
-# 分支范围 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
+# 不可变的 Subversion 历史 —— 单个 revision 或明确的 revision 范围
+ocr review --commit 128
+ocr review --from 120 --to 128
+
+# Git 分支范围 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
 ocr review --from main --to feature-branch
 
-# 单个提交
+# 单个 Git 提交
 ocr review --commit abc123
 
 # 恢复中断的区间或单 commit 评审

@@ -94,14 +94,22 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
+SVN の Range または Commit モードでは、まず `svn info --show-item url` で選択 URL を取得し、
+preview が返す数値 `resolved_base` と `resolved_head` を使用します。
+
+```bash
+svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>
+svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<resolved_head>
+```
+
+明示的な URL peg により、dirty、古い、または mixed-revision のワーキングコピーから diff と宛先コンテンツを分離できます。
+
 **Workspace モード**：
 ```bash
 git diff HEAD -- <path>        # Git 追跡ファイル
 svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN 管理対象ファイル
 cat <path>                     # Git 未追跡 / SVN 未管理ファイル
 ```
-
-Range と Commit モードは Git 専用です。
 
 ### ステップ 4：各ファイルのレビュー
 

@@ -8,7 +8,7 @@ sidebar:
 
 ## 前置条件
 
-- Git 评审需要 **Git ≥ 2.41**，SVN 工作副本评审需要 **Subversion ≥ 1.7**
+- Git 评审需要 **Git ≥ 2.41**，SVN 工作区与 revision 评审需要 **Subversion ≥ 1.7**
 - **Node.js ≥ 18**
 - **LLM API key**（使用[委托模式](../integrations/delegate/)时不需要）
 
@@ -71,10 +71,15 @@ ocr review --from main --to feature-branch
 
 # 单个 commit —— 评审该 commit 引入的 diff
 ocr review --commit abc123
+
+# SVN revision 历史 —— 评审前将端点冻结为数字 revision
+ocr review --commit 128
+ocr review --from 120 --to 128
 ```
 
-SVN 仅支持工作区模式：`ocr review` 会包含已纳管和未纳管的本地变更。上面的分支范围与
-commit 示例需要 Git。
+在 SVN 工作副本中，直接运行 `ocr review` 会包含已纳管和未纳管的本地变更。
+`--commit REV` 评审 `REV-1:REV`，`--from REV --to REV` 比较两个仓库 revision。
+`HEAD` 与日期 revision 会在加载 diff 前解析为数字 revision。
 
 > `ocr review` 的完整参数（并发调优、输出格式、audience模式、背景上下文等）及其他所有子命令见 [CLI 参考](../cli-reference/)。
 

@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -144,7 +143,7 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
 	var outStr, errStr string
 	var err error
-	if p.FileReader.RepositoryKind == vcs.Subversion && p.FileReader.Ref == "" {
+	if p.FileReader.RepositoryKind == vcs.Subversion {
 		outStr, err = p.walkGrep(ctx, searchText, caseSensitive, usePerlRegexp, pathspec)
 	} else {
 		cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
@@ -196,7 +195,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
-	hasRef := p.FileReader.Ref != ""
+	hasRef := p.FileReader.Ref != "" && p.FileReader.RepositoryKind != vcs.Subversion
 	splitN := 3
 	offset := 0
 	if hasRef {
@@ -248,8 +247,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	return sb.String(), nil
 }
 
-// walkGrep searches an SVN working copy without requiring Git. The output is
-// shaped like `git grep -n` so the common result formatter can be reused.
+// walkGrep searches workspace files or immutable SVN content without requiring
+// Git. The output is shaped like `git grep -n` so the common formatter can be
+// reused.
 func (p *CodeSearchProvider) walkGrep(parentCtx context.Context, searchText string, caseSensitive bool, useRegexp bool, pathspec []string) (string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, gitGrepTimeout)
 	defer cancel()
@@ -267,7 +267,7 @@ func (p *CodeSearchProvider) walkGrep(parentCtx context.Context, searchText stri
 		}
 	}
 
-	files, err := NewFileFind(p.FileReader).listWalkFiles(ctx)
+	files, err := NewFileFind(p.FileReader).listGitFiles(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -287,13 +287,12 @@ func (p *CodeSearchProvider) walkGrep(parentCtx context.Context, searchText stri
 			continue
 		}
 
-		fullPath := filepath.Join(p.FileReader.RepoDir, filepath.FromSlash(path))
-		file, openErr := os.Open(fullPath)
-		if openErr != nil {
-			return "", fmt.Errorf("open %q: %w", path, openErr)
+		content, readErr := p.FileReader.Read(ctx, path)
+		if readErr != nil {
+			return "", fmt.Errorf("read %q: %w", path, readErr)
 		}
 
-		scanner := bufio.NewScanner(file)
+		scanner := bufio.NewScanner(strings.NewReader(content))
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		lineNumber := 0
 		for scanner.Scan() {
@@ -322,12 +321,8 @@ func (p *CodeSearchProvider) walkGrep(parentCtx context.Context, searchText stri
 			}
 		}
 		scanErr := scanner.Err()
-		closeErr := file.Close()
 		if scanErr != nil {
 			return "", fmt.Errorf("search %q: %w", path, scanErr)
-		}
-		if closeErr != nil {
-			return "", fmt.Errorf("close %q: %w", path, closeErr)
 		}
 		if matchCount >= gitGrepMaxCount {
 			break

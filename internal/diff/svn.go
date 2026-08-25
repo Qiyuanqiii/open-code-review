@@ -18,27 +18,92 @@ import (
 	"github.com/alibaba/open-code-review/internal/svncmd"
 )
 
-// SVNProvider retrieves workspace changes from a Subversion working copy.
-// Subversion revisions and repository paths do not have Git's commit/range
-// semantics, so this provider deliberately implements workspace mode only.
+type svnReviewMode uint8
+
+const (
+	svnModeWorkspace svnReviewMode = iota
+	svnModeRange
+	svnModeCommit
+)
+
+// SVNProvider retrieves workspace or immutable repository changes for the URL
+// selected by a Subversion working copy.
 type SVNProvider struct {
-	repoDir string
-	run     func(context.Context, ...string) (string, error)
-	info    func(context.Context) (svncmd.WorkingCopyInfo, error)
+	repoDir         string
+	mode            svnReviewMode
+	from            string
+	to              string
+	commit          string
+	input           InputResolution
+	inputResolved   bool
+	run             func(context.Context, ...string) (string, error)
+	info            func(context.Context) (svncmd.WorkingCopyInfo, error)
+	resolveRevision func(context.Context, string, string) (string, error)
 }
 
 // NewSVNWorkspaceProvider creates a provider for local Subversion changes.
 func NewSVNWorkspaceProvider(repoDir string) *SVNProvider {
-	p := &SVNProvider{repoDir: repoDir}
+	return newSVNProvider(repoDir, svnModeWorkspace, "", "", "")
+}
+
+// NewSVNRangeProvider creates a provider comparing two SVN revisions.
+func NewSVNRangeProvider(repoDir, from, to string) *SVNProvider {
+	return newSVNProvider(repoDir, svnModeRange, from, to, "")
+}
+
+// NewSVNCommitProvider creates a provider for the change introduced by one SVN
+// revision.
+func NewSVNCommitProvider(repoDir, revision string) *SVNProvider {
+	return newSVNProvider(repoDir, svnModeCommit, "", "", revision)
+}
+
+func newSVNProvider(repoDir string, mode svnReviewMode, from, to, commit string) *SVNProvider {
+	p := &SVNProvider{repoDir: repoDir, mode: mode, from: from, to: to, commit: commit}
 	p.run = p.runSVN
 	p.info = func(ctx context.Context) (svncmd.WorkingCopyInfo, error) {
 		return svncmd.Info(ctx, repoDir)
 	}
+	p.resolveRevision = func(ctx context.Context, repositoryRoot, raw string) (string, error) {
+		return svncmd.ResolveRevision(ctx, repoDir, repositoryRoot, raw)
+	}
 	return p
 }
 
-// GetDiff returns versioned and unversioned workspace changes.
+// ResolveSVNInput freezes user-provided SVN revision spellings to numeric
+// repository endpoints and captures the selected repository URL for immutable
+// file reads.
+func ResolveSVNInput(ctx context.Context, repoDir, from, to, commit string) (InputResolution, error) {
+	var provider *SVNProvider
+	switch {
+	case commit != "":
+		provider = NewSVNCommitProvider(repoDir, commit)
+	case from != "" && to != "":
+		provider = NewSVNRangeProvider(repoDir, from, to)
+	default:
+		return InputResolution{}, fmt.Errorf("Subversion input resolution requires --commit or --from/--to")
+	}
+	if err := provider.ensureInputResolved(ctx); err != nil {
+		return InputResolution{}, err
+	}
+	return provider.input, nil
+}
+
+// SealInput makes the provider reuse endpoints resolved by pre-flight admission
+// instead of resolving moving inputs such as HEAD again.
+func (p *SVNProvider) SealInput(input InputResolution) {
+	p.input = input
+	p.inputResolved = true
+}
+
+// GetDiff returns workspace or immutable revision changes.
 func (p *SVNProvider) GetDiff(ctx context.Context) ([]model.Diff, error) {
+	if p.mode != svnModeWorkspace {
+		return p.getImmutableDiff(ctx)
+	}
+	return p.getWorkspaceDiff(ctx)
+}
+
+func (p *SVNProvider) getWorkspaceDiff(ctx context.Context) ([]model.Diff, error) {
 	tracked, err := p.run(ctx, "diff", "--git", "--internal-diff", "--show-copies-as-adds", "--depth", "infinity", ".")
 	if err != nil {
 		return nil, fmt.Errorf("svn diff failed (Subversion 1.7 or newer is required): %w", err)
@@ -64,18 +129,145 @@ func (p *SVNProvider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	return (&Provider{repoDir: p.repoDir}).filterDiffs(diffs), nil
 }
 
-// ResolveInput returns no Git commit endpoints for a mutable Subversion
-// working copy.
-func (p *SVNProvider) ResolveInput(context.Context) InputResolution {
-	return InputResolution{}
+func (p *SVNProvider) getImmutableDiff(ctx context.Context) ([]model.Diff, error) {
+	if err := p.ensureInputResolved(ctx); err != nil {
+		return nil, err
+	}
+	if p.input.ResolvedHead == "" || p.input.RepositoryTarget == "" {
+		return nil, fmt.Errorf("sealed Subversion input is missing its destination revision or repository target")
+	}
+	if p.mode == svnModeRange && p.input.ResolvedBase == "" {
+		return nil, fmt.Errorf("sealed Subversion range input is missing its source revision")
+	}
+	if p.mode == svnModeCommit && p.input.ResolvedBase == "" {
+		// Revision zero is the empty repository and has no preceding change.
+		return []model.Diff{}, nil
+	}
+
+	oldTarget := svncmd.PegTarget(p.input.RepositoryTarget, p.input.ResolvedBase)
+	newTarget := svncmd.PegTarget(p.input.RepositoryTarget, p.input.ResolvedHead)
+	tracked, err := p.run(ctx, "diff", "--git", "--internal-diff", "--show-copies-as-adds", "--depth", "infinity", "--old", oldTarget, "--new", newTarget)
+	if err != nil {
+		return nil, fmt.Errorf("svn revision diff failed (Subversion 1.7 or newer is required): %w", err)
+	}
+
+	normalized := svnContentDiffSections(normalizeSVNDiff(p.repoDir, tracked))
+	readContent := func(ctx context.Context, path string) ([]byte, error) {
+		target, err := svncmd.ChildTarget(p.input.RepositoryTarget, path, p.input.ResolvedHead)
+		if err != nil {
+			return nil, err
+		}
+		out, err := p.run(ctx, "cat", "--revision", p.input.ResolvedHead, "--", target)
+		return []byte(out), err
+	}
+	diffs, err := parseDiffTextWithReader(ctx, normalized, readContent)
+	if err != nil {
+		return nil, err
+	}
+	diffs = removeSVNPropertyOnlyDiffs(diffs)
+	return (&Provider{repoDir: p.repoDir}).filterDiffs(diffs), nil
 }
 
-// RemoteIdentity returns the credential-free repository URL identity when it
-// is available from local working-copy metadata.
+func (p *SVNProvider) ensureInputResolved(ctx context.Context) error {
+	if p.mode == svnModeWorkspace || p.inputResolved {
+		return nil
+	}
+	switch p.mode {
+	case svnModeRange:
+		if err := svncmd.ValidateRevision(p.from); err != nil {
+			return fmt.Errorf("validate --from: %w", err)
+		}
+		if err := svncmd.ValidateRevision(p.to); err != nil {
+			return fmt.Errorf("validate --to: %w", err)
+		}
+	case svnModeCommit:
+		if err := svncmd.ValidateRevision(p.commit); err != nil {
+			return fmt.Errorf("validate --commit: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown Subversion review mode")
+	}
+	info, err := p.info(ctx)
+	if err != nil {
+		return fmt.Errorf("read Subversion working-copy metadata: %w", err)
+	}
+	if info.URL == "" || info.RepositoryRoot == "" {
+		return fmt.Errorf("Subversion working-copy metadata did not report repository URLs")
+	}
+
+	p.input.RepositoryTarget = info.URL
+	p.input.RepositoryRoot = info.RepositoryRoot
+	p.input.RepositoryUUID = info.RepositoryUUID
+	resolvedRevisions := make(map[string]string)
+	resolve := func(raw string) (string, error) {
+		key := raw
+		if strings.EqualFold(raw, "HEAD") {
+			key = "HEAD"
+		}
+		if revision, ok := resolvedRevisions[key]; ok {
+			return revision, nil
+		}
+		revision, err := p.resolveRevision(ctx, info.RepositoryRoot, raw)
+		if err == nil {
+			resolvedRevisions[key] = revision
+		}
+		return revision, err
+	}
+	switch p.mode {
+	case svnModeRange:
+		base, err := resolve(p.from)
+		if err != nil {
+			return fmt.Errorf("resolve --from: %w", err)
+		}
+		head, err := resolve(p.to)
+		if err != nil {
+			return fmt.Errorf("resolve --to: %w", err)
+		}
+		p.input.ResolvedBase = base
+		p.input.ResolvedHead = head
+		p.input.ExactRange = base + ":" + head
+	case svnModeCommit:
+		head, err := resolve(p.commit)
+		if err != nil {
+			return fmt.Errorf("resolve --commit: %w", err)
+		}
+		base, err := svncmd.PreviousRevision(head)
+		if err != nil {
+			return err
+		}
+		p.input.ResolvedBase = base
+		p.input.ResolvedHead = head
+		if base != "" {
+			p.input.ExactRange = base + ":" + head
+		}
+	}
+	p.inputResolved = true
+	return nil
+}
+
+// ResolveInput returns the numeric SVN endpoints used by GetDiff. Resolution
+// errors are surfaced by GetDiff; callers invoke this after a successful load.
+func (p *SVNProvider) ResolveInput(ctx context.Context) InputResolution {
+	_ = p.ensureInputResolved(ctx)
+	return p.input
+}
+
+// RemoteIdentity returns a stable, credential-free repository identity. SVN's
+// repository UUID survives URL moves and also identifies local file repositories;
+// older servers that omit it fall back to a canonical credential-free URL.
 func (p *SVNProvider) RemoteIdentity(ctx context.Context) string {
+	if uuid := strings.TrimSpace(p.input.RepositoryUUID); uuid != "" {
+		return "svn:" + strings.ToLower(uuid)
+	}
+	if p.input.RepositoryRoot != "" {
+		return canonicalRemote(p.input.RepositoryRoot)
+	}
 	info, err := p.info(ctx)
 	if err != nil {
 		return ""
+	}
+	if uuid := strings.TrimSpace(info.RepositoryUUID); uuid != "" {
+		return "svn:" + strings.ToLower(uuid)
 	}
 	identity := info.RepositoryRoot
 	if identity == "" {

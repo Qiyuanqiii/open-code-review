@@ -8,7 +8,7 @@ Get your first code review running in a few minutes.
 
 ## Prerequisites
 
-- **Git ≥ 2.41** for Git reviews, or **Subversion ≥ 1.7** for SVN workspace reviews
+- **Git ≥ 2.41** for Git reviews, or **Subversion ≥ 1.7** for SVN workspace and revision reviews
 - **Node.js ≥ 18**
 - **LLM API key** (not needed if using [Delegation Mode](../integrations/delegate/))
 
@@ -71,11 +71,16 @@ ocr review --from main --to feature-branch
 
 # Single commit — reviews the diff that commit introduced
 ocr review --commit abc123
+
+# SVN revision history — numeric endpoints are frozen before review
+ocr review --commit 128
+ocr review --from 120 --to 128
 ```
 
-SVN supports workspace mode only: `ocr review` includes versioned and
-unversioned local changes. The branch-range and commit examples above require
-Git.
+In an SVN working copy, plain `ocr review` includes versioned and unversioned
+local changes. `--commit REV` reviews `REV-1:REV`, while `--from REV --to REV`
+compares two repository revisions. `HEAD` and date revisions are accepted and
+resolved to numeric revisions before the diff is loaded.
 
 > See [CLI Reference](../cli-reference/) for the complete list of `ocr review` flags (concurrency tuning, output format, audience mode, background context, and more) plus every other sub-command.
 

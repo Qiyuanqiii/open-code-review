@@ -99,7 +99,7 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 ### 前提条件
 
 - **Git >= 2.41** — Git のワーキングコピー、commit、範囲レビューに必要です。
-- **Subversion >= 1.7（任意）** — SVN ワーキングコピーのレビュー時のみ必要です。commit と範囲モードは引き続き Git 専用です。
+- **Subversion >= 1.7（任意）** — SVN のワークスペース、revision、revision 範囲レビューに必要です。
 
 ### CLI
 
@@ -142,10 +142,14 @@ ocr review
 cd your-svn-working-copy
 ocr review
 
-# ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
+# 不変の Subversion 履歴 — 単一 revision または明示的な revision 範囲
+ocr review --commit 128
+ocr review --from 120 --to 128
+
+# Git ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
 ocr review --from main --to feature-branch
 
-# 単一コミット
+# 単一 Git コミット
 ocr review --commit abc123
 
 # 中断した範囲または単一 commit レビューを再開

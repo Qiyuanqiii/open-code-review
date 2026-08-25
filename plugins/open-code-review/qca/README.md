@@ -80,4 +80,4 @@ credentials.
 - Write and Edit are disabled. Bash read-only behavior is prompt-enforced unless
   the QCA runtime applies a stricter command policy.
 - The session completes without `OCR_LLM_*` variables.
-- Git workspace, branch range, single-commit, and SVN workspace reviews all work.
+- Git and SVN workspace, range, and single-revision reviews all work.

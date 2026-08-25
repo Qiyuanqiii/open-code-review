@@ -64,8 +64,7 @@ Claude Code でコマンドを名前で呼び出します。plugin marketplace �
 /open-code-review:review focus on race conditions in commit abc123
 ```
 
-prompt はあなたのリクエストを解析し、正しい `ocr review` 引数を選択します。引数なし → 作業領域モード（Git の staged + unstaged + untracked、または SVN の管理対象 + 未管理）、Git commit の言及 → `--commit`、Git ブランチ区間の言及 →
-`--from` / `--to`。OCR の引数を直接透過的に渡すこともできます
+prompt はあなたのリクエストを解析し、正しい `ocr review` 引数を選択します。引数なし → 作業領域モード（Git の staged + unstaged + untracked、または SVN の管理対象 + 未管理）、Git commit または SVN revision の言及 → `--commit`、Git ブランチ区間または SVN revision 範囲の言及 → `--from` / `--to`。OCR の引数を直接透過的に渡すこともできます
 （例：`/open-code-review:review --commit abc123` や `--from main --to feature`）。
 
 ## コマンドが行うこと

@@ -324,9 +324,11 @@ collector にエクスポートされることは決してありません。予�
 
 ### OCR は Git 以外の VCS をサポートするか？
 
-SVN をサポートします。Subversion 1.7 以降では、ワーキングコピーのレビューに管理対象および
-未管理のローカル変更が含まれます。ただしワークスペースモードのみで、commit と範囲レビューには
-引き続き Git が必要です。Mercurial などその他の VCS にはまだ provider がありません。
+サポートします。Subversion 1.7 以降では、管理対象および未管理のワーキングコピー変更、
+`--commit REV` による単一の不変 revision、`--from REV --to REV` による正確な revision
+範囲をレビューできます。`HEAD` と日付 revision は最初に数値端点へ固定されます。
+ブランチ間 URL 比較と merge server 自動化は今後の作業です。Mercurial などその他の VCS
+にはまだ provider がありません。
 
 ### なぜバイナリは `opencodereview` なのに CLI は `ocr` なのか？
 

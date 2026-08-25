@@ -279,6 +279,20 @@ func TestSVNProviderRemoteIdentityFallsBackToWorkingCopyURL(t *testing.T) {
 	}
 }
 
+func TestSVNProviderRemoteIdentityPrefersRepositoryUUID(t *testing.T) {
+	provider := NewSVNWorkspaceProvider(t.TempDir())
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{
+			URL:            "file:///temporary/location/trunk",
+			RepositoryRoot: "file:///temporary/location",
+			RepositoryUUID: "A0B1C2D3-E4F5-6789-ABCD-EF0123456789",
+		}, nil
+	}
+	if got := provider.RemoteIdentity(context.Background()); got != "svn:a0b1c2d3-e4f5-6789-abcd-ef0123456789" {
+		t.Errorf("RemoteIdentity = %q", got)
+	}
+}
+
 func TestSVNProviderDiffErrorMentionsMinimumVersion(t *testing.T) {
 	provider := NewSVNWorkspaceProvider(t.TempDir())
 	provider.run = func(context.Context, ...string) (string, error) {
@@ -287,5 +301,181 @@ func TestSVNProviderDiffErrorMentionsMinimumVersion(t *testing.T) {
 	_, err := provider.GetDiff(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "1.7") {
 		t.Fatalf("error = %v, want minimum-version guidance", err)
+	}
+}
+
+func TestSVNCommitProviderUsesFrozenRevisionContent(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "value.c"), []byte("working copy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewSVNCommitProvider(repo, "HEAD")
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{
+			URL:            "https://svn.example.com/project/trunk",
+			RepositoryRoot: "https://svn.example.com/project",
+		}, nil
+	}
+	provider.resolveRevision = func(_ context.Context, root, raw string) (string, error) {
+		if root != "https://svn.example.com/project" || raw != "HEAD" {
+			t.Fatalf("resolveRevision(%q, %q)", root, raw)
+		}
+		return "8", nil
+	}
+	var calls [][]string
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, slices.Clone(args))
+		switch args[0] {
+		case "diff":
+			return `Index: value.c
+===================================================================
+diff --git a/value.c b/value.c
+--- a/value.c (revision 7)
++++ b/value.c (revision 8)
+@@ -1 +1 @@
+-old
++immutable
+`, nil
+		case "cat":
+			return "immutable\n", nil
+		default:
+			return "", errors.New("unexpected svn command")
+		}
+	}
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 || diffs[0].NewFileContent != "immutable\n" {
+		t.Fatalf("diffs = %+v", diffs)
+	}
+	resolved := provider.ResolveInput(context.Background())
+	if resolved.ResolvedBase != "7" || resolved.ResolvedHead != "8" || resolved.ExactRange != "7:8" {
+		t.Fatalf("resolution = %+v", resolved)
+	}
+	if resolved.RepositoryTarget != "https://svn.example.com/project/trunk" {
+		t.Fatalf("repository target = %q", resolved.RepositoryTarget)
+	}
+	if len(calls) != 2 || calls[0][0] != "diff" || calls[1][0] != "cat" {
+		t.Fatalf("svn calls = %v", calls)
+	}
+	diffArgs := strings.Join(calls[0], " ")
+	if !strings.Contains(diffArgs, "trunk@7") || !strings.Contains(diffArgs, "trunk@8") {
+		t.Errorf("diff args are not frozen: %s", diffArgs)
+	}
+	catArgs := strings.Join(calls[1], " ")
+	if !strings.Contains(catArgs, "--revision 8") || !strings.Contains(catArgs, "value.c@8") {
+		t.Errorf("cat args are not frozen: %s", catArgs)
+	}
+}
+
+func TestSVNRangeProviderResolvesBothEndpoints(t *testing.T) {
+	provider := NewSVNRangeProvider(t.TempDir(), "r3", "HEAD")
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{URL: "svn://example.com/trunk", RepositoryRoot: "svn://example.com"}, nil
+	}
+	provider.resolveRevision = func(_ context.Context, _ string, raw string) (string, error) {
+		return map[string]string{"r3": "3", "HEAD": "9"}[raw], nil
+	}
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		if args[0] != "diff" {
+			return "", errors.New("unexpected svn command")
+		}
+		return "", nil
+	}
+	if _, err := provider.GetDiff(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := provider.ResolveInput(context.Background())
+	if got.ResolvedBase != "3" || got.ResolvedHead != "9" || got.ExactRange != "3:9" {
+		t.Fatalf("resolution = %+v", got)
+	}
+}
+
+func TestSVNRangeProviderResolvesEquivalentHEADOnce(t *testing.T) {
+	provider := NewSVNRangeProvider(t.TempDir(), "HEAD", "head")
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{URL: "svn://example.com/trunk", RepositoryRoot: "svn://example.com"}, nil
+	}
+	resolveCalls := 0
+	provider.resolveRevision = func(context.Context, string, string) (string, error) {
+		resolveCalls++
+		return "9", nil
+	}
+	provider.run = func(context.Context, ...string) (string, error) { return "", nil }
+	if _, err := provider.GetDiff(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("HEAD resolution calls = %d, want 1", resolveCalls)
+	}
+	if got := provider.ResolveInput(context.Background()).ExactRange; got != "9:9" {
+		t.Fatalf("exact range = %q", got)
+	}
+}
+
+func TestSVNCommitProviderRevisionZeroIsEmpty(t *testing.T) {
+	provider := NewSVNCommitProvider(t.TempDir(), "0")
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{URL: "svn://example.com/trunk", RepositoryRoot: "svn://example.com"}, nil
+	}
+	provider.resolveRevision = func(context.Context, string, string) (string, error) { return "0", nil }
+	provider.run = func(context.Context, ...string) (string, error) {
+		t.Fatal("revision zero must not spawn svn diff")
+		return "", nil
+	}
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 0 {
+		t.Fatalf("diffs = %+v", diffs)
+	}
+	got := provider.ResolveInput(context.Background())
+	if got.ResolvedBase != "" || got.ResolvedHead != "0" || got.ExactRange != "" {
+		t.Fatalf("resolution = %+v", got)
+	}
+}
+
+func TestSVNProviderSealedInputSkipsResolution(t *testing.T) {
+	provider := NewSVNRangeProvider(t.TempDir(), "HEAD", "HEAD")
+	provider.SealInput(InputResolution{
+		ResolvedBase:     "10",
+		ResolvedHead:     "11",
+		ExactRange:       "10:11",
+		RepositoryTarget: "https://svn.example.com/trunk",
+		RepositoryRoot:   "https://svn.example.com",
+	})
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		t.Fatal("sealed input must not re-read working-copy metadata")
+		return svncmd.WorkingCopyInfo{}, nil
+	}
+	provider.resolveRevision = func(context.Context, string, string) (string, error) {
+		t.Fatal("sealed input must not resolve revisions again")
+		return "", nil
+	}
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		if args[0] != "diff" {
+			t.Fatalf("unexpected command: %v", args)
+		}
+		return "", nil
+	}
+	if _, err := provider.GetDiff(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.RemoteIdentity(context.Background()); got != "svn.example.com" {
+		t.Fatalf("RemoteIdentity = %q", got)
+	}
+}
+
+func TestSVNProviderRejectsRevisionBeforeReadingMetadata(t *testing.T) {
+	provider := NewSVNCommitProvider(t.TempDir(), "-r7")
+	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {
+		t.Fatal("invalid revision must be rejected before spawning svn info")
+		return svncmd.WorkingCopyInfo{}, nil
+	}
+	if _, err := provider.GetDiff(context.Background()); err == nil || !strings.Contains(err.Error(), "must not start") {
+		t.Fatalf("error = %v", err)
 	}
 }

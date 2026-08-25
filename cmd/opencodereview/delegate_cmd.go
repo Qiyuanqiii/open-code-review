@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +43,9 @@ var delegateCmd = &cobra.Command{
 Output review spec for host-agent delegation (no LLM required).`,
 	Example: `  # Preview which files will be reviewed
   ocr delegate preview --from main --to feature
+
+  # Preview an immutable SVN revision
+  ocr delegate preview --commit 128
 
   # Preview workspace changes
   ocr delegate preview
@@ -88,8 +93,9 @@ func init() {
 
 // delegateContext holds the shared state for delegate sub-commands.
 type delegateContext struct {
-	cc   *commonContext
-	opts delegateOptions
+	cc     *commonContext
+	opts   delegateOptions
+	sealed *diff.InputResolution
 }
 
 func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
@@ -115,8 +121,14 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 		return nil, err
 	}
 	opts.background = bg
+	resolveCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sealed, err := resolveSVNReviewInput(resolveCtx, cc, reviewOpts)
+	if err != nil {
+		return nil, err
+	}
 
-	return &delegateContext{cc: cc, opts: opts}, nil
+	return &delegateContext{cc: cc, opts: opts, sealed: sealed}, nil
 }
 
 // preview runs the agent's file-selection logic and returns the preview result.
@@ -129,12 +141,13 @@ func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, err
 		Commit:         dc.opts.commit,
 		FileFilter:     dc.cc.FileFilter,
 		GitRunner:      dc.cc.GitRunner,
+		SealedInput:    dc.sealed,
 	})
 }
 
 // mergeBase computes the merge-base for range mode. Returns "" for other modes.
 func (dc *delegateContext) mergeBase(ctx context.Context) string {
-	if dc.opts.from == "" || dc.opts.to == "" {
+	if dc.cc.RepositoryKind != vcs.Git || dc.opts.from == "" || dc.opts.to == "" {
 		return ""
 	}
 	provider := diff.NewProvider(dc.cc.RepoDir, dc.opts.from, dc.opts.to, dc.cc.GitRunner)
@@ -170,6 +183,12 @@ func executeDelegatePreview(opts delegateOptions) error {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 	mergeBase := dc.mergeBase(ctx)
+	var resolvedBase, resolvedHead, exactRange string
+	if dc.sealed != nil {
+		resolvedBase = dc.sealed.ResolvedBase
+		resolvedHead = dc.sealed.ResolvedHead
+		exactRange = dc.sealed.ExactRange
+	}
 	if opts.format == "json" {
 		return writeDelegateJSON(delegatePreviewJSON{
 			SchemaVersion:   delegateSchemaVersion,
@@ -180,6 +199,9 @@ func executeDelegatePreview(opts delegateOptions) error {
 			To:              dc.opts.to,
 			Commit:          dc.opts.commit,
 			MergeBase:       mergeBase,
+			ResolvedBase:    resolvedBase,
+			ResolvedHead:    resolvedHead,
+			ExactRange:      exactRange,
 			Background:      dc.opts.background,
 			TotalFiles:      preview.TotalFiles,
 			ReviewableCount: preview.ReviewableCount,
@@ -205,6 +227,15 @@ func executeDelegatePreview(opts delegateOptions) error {
 	}
 	if mergeBase != "" {
 		fmt.Printf("- merge_base: %s\n", mergeBase)
+	}
+	if resolvedBase != "" {
+		fmt.Printf("- resolved_base: %s\n", resolvedBase)
+	}
+	if resolvedHead != "" {
+		fmt.Printf("- resolved_head: %s\n", resolvedHead)
+	}
+	if exactRange != "" {
+		fmt.Printf("- exact_range: %s\n", exactRange)
 	}
 	if dc.opts.background != "" {
 		fmt.Printf("- background: %s\n", dc.opts.background)
@@ -264,6 +295,9 @@ type delegatePreviewJSON struct {
 	To              string                    `json:"to,omitempty"`
 	Commit          string                    `json:"commit,omitempty"`
 	MergeBase       string                    `json:"merge_base,omitempty"`
+	ResolvedBase    string                    `json:"resolved_base,omitempty"`
+	ResolvedHead    string                    `json:"resolved_head,omitempty"`
+	ExactRange      string                    `json:"exact_range,omitempty"`
 	Background      string                    `json:"background,omitempty"`
 	TotalFiles      int                       `json:"total_files"`
 	ReviewableCount int                       `json:"reviewable_count"`

@@ -16,13 +16,12 @@ import (
 )
 
 // SealedInput is what a pre-flight resolve froze: the identity it computed, and
-// the commit endpoints it computed that identity from.
+// the immutable VCS endpoints it computed that identity from.
 //
 // Resolution is the point of this type. Handing it back to the run pins the run
-// to the same immutable commits, so the second diff load cannot disagree with
-// the first — which is what lets the resume decision stay entirely before the
-// run exists. Without it, a ref that moved after admission would be discovered
-// only mid-run, once a child session and manifest were already on disk.
+// to the same immutable Git commits or SVN revisions, so the second diff load
+// cannot disagree with the first. Without it, a ref or HEAD that moved after
+// admission would be discovered only after a child session already existed.
 type SealedInput struct {
 	Identity   session.RunIdentity
 	Resolution diff.InputResolution
@@ -46,9 +45,13 @@ type SealedInput struct {
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
-	if err != nil {
-		return nil, err
+	resolution := args.SealedInput
+	if resolution == nil {
+		var err error
+		resolution, err = resolveInputBeforeDiff(ctx, args)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if resolution != nil {
 		args.SealedInput = resolution
@@ -63,12 +66,19 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
 }
 
-// resolveInputBeforeDiff turns every moving head ref into an immutable commit
-// before the diff used for admission is loaded. Range mode then computes its
-// merge-base against that frozen head; commit mode needs only the frozen head.
+// resolveInputBeforeDiff freezes moving Git refs or SVN revision spellings
+// before the diff used for admission is loaded. Git ranges retain merge-base
+// semantics; SVN ranges retain their exact numeric endpoints.
 func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
-	if args.RepositoryKind == vcs.Subversion && (args.Commit != "" || args.From != "" || args.To != "") {
-		return nil, fmt.Errorf("Subversion supports workspace review only; commit and range identity require Git")
+	if args.RepositoryKind == vcs.Subversion {
+		if args.Commit == "" && args.From == "" && args.To == "" {
+			return nil, nil
+		}
+		resolved, err := diff.ResolveSVNInput(ctx, args.RepoDir, args.From, args.To, args.Commit)
+		if err != nil {
+			return nil, err
+		}
+		return &resolved, nil
 	}
 	switch {
 	case args.Commit != "":

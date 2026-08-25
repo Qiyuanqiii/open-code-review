@@ -93,16 +93,20 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	}
 }
 
-// InputResolution carries this run's frozen, immutable commit endpoints, per the
+// InputResolution carries this run's frozen, immutable VCS endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
-// resolvable" — a root commit and a merge commit have no single comparison base,
-// an unborn workspace has no HEAD, and a workspace has no immutable head — and a
-// caller must never treat an empty value as a real endpoint or fabricate one.
-// ExactRange is populated only when both a unique base and a head resolve.
+// resolvable" — a Git root commit and merge commit have no single comparison
+// base, an unborn workspace has no HEAD, and a workspace has no immutable head.
+// ExactRange is populated only when both a unique base and head resolve.
+// RepositoryTarget, RepositoryRoot, and RepositoryUUID are runtime-only SVN
+// metadata; they are never copied into the manifest or session log.
 type InputResolution struct {
-	ResolvedBase string
-	ResolvedHead string
-	ExactRange   string
+	ResolvedBase     string
+	ResolvedHead     string
+	ExactRange       string
+	RepositoryTarget string
+	RepositoryRoot   string
+	RepositoryUUID   string
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the

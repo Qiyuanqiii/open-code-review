@@ -94,14 +94,22 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
+对于 SVN Range 或 Commit 模式，先通过 `svn info --show-item url` 获取所选 URL，
+再使用 preview 返回的数字 `resolved_base` 与 `resolved_head`：
+
+```bash
+svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>
+svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<resolved_head>
+```
+
+明确的 URL peg 可确保 diff 与目标内容不受脏、过期或混合 revision 工作副本影响。
+
 **Workspace 模式**：
 ```bash
 git diff HEAD -- <path>        # Git 已跟踪文件
 svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN 已纳管文件
 cat <path>                     # Git 未跟踪 / SVN 未纳管文件
 ```
-
-Range 与 Commit 模式仅支持 Git。
 
 ### 第 4 步：审查每个文件
 

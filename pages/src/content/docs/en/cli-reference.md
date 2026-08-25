@@ -173,10 +173,32 @@ In Git, OCR assembles the working-tree changes from two commands:
 This is what you usually want pre-commit. Stage selectively if you want
 narrower scope.
 
-In a Subversion 1.7+ working copy, OCR auto-detects SVN and combines
-Git-compatible output from `svn diff --git` with unversioned files reported by
-`svn status --xml`. Property-only changes are ignored because they have no
-line-addressable source change.
+In a Subversion working copy, OCR first checks `svn --version --quiet`; client
+version 1.7 or newer is required for the Git-compatible diff capabilities it
+uses. In workspace mode, it combines `svn diff --git` with unversioned files
+reported by `svn status --xml`. Property-only changes are ignored because they
+have no line-addressable source change.
+
+SVN workspace edge cases have these explicit semantics:
+
+- A copy is rendered as a full-file addition with repository-root-relative
+  copy-from path and revision metadata. A move is a copied addition plus a
+  separate deletion. A replacement is likewise a deletion plus an addition.
+- Binary content changes and MIME-marked binary files are identified as binary.
+  Executable, EOL, MIME, and other property-only changes are ignored because
+  they have no line-addressable source change. When content also changes, the
+  content or binary change is kept and property text is omitted.
+- Mixed-BASE-revision working copies are supported because every node is diffed
+  against its own BASE. Switched, sparse, obstructed, incomplete, or conflicted
+  working copies are rejected before diff loading.
+- `svn:externals` definitions and checked-out external nodes are rejected. Run
+  OCR separately at each external's own working-copy root; this prevents file
+  tools from crossing the selected repository boundary.
+- XML paths are authoritative when console output loses Unicode characters on
+  Windows. Spaces and `@` in names are preserved, and SVN commands target the
+  working-copy root after `--`, so a filename is never parsed as peg syntax.
+- Inspection uses a fixed number of recursive SVN commands rather than one
+  process per file. Commands remain sequential, bounded, and cancellable.
 
 #### Range mode
 

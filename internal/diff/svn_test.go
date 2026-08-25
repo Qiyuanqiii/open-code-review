@@ -6,14 +6,52 @@ package diff
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/svncmd"
 )
+
+const defaultSVNInfoXML = `<?xml version="1.0"?>
+<info><entry path="." kind="dir" revision="42">
+  <url>https://svn.example.com/repos/project/trunk</url>
+  <relative-url>^/project/trunk</relative-url>
+  <repository><root>https://svn.example.com/repos</root></repository>
+  <wc-info><depth>infinity</depth></wc-info>
+</entry></info>`
+
+func stubSVNWorkspace(t *testing.T, provider *SVNProvider, tracked, status string) *[][]string {
+	return stubSVNWorkspaceState(t, provider, tracked, status, defaultSVNInfoXML, `<properties/>`)
+}
+
+func stubSVNWorkspaceState(t *testing.T, provider *SVNProvider, tracked, status, info, properties string) *[][]string {
+	t.Helper()
+	var calls [][]string
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, slices.Clone(args))
+		switch args[0] {
+		case "--version":
+			return "1.14.5-SlikSvn\n", nil
+		case "status":
+			return status, nil
+		case "info":
+			return info, nil
+		case "propget":
+			return properties, nil
+		case "diff":
+			return tracked, nil
+		default:
+			return "", fmt.Errorf("unexpected svn command: %v", args)
+		}
+	}
+	return &calls
+}
 
 func TestSVNProviderGetDiff(t *testing.T) {
 	repo := t.TempDir()
@@ -55,18 +93,7 @@ Modified: svn:ignore
 </target></status>`
 
 	provider := NewSVNWorkspaceProvider(repo)
-	var calls [][]string
-	provider.run = func(_ context.Context, args ...string) (string, error) {
-		calls = append(calls, slices.Clone(args))
-		switch args[0] {
-		case "diff":
-			return tracked, nil
-		case "status":
-			return status, nil
-		default:
-			return "", errors.New("unexpected svn command")
-		}
-	}
+	calls := stubSVNWorkspace(t, provider, tracked, status)
 
 	diffs, err := provider.GetDiff(context.Background())
 	if err != nil {
@@ -87,10 +114,16 @@ Modified: svn:ignore
 	if diffs[1].NewPath != "extra/helper.go" || !diffs[1].IsNew {
 		t.Errorf("unversioned diff = %+v, want new extra/helper.go", diffs[1])
 	}
-	if len(calls) != 2 {
-		t.Fatalf("svn calls = %v, want diff and status", calls)
+	if len(*calls) != 5 {
+		t.Fatalf("svn calls = %v, want five bounded recursive commands", *calls)
 	}
-	joined := strings.Join(calls[0], " ")
+	var diffCall []string
+	for _, call := range *calls {
+		if call[0] == "diff" {
+			diffCall = call
+		}
+	}
+	joined := strings.Join(diffCall, " ")
 	for _, option := range []string{"--git", "--internal-diff", "--show-copies-as-adds"} {
 		if !strings.Contains(joined, option) {
 			t.Errorf("svn diff args %q missing %s", joined, option)
@@ -166,11 +199,7 @@ func TestSVNProviderMarksGitBinaryPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := NewSVNWorkspaceProvider(repo)
-	provider.run = func(_ context.Context, args ...string) (string, error) {
-		if args[0] == "status" {
-			return `<status><target path="."/></status>`, nil
-		}
-		return `Index: blob.bin
+	stubSVNWorkspace(t, provider, `Index: blob.bin
 ===================================================================
 diff --git a/trunk/blob.bin b/trunk/blob.bin
 --- a/trunk/blob.bin (revision 1)
@@ -178,8 +207,7 @@ diff --git a/trunk/blob.bin b/trunk/blob.bin
 GIT binary patch
 literal 3
 abc
-`, nil
-	}
+`, `<status><target path="."/></status>`)
 
 	diffs, err := provider.GetDiff(context.Background())
 	if err != nil {
@@ -196,11 +224,7 @@ func TestSVNProviderAddedAndDeletedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := NewSVNWorkspaceProvider(repo)
-	provider.run = func(_ context.Context, args ...string) (string, error) {
-		if args[0] == "status" {
-			return `<status><target path="."/></status>`, nil
-		}
-		return `Index: added.go
+	stubSVNWorkspace(t, provider, `Index: added.go
 ===================================================================
 diff --git a/project/trunk/added.go b/project/trunk/added.go
 new file mode 100644
@@ -216,8 +240,7 @@ deleted file mode 100644
 +++ /dev/null
 @@ -1 +0,0 @@
 -package deleted
-`, nil
-	}
+`, `<status><target path="."/></status>`)
 
 	diffs, err := provider.GetDiff(context.Background())
 	if err != nil {
@@ -240,12 +263,7 @@ func TestSVNProviderUnversionedBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := NewSVNWorkspaceProvider(repo)
-	provider.run = func(_ context.Context, args ...string) (string, error) {
-		if args[0] == "status" {
-			return `<status><target path="."><entry path="blob.bin"><wc-status item="unversioned"/></entry></target></status>`, nil
-		}
-		return "", nil
-	}
+	stubSVNWorkspace(t, provider, "", `<status><target path="."><entry path="blob.bin"><wc-status item="unversioned"/></entry></target></status>`)
 
 	diffs, err := provider.GetDiff(context.Background())
 	if err != nil {
@@ -293,10 +311,13 @@ func TestSVNProviderRemoteIdentityPrefersRepositoryUUID(t *testing.T) {
 	}
 }
 
-func TestSVNProviderDiffErrorMentionsMinimumVersion(t *testing.T) {
+func TestSVNProviderRejectsUnsupportedVersion(t *testing.T) {
 	provider := NewSVNWorkspaceProvider(t.TempDir())
-	provider.run = func(context.Context, ...string) (string, error) {
-		return "", errors.New("unknown option: --git")
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "--version" {
+			return "1.6.17\n", nil
+		}
+		return "", errors.New("unexpected command after failed capability check")
 	}
 	_, err := provider.GetDiff(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "1.7") {
@@ -477,5 +498,375 @@ func TestSVNProviderRejectsRevisionBeforeReadingMetadata(t *testing.T) {
 	}
 	if _, err := provider.GetDiff(context.Background()); err == nil || !strings.Contains(err.Error(), "must not start") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSVNProviderCopyMoveAndReplacementMetadata(t *testing.T) {
+	repo := t.TempDir()
+	for path, content := range map[string]string{
+		"copied.go":  "package copied\n",
+		"moved.go":   "package moved\n",
+		"replace.go": "package replacement\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tracked := `Index: copied.go
+===================================================================
+diff --git a/project/trunk/copied.go b/project/trunk/copied.go
+new file mode 100644
+--- /dev/null
++++ b/project/trunk/copied.go
+@@ -0,0 +1 @@
++package copied
+Index: moved.go
+===================================================================
+diff --git a/project/trunk/moved.go b/project/trunk/moved.go
+new file mode 100644
+--- /dev/null
++++ b/project/trunk/moved.go
+@@ -0,0 +1 @@
++package moved
+Index: old.go
+===================================================================
+diff --git a/project/trunk/old.go b/project/trunk/old.go
+deleted file mode 100644
+--- a/project/trunk/old.go
++++ /dev/null
+@@ -1 +0,0 @@
+-package moved
+Index: replace.go
+===================================================================
+diff --git a/project/trunk/replace.go b/project/trunk/replace.go
+deleted file mode 100644
+--- a/project/trunk/replace.go
++++ /dev/null
+@@ -1 +0,0 @@
+-package old
+Index: replace.go
+===================================================================
+diff --git a/project/trunk/replace.go b/project/trunk/replace.go
+new file mode 100644
+--- /dev/null
++++ b/project/trunk/replace.go
+@@ -0,0 +1 @@
++package replacement
+`
+	status := `<status><target path=".">
+  <entry path="copied.go"><wc-status item="added" copied="true"/></entry>
+  <entry path="moved.go"><wc-status item="added" copied="true" moved-from="old.go"/></entry>
+  <entry path="old.go"><wc-status item="deleted" moved-to="moved.go"/></entry>
+  <entry path="replace.go"><wc-status item="replaced"/></entry>
+</target></status>`
+	info := `<?xml version="1.0"?><info>
+  <entry path="." kind="dir" revision="42"><repository><root>https://svn.example.com/repos</root></repository><wc-info><depth>infinity</depth></wc-info></entry>
+  <entry path="copied.go" kind="file" revision="42"><repository><root>https://svn.example.com/repos</root></repository><wc-info><copy-from-url>https://svn.example.com/repos/project/trunk/original.go</copy-from-url><copy-from-rev>41</copy-from-rev></wc-info></entry>
+  <entry path="moved.go" kind="file" revision="42"><repository><root>https://svn.example.com/repos</root></repository><wc-info><copy-from-url>https://svn.example.com/repos/project/trunk/old.go</copy-from-url><copy-from-rev>42</copy-from-rev><moved-from>old.go</moved-from></wc-info></entry>
+</info>`
+
+	provider := NewSVNWorkspaceProvider(repo)
+	stubSVNWorkspaceState(t, provider, tracked, status, info, `<properties/>`)
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff: %v", err)
+	}
+	if len(diffs) != 5 {
+		t.Fatalf("len(diffs) = %d, want 5: %+v", len(diffs), diffs)
+	}
+
+	copied := findSVNDiff(t, diffs, "copied.go", false)
+	if !copied.IsCopied || copied.CopyFromPath != "^/project/trunk/original.go" || copied.CopyFromRevision != "41" {
+		t.Errorf("copied metadata = %+v", copied)
+	}
+	if !strings.Contains(copied.Diff, "copy from ^/project/trunk/original.go@41\ncopy to copied.go") {
+		t.Errorf("copy headers missing:\n%s", copied.Diff)
+	}
+
+	movedAdd := findSVNDiff(t, diffs, "moved.go", false)
+	if !movedAdd.IsCopied || movedAdd.IsRenamed || movedAdd.MovedFromPath != "old.go" {
+		t.Errorf("move add metadata = %+v", movedAdd)
+	}
+	movedDelete := findSVNDiff(t, diffs, "old.go", true)
+	if movedDelete.MovedToPath != "moved.go" || !movedDelete.IsDeleted {
+		t.Errorf("move delete metadata = %+v", movedDelete)
+	}
+
+	replacedDelete := findSVNDiff(t, diffs, "replace.go", true)
+	replacedAdd := findSVNDiff(t, diffs, "replace.go", false)
+	if !replacedDelete.IsReplaced || !replacedAdd.IsReplaced {
+		t.Errorf("replacement entries = delete %+v, add %+v", replacedDelete, replacedAdd)
+	}
+}
+
+func findSVNDiff(t *testing.T, diffs []model.Diff, path string, deleted bool) model.Diff {
+	t.Helper()
+	for _, d := range diffs {
+		candidate := d.NewPath
+		if d.IsDeleted {
+			candidate = d.OldPath
+		}
+		if candidate == path && d.IsDeleted == deleted {
+			return d
+		}
+	}
+	t.Fatalf("diff %q deleted=%v not found in %+v", path, deleted, diffs)
+	return model.Diff{}
+}
+
+func TestAnnotateSVNDirectoryCopyDerivesChildMetadata(t *testing.T) {
+	diffs := []model.Diff{
+		{
+			OldPath: "copied dir/child @.go", NewPath: "copied dir/child @.go", IsNew: true,
+			Diff: "diff --git a/copied dir/child @.go b/copied dir/child @.go\nnew file mode 100644",
+		},
+		{
+			OldPath: "copied dir/new.go", NewPath: "copied dir/new.go", IsNew: true,
+			Diff: "diff --git a/copied dir/new.go b/copied dir/new.go\nnew file mode 100644",
+		},
+	}
+	inspection := svnInspection{
+		status: []svncmd.StatusEntry{
+			{Path: filepath.FromSlash("copied dir/child @.go"), Item: "normal", Copied: true},
+			{Path: filepath.FromSlash("copied dir/new.go"), Item: "added", Copied: false},
+		},
+		info: []svncmd.WorkingCopyEntry{{
+			Path: "copied dir", RepositoryRoot: "https://svn.example.com/repos/project",
+			CopyFromURL: "https://svn.example.com/repos/project/trunk/source%20dir", CopyFromRevision: "77",
+		}},
+	}
+
+	if err := annotateSVNHistory(t.TempDir(), diffs, inspection); err != nil {
+		t.Fatalf("annotateSVNHistory: %v", err)
+	}
+	got := diffs[0]
+	if !got.IsCopied || got.CopyFromPath != "^/trunk/source dir/child @.go" || got.CopyFromRevision != "77" {
+		t.Fatalf("derived copy metadata = %+v", got)
+	}
+	if diffs[1].IsCopied || diffs[1].CopyFromPath != "" {
+		t.Fatalf("new child under copied directory was misclassified: %+v", diffs[1])
+	}
+}
+
+func TestMatchingMoveRootsPreferMostSpecificPath(t *testing.T) {
+	roots := []svnMoveRoot{
+		{from: "old", to: "new"},
+		{from: "old/nested", to: "new/nested"},
+	}
+	if got, ok := matchingMoveSource(roots, "old/nested/file.go"); !ok || got.from != "old/nested" {
+		t.Fatalf("source match = %+v, %v", got, ok)
+	}
+	if got, ok := matchingMoveDestination(roots, "new/nested/file.go"); !ok || got.to != "new/nested" {
+		t.Fatalf("destination match = %+v, %v", got, ok)
+	}
+}
+
+func TestValidateSVNStatusRejectsUnsafeStates(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry svncmd.StatusEntry
+		want  string
+	}{
+		{name: "switched", entry: svncmd.StatusEntry{Path: "src", Item: "normal", Switched: true}, want: "switched"},
+		{name: "external", entry: svncmd.StatusEntry{Path: "vendor", Item: "external"}, want: "external"},
+		{name: "obstructed", entry: svncmd.StatusEntry{Path: "src/app.go", Item: "obstructed"}, want: "obstructed"},
+		{name: "incomplete", entry: svncmd.StatusEntry{Path: "src", Item: "incomplete"}, want: "incomplete"},
+		{name: "text conflict", entry: svncmd.StatusEntry{Path: "src/app.go", Item: "conflicted"}, want: "conflicted"},
+		{name: "property conflict", entry: svncmd.StatusEntry{Path: "src/app.go", Item: "modified", Properties: "conflicted"}, want: "conflicted"},
+		{name: "tree conflict", entry: svncmd.StatusEntry{Path: "src", Item: "modified", TreeConflicted: true}, want: "conflicted"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateSVNStatus(t.TempDir(), []svncmd.StatusEntry{test.entry})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestSVNInspectionRejectsSparseAndExternalWorkingCopies(t *testing.T) {
+	t.Run("sparse", func(t *testing.T) {
+		entries := []svncmd.WorkingCopyEntry{{Path: ".", Kind: "dir", Depth: "immediates"}}
+		err := validateSVNDepths(t.TempDir(), entries)
+		if err == nil || !strings.Contains(err.Error(), "sparse") || !strings.Contains(err.Error(), "immediates") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("externals", func(t *testing.T) {
+		provider := NewSVNWorkspaceProvider(t.TempDir())
+		calls := stubSVNWorkspaceState(t, provider, "", `<status/>`, defaultSVNInfoXML,
+			`<properties><target path="."><property name="svn:externals">^/vendor vendor</property></target></properties>`)
+		_, err := provider.GetDiff(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "svn:externals") {
+			t.Fatalf("error = %v", err)
+		}
+		if len(*calls) != 4 {
+			t.Fatalf("calls = %v, diff must not run after external rejection", *calls)
+		}
+	})
+}
+
+func TestMixedSVNRevisionsAreDetectedAndSupported(t *testing.T) {
+	entries := []svncmd.WorkingCopyEntry{{Revision: "10"}, {Revision: "11"}, {Revision: "Resource is not under version control."}}
+	if !hasMixedSVNRevisions(entries) {
+		t.Fatal("mixed BASE revisions were not detected")
+	}
+	if hasMixedSVNRevisions([]svncmd.WorkingCopyEntry{{Revision: "10"}, {Revision: "10"}}) {
+		t.Fatal("uniform BASE revisions reported as mixed")
+	}
+
+	provider := NewSVNWorkspaceProvider(t.TempDir())
+	info := `<info>
+  <entry path="." kind="dir" revision="10"><wc-info><depth>infinity</depth></wc-info></entry>
+  <entry path="file.go" kind="file" revision="11"><wc-info><depth>infinity</depth></wc-info></entry>
+</info>`
+	stubSVNWorkspaceState(t, provider, "", `<status/>`, info, `<properties/>`)
+	inspection, err := provider.inspectWorkingCopy(context.Background())
+	if err != nil {
+		t.Fatalf("mixed-revision working copy rejected: %v", err)
+	}
+	if !inspection.mixedRevision {
+		t.Fatal("inspection did not record mixed revisions")
+	}
+}
+
+func TestSVNContentDiffSectionsPropertyBehavior(t *testing.T) {
+	propertyOnly := `diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+--- a/script.sh
++++ b/script.sh
+Property changes on: script.sh
+Added: svn:executable
++*
+diff --git a/eol.txt b/eol.txt
+--- a/eol.txt
++++ b/eol.txt
+Property changes on: eol.txt
+Modified: svn:eol-style
+-native
++LF
+`
+	if got := svnContentDiffSections(propertyOnly); got != "" {
+		t.Fatalf("property-only changes = %q, want omitted", got)
+	}
+
+	binaryWithMIME := `diff --git a/blob.dat b/blob.dat
+GIT binary patch
+literal 3
+abc
+Property changes on: blob.dat
+Added: svn:mime-type
++application/octet-stream
+`
+	got := svnContentDiffSections(binaryWithMIME)
+	if !strings.Contains(got, "GIT binary patch") || strings.Contains(got, "svn:mime-type") {
+		t.Fatalf("binary/MIME output = %q", got)
+	}
+}
+
+func TestNormalizeSVNPathUnicodeSpacesPegAndPlatformPaths(t *testing.T) {
+	repo := t.TempDir()
+	name := "src/\u6d4b\u8bd5 space @ file.go"
+	if got := normalizeSVNPath(repo, filepath.FromSlash(name)); got != name {
+		t.Fatalf("normalizeSVNPath = %q, want %q", got, name)
+	}
+	abs := filepath.Join(repo, "src", "windows.go")
+	if got := normalizeSVNPath(repo, abs); got != "src/windows.go" {
+		t.Fatalf("absolute path = %q, want src/windows.go", got)
+	}
+	if runtime.GOOS == "windows" {
+		backslash := filepath.Join("src", "nested", "file.go")
+		if got := normalizeSVNPath(repo, backslash); got != "src/nested/file.go" {
+			t.Fatalf("Windows path = %q", got)
+		}
+	}
+}
+
+func TestNormalizeSVNDiffRecoversUnicodePathFromXMLCandidate(t *testing.T) {
+	path := "unicode-\u6d4b\u8bd5 space @.go"
+	raw := `Index: unicode-?? space @.go
+===================================================================
+diff --git a/trunk/unicode-?? space @.go b/trunk/unicode-?? space @.go
+--- a/trunk/unicode-?? space @.go
++++ b/trunk/unicode-?? space @.go
+@@ -1 +1 @@
+-before
++after
+`
+	got, err := normalizeSVNDiffWithCandidates(t.TempDir(), raw, []string{path})
+	if err != nil {
+		t.Fatalf("normalizeSVNDiffWithCandidates: %v", err)
+	}
+	if !strings.Contains(got, "diff --git a/"+path+" b/"+path) || !strings.Contains(got, "+++ b/"+path) {
+		t.Fatalf("Unicode path was not recovered:\n%s", got)
+	}
+}
+
+func TestResolveSVNDiffPathRejectsAmbiguousConsoleEncoding(t *testing.T) {
+	_, err := resolveSVNDiffPath(t.TempDir(), "src/??.go", []string{"src/\u6d4b\u8bd5.go", "src/\u6d4b\u9a8c.go"})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveSVNDiffPathRejectsUnmatchedConsoleEncoding(t *testing.T) {
+	_, err := resolveSVNDiffPath(t.TempDir(), "src/??.go", []string{"src/ordinary.go"})
+	if err == nil || !strings.Contains(err.Error(), "could not be reconciled") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRepositoryRelativeSVNPath(t *testing.T) {
+	got, err := repositoryRelativeSVNPath(
+		"https://user:secret@SVN.EXAMPLE.COM/repos/project",
+		"https://svn.example.com/repos/project/trunk/source%20@.go",
+	)
+	if err != nil {
+		t.Fatalf("repositoryRelativeSVNPath: %v", err)
+	}
+	if got != "^/trunk/source @.go" {
+		t.Fatalf("path = %q", got)
+	}
+	got, err = repositoryRelativeSVNPath("https://svn.example.com", "https://svn.example.com/trunk/file.go")
+	if err != nil || got != "^/trunk/file.go" {
+		t.Fatalf("root repository path = %q, error = %v", got, err)
+	}
+
+	for _, candidate := range []string{
+		"https://other.example.com/repos/project/trunk/file.go",
+		"https://svn.example.com/repos/project-other/trunk/file.go",
+	} {
+		if _, outsideErr := repositoryRelativeSVNPath("https://svn.example.com/repos/project", candidate); outsideErr == nil {
+			t.Errorf("outside candidate %q was accepted", candidate)
+		}
+	}
+}
+
+func TestCollectUnversionedPathRejectsNestedWorkingCopy(t *testing.T) {
+	repo := t.TempDir()
+	nested := filepath.Join(repo, "unversioned", "vendor", "nested")
+	if err := os.MkdirAll(filepath.Join(nested, ".svn"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := collectUnversionedPath(context.Background(), repo, "unversioned", nil, make(map[string]struct{}))
+	if err == nil || !strings.Contains(err.Error(), "nested Subversion working copy") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSVNProviderPropagatesCancellation(t *testing.T) {
+	provider := NewSVNWorkspaceProvider(t.TempDir())
+	provider.run = func(ctx context.Context, _ ...string) (string, error) {
+		return "", ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := provider.GetDiff(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }

@@ -75,9 +75,9 @@ credentials.
 
 ## Validation
 
-- `ocr delegate preview --format json` returns `schema_version: "1"`.
+- `ocr delegate preview --format json` returns `schema_version: "1"` and a `vcs` value.
 - All previewed files are accounted for in the final response.
 - Write and Edit are disabled. Bash read-only behavior is prompt-enforced unless
   the QCA runtime applies a stricter command policy.
 - The session completes without `OCR_LLM_*` variables.
-- Workspace, branch range, and single-commit reviews all work.
+- Git workspace, branch range, single-commit, and SVN workspace reviews all work.

@@ -88,8 +88,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## `ocr review`
 
-The main command. Resolves a Git diff, groups the changed files
-semantically, dispatches one sub-agent per group, collects review
+The main command. Resolves a Git or Subversion working-copy diff, groups the
+changed files semantically, dispatches one sub-agent per group, collects review
 comments, and prints them.
 
 ### Synopsis
@@ -99,17 +99,17 @@ ocr review [flags]
 ocr r      [flags]   (alias)
 ```
 
-If no flags are passed, OCR runs in **workspace mode** — review of all
-staged + unstaged + untracked changes in the current directory's repo.
+If no flags are passed, OCR runs in **workspace mode** and reviews all local
+Git or Subversion working-copy changes.
 
 ### Flags
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--repo <path>` | — | current dir | Git repository root. |
-| `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
-| `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
-| `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
+| `--repo <path>` | — | current dir | Git or Subversion working-copy root. |
+| `--from <ref>` | — | — | Git source ref to start the diff from (e.g., `main`). |
+| `--to <ref>` | — | — | Git target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
+| `--commit <sha>` | `-c` | — | Single Git commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
@@ -134,7 +134,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
-> with `--preview`.
+> with `--preview`. Subversion supports workspace mode only.
 
 ### Per-run LLM selection
 
@@ -163,7 +163,7 @@ supported environment variable.
 ocr review
 ```
 
-OCR assembles the working-tree changes from two git commands:
+In Git, OCR assembles the working-tree changes from two commands:
 
 - tracked changes via `git diff HEAD` (staged + unstaged combined against
   `HEAD`; if that comes back empty, OCR falls back to `git diff --staged`)
@@ -172,6 +172,12 @@ OCR assembles the working-tree changes from two git commands:
 
 This is what you usually want pre-commit. Stage selectively if you want
 narrower scope.
+
+In a Subversion 1.7+ working copy, OCR auto-detects SVN and combines
+Git-compatible output from `svn diff --git` with unversioned files reported by
+`svn status --xml`. Property-only changes are ignored because they have no
+line-addressable source change. `--from`, `--to`, and `--commit` are not
+supported for SVN.
 
 #### Range mode
 
@@ -456,7 +462,7 @@ Rule introspection. There is exactly one subcommand:
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    Git or Subversion working-copy root (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

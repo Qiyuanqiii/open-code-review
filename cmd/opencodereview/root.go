@@ -15,7 +15,7 @@ var rootCmd = &cobra.Command{
 	Short: "OpenCodeReview - AI-Powered Code Review CLI",
 	Long: `OpenCodeReview - AI-Powered Code Review CLI
 
-An AI-powered code review tool that reads git diffs, sends them to a
+An AI-powered code review tool that reads Git diffs or Subversion working-copy diffs, sends them to a
 configurable LLM service, and generates review comments.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,

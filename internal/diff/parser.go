@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Package diff parses unified git diff output into structured Diff objects.
+// Package diff parses Git-compatible unified diff output into structured Diff
+// objects.
 package diff
 
 import (
@@ -74,6 +75,9 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case !inHunk && strings.HasPrefix(line, "index "):
 			continue
 		case !inHunk && binaryRe.MatchString(line):
+			current.IsBinary = true
+		case !inHunk && (line == "GIT binary patch" ||
+			strings.HasPrefix(line, "Cannot display: file marked as a binary type")):
 			current.IsBinary = true
 		// Extended header lines (unambiguous: content lines always carry a
 		// leading "+", "-" or " " prefix, so a bare prefix match is safe).

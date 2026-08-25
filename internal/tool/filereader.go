@@ -16,6 +16,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/pathutil"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // ReviewMode represents the active review mode.
@@ -57,7 +58,10 @@ func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 // FileReader resolves file contents according to the active review mode.
 type FileReader struct {
 	RepoDir string
-	Mode    ReviewMode
+	// RepositoryKind lets workspace tools avoid a needless Git dependency in a
+	// Subversion working copy. The zero value preserves historical behavior.
+	RepositoryKind vcs.Kind
+	Mode           ReviewMode
 	// Ref is the git ref to use for ModeRange (--to) or ModeCommit (--commit).
 	// Empty for ModeWorkspace.
 	Ref    string

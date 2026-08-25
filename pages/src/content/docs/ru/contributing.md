@@ -123,7 +123,7 @@ open-code-review/
 ├── internal/
 │   ├── agent/                 # Review agent logic, sub-agent dispatch
 │   ├── config/                # Template, rules, allowlist, embedded JSON
-│   ├── diff/                  # Git diff parsing, three modes
+│   ├── diff/                  # Провайдеры diff для Git и Subversion
 │   ├── gitcmd/                # Git subprocess runner
 │   ├── llm/                   # LLM client (Anthropic & OpenAI), endpoint resolver
 │   ├── model/                 # Data structs (LlmComment, Diff, …)

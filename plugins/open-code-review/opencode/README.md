@@ -75,7 +75,7 @@ an LLM request.
 - Reviews have a 15-minute overall timeout and a 10 MiB output limit.
 - Cancelling the OpenCode tool terminates the OCR process.
 - OCR credentials remain in the existing OCR configuration or environment.
-- Workspace mode includes staged, unstaged, and untracked files.
+- Workspace mode includes Git staged/unstaged/untracked files or SVN versioned/unversioned files.
 
 ## Development
 

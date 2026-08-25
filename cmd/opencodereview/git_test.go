@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 func initTestGitRepo(t *testing.T) string {
@@ -89,11 +91,11 @@ func TestResolveRepoDir_ValidGitRepo(t *testing.T) {
 	}
 }
 
-func TestResolveRepoDir_NotGitRepo(t *testing.T) {
+func TestResolveRepoDir_UnsupportedDirectory(t *testing.T) {
 	dir := t.TempDir()
 	_, err := resolveRepoDir(dir)
 	if err == nil {
-		t.Fatal("expected error for non-git dir")
+		t.Fatal("expected error for unsupported directory")
 	}
 	if !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("unexpected error: %v", err)
@@ -160,6 +162,23 @@ func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	err := validateReviewRefs(dir, reviewOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRepositoryReviewMode_SubversionWorkspaceOnly(t *testing.T) {
+	if err := validateRepositoryReviewMode(vcs.Subversion, reviewOptions{}); err != nil {
+		t.Fatalf("workspace review rejected: %v", err)
+	}
+	for _, opts := range []reviewOptions{
+		{commit: "42"},
+		{from: "41", to: "42"},
+	} {
+		if err := validateRepositoryReviewMode(vcs.Subversion, opts); err == nil {
+			t.Errorf("options %+v were accepted for Subversion", opts)
+		}
+	}
+	if err := validateRepositoryReviewMode(vcs.Git, reviewOptions{commit: "HEAD"}); err != nil {
+		t.Fatalf("Git commit review rejected: %v", err)
 	}
 }
 

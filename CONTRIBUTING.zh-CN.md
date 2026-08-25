@@ -122,7 +122,7 @@ make build
 ├── internal/
 │   ├── agent/            # 评审 Agent 逻辑
 │   ├── config/           # 配置管理
-│   ├── diff/             # Git diff 解析
+│   ├── diff/             # Git 与 Subversion diff provider
 │   ├── llm/              # LLM API 客户端（Anthropic & OpenAI）
 │   ├── model/            # 数据模型
 │   ├── session/          # 评审会话管理

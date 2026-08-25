@@ -190,7 +190,7 @@ func TestExecuteDelegatePreviewJSON(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("decode preview JSON: %v\n%s", err, out)
 	}
-	if got.SchemaVersion != delegateSchemaVersion || got.Mode != "workspace" {
+	if got.SchemaVersion != delegateSchemaVersion || got.VCS != "git" || got.Mode != "workspace" {
 		t.Fatalf("unexpected envelope: %#v", got)
 	}
 	if len(got.ReviewableFiles) != 1 || got.ReviewableFiles[0].Path != "app.go" {

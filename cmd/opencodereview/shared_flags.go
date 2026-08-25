@@ -13,7 +13,7 @@ import (
 )
 
 func addRepoFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "repo", "", "root directory of the git repository (default: current dir)")
+	cmd.Flags().StringVar(target, "repo", "", "root directory of the Git or Subversion working copy (default: current dir)")
 }
 
 func addRuleFlag(cmd *cobra.Command, target *string) {
@@ -21,9 +21,9 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 }
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
-	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
-	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	cmd.Flags().StringVar(from, "from", "", "Git source ref to start diff from (e.g., 'main')")
+	cmd.Flags().StringVar(to, "to", "", "Git target ref to end diff at (e.g., 'feature-branch')")
+	cmd.Flags().StringVarP(commit, "commit", "c", "", "single Git commit hash or tag to review (vs its parent)")
 }
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {

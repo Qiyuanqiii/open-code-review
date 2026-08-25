@@ -117,7 +117,7 @@ open-code-review/
 ├── internal/
 │   ├── agent/                 # 评审 agent 逻辑、子 agent 分发
 │   ├── config/                # 模板、规则、白名单、内嵌 JSON
-│   ├── diff/                  # Git diff 解析、三种模式
+│   ├── diff/                  # Git 与 Subversion diff provider
 │   ├── gitcmd/                # Git 子进程运行器
 │   ├── llm/                   # LLM client（Anthropic 与 OpenAI）、端点解析器
 │   ├── model/                 # 数据结构（LlmComment、Diff……）

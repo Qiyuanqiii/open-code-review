@@ -8,7 +8,7 @@ This document provides a security assurance case for Open Code Review (OCR), jus
 
 OCR is a CLI tool that:
 
-1. Reads git diff output from a local repository.
+1. Reads Git-compatible diff output from a local Git repository or Subversion working copy.
 2. Sends code diffs to a configured LLM provider (OpenAI, Anthropic, etc.) via HTTPS.
 3. Receives review comments from the LLM and presents them to the user.
 4. Optionally serves a local web viewer for browsing review session history.
@@ -19,7 +19,7 @@ OCR is a CLI tool that:
 |-------|-------------|
 | Local user | Trusted — invokes the CLI with full control over configuration |
 | LLM provider API | Semi-trusted — responses are validated before use |
-| Git repository | Semi-trusted — diffs may contain adversarial content |
+| VCS working copy | Semi-trusted — diffs may contain adversarial content |
 | Network | Untrusted — all communication uses TLS |
 | Web browser (viewer) | Untrusted — may be exploited via DNS rebinding |
 
@@ -30,7 +30,7 @@ OCR is a CLI tool that:
 │  User Machine (Trusted Zone)                     │
 │                                                  │
 │  ┌──────────┐    ┌──────────┐    ┌────────────┐  │
-│  │ Git Repo │───▶│ OCR CLI  │───▶│ Local File │  │
+│  │ VCS Copy │───▶│ OCR CLI  │───▶│ Local File │  │
 │  │ (diffs)  │    │ (core)   │    │  (output)  │  │
 │  └──────────┘    └────┬─────┘    └────────────┘  │
 │        Trust ────────▶│◀──────── Trust            │
@@ -49,7 +49,7 @@ OCR is a CLI tool that:
               └────────────────────┘
 ```
 
-1. **Git → CLI**: Diff content may contain crafted payloads. Parsed with strict format validation.
+1. **VCS → CLI**: Diff content may contain crafted payloads. Parsed with strict format validation.
 2. **CLI → LLM API**: API keys transmitted over HTTPS only. Responses validated before use.
 3. **CLI → Local output**: File writes constrained to the working directory.
 4. **Browser → Viewer**: Host-header allowlist enforces access control; blocks DNS rebinding.
@@ -58,7 +58,7 @@ OCR is a CLI tool that:
 
 | ID | Threat | Boundary | Mitigation |
 |----|--------|----------|------------|
-| T1 | Command injection via crafted diff content | 1 | All external commands are `git` only, with hardcoded subcommands; no shell expansion; `--end-of-options` used to prevent flag injection |
+| T1 | Command injection via crafted diff content | 1 | External VCS commands use only `git` or `svn` with hardcoded subcommands and no shell expansion; Git ref arguments are validated and separated from options |
 | T2 | API key leakage | 2 | Keys read from environment variables only; never logged, written to output files, or transmitted beyond the configured LLM endpoint |
 | T3 | Path traversal via LLM-suggested file paths | 3 | `pathutil.WithinBase()` validates all file paths against the repository root, both before and after symlink resolution |
 | T4 | DNS rebinding against local viewer | 4 | Host-header allowlist rejects requests from non-loopback origins; configurable via `OCR_VIEWER_ALLOWED_HOSTS` |
@@ -75,7 +75,7 @@ The following analysis maps [Saltzer & Schroeder's design principles](https://ie
 | **Least privilege** | `CGO_ENABLED=0` eliminates C library attack surface. The CLI requires no elevated permissions. No network listeners except the opt-in viewer. |
 | **Fail-safe defaults** | API keys must be explicitly provided via environment variables. The viewer binds to localhost by default; non-loopback hosts require explicit allowlisting. |
 | **Complete mediation** | Every viewer HTTP request is checked against the host allowlist (`internal/viewer/hostguard.go`). Every file path from agent tools is validated against the repository root (`internal/tool/filereader.go:98`, `internal/pathutil/path.go`). |
-| **Economy of mechanism** | External process execution is limited to `git` with hardcoded subcommands — no shell invocation, no arbitrary command execution. |
+| **Economy of mechanism** | External VCS process execution is limited to `git` and `svn` with hardcoded subcommands — no shell invocation, no arbitrary command execution. |
 | **Open design** | Fully open-source (Apache-2.0). Security relies on TLS, not obscurity. |
 | **Separation of privilege** | API authentication (keys) is separated from configuration (files). The viewer's host guard is a distinct middleware layer. |
 | **Least common mechanism** | Each review session writes to its own JSONL file. No shared state between sessions. |
@@ -87,7 +87,7 @@ The following maps [OWASP Top 10](https://owasp.org/www-project-top-ten/) and [C
 
 | Weakness | Applicability | Countermeasure |
 |----------|---------------|----------------|
-| **A03:2021 Injection** (CWE-78 OS Command Injection) | All `exec.Command` calls use `git` with explicit argument lists — no shell interpolation. `--end-of-options` prevents flag injection. | Mitigated |
+| **A03:2021 Injection** (CWE-78 OS Command Injection) | VCS `exec.Command` calls use `git` or `svn` with explicit argument lists and no shell interpolation. Git refs are validated and separated from options. | Mitigated |
 | **A03:2021 Injection** (CWE-79 Cross-site Scripting) | Viewer template output is HTML-escaped by `html/template`. Defense-in-depth: every viewer response carries a strict Content-Security-Policy (`default-src 'self'`, no `unsafe-inline`) plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, and `Permissions-Policy` (`internal/viewer/securityheaders.go`). | Mitigated |
 | **A01:2021 Broken Access Control** (CWE-22 Path Traversal) | Agent file-read tool validates paths with `pathutil.WithinBase()` before and after symlink resolution (`internal/tool/filereader.go:91-112`). | Mitigated |
 | **A02:2021 Cryptographic Failures** | All API communication uses HTTPS/TLS 1.2+. Go's default TLS configuration is used without weakening. `InsecureSkipVerify` is never set. | Mitigated |

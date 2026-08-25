@@ -22,6 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
@@ -63,6 +64,10 @@ var reviewCmd = &cobra.Command{
 	Long:    "OpenCodeReview - AI-Powered Code Review CLI\n\nStart a diff-based code review using a configurable LLM.",
 	Args:    cobra.NoArgs,
 	Example: `  # Review staged + unstaged + untracked changes in current workspace
+  ocr review
+
+  # Review local changes in a Subversion 1.7+ working copy
+  ocr review --preview
   ocr review
 
   # Review a branch against its base (merge-base mode)
@@ -126,9 +131,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
-	// Security (#112): reject ref-option injection before any git invocation.
-	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+	if err := validateRepositoryReviewMode(cc.RepositoryKind, opts); err != nil {
 		return err
+	}
+	// Security (#112): reject ref-option injection before any Git command uses it.
+	if cc.RepositoryKind == vcs.Git {
+		if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+			return err
+		}
 	}
 
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
@@ -185,10 +195,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
 	fileReader := &tool.FileReader{
-		RepoDir: cc.RepoDir,
-		Mode:    mode,
-		Ref:     fileReadRef(mode, opts, sealedInput),
-		Runner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		RepositoryKind: cc.RepositoryKind,
+		Mode:           mode,
+		Ref:            fileReadRef(mode, opts, sealedInput),
+		Runner:         cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
@@ -207,6 +218,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
+		RepositoryKind:        cc.RepositoryKind,
 		From:                  opts.from,
 		To:                    opts.to,
 		Commit:                opts.commit,
@@ -241,6 +253,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	runCtx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "review.run")
 	defer span.End()
 	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
+	telemetry.SetAttr(span, "review.vcs", string(cc.RepositoryKind))
 	telemetry.SetAttr(span, "review.from", opts.from)
 	telemetry.SetAttr(span, "review.to", opts.to)
 	telemetry.SetAttr(span, "review.model", rt.Model)
@@ -380,15 +393,16 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		RepositoryKind: cc.RepositoryKind,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		ReviewMode:     reviewModeFromOptions(opts),
+		Template:       *cc.Template,
+		SystemRule:     cc.Resolver,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -433,10 +447,15 @@ func reviewModeFromOptions(opts reviewOptions) string {
 	return session.ReviewModeWorkspace
 }
 
-// resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to
-// resolveWorkingDir(requireGit=true) so it anchors at the git top-level just
-// like the review path — keeping rule resolution consistent when run from a
-// monorepo subdirectory (#287).
+func validateRepositoryReviewMode(kind vcs.Kind, opts reviewOptions) error {
+	if kind == vcs.Subversion && (opts.from != "" || opts.to != "" || opts.commit != "") {
+		return fmt.Errorf("Subversion supports workspace review only; --commit and --from/--to require Git")
+	}
+	return nil
+}
+
+// resolveRepoDir resolves the repo dir for `ocr rules check`. It anchors at the
+// Git top-level or Subversion working-copy root, matching the review path.
 func resolveRepoDir(input string) (string, error) {
 	absPath, _, err := resolveWorkingDir(input, true)
 	return absPath, err
@@ -486,12 +505,13 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		RepositoryKind: cc.RepositoryKind,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

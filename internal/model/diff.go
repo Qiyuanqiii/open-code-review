@@ -3,7 +3,7 @@
 
 package model
 
-// Diff represents a single file change in a git diff.
+// Diff represents a single file change in a Git-compatible unified diff.
 type Diff struct {
 	OldPath        string `json:"old_path"`
 	NewPath        string `json:"new_path"`

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // TestFileFind_NonGitDirectoryFallback verifies file_find works in a plain
@@ -68,6 +69,26 @@ func TestFileFind_NonGitDirectoryNoMatch(t *testing.T) {
 	}
 	if !strings.Contains(out, "not found") {
 		t.Errorf("expected not-found sentinel, got: %q", out)
+	}
+}
+
+func TestFileFind_SubversionWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "service.go"), []byte("package service\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewFileFind(&FileReader{
+		RepoDir:        dir,
+		Mode:           ModeWorkspace,
+		RepositoryKind: vcs.Subversion,
+	})
+
+	out, err := p.Execute(context.Background(), map[string]any{"query_name": "service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "service.go" {
+		t.Fatalf("Execute() = %q, want service.go", out)
 	}
 }
 

@@ -122,7 +122,7 @@ make build
 ├── internal/
 │   ├── agent/            # Логика ревью-агента
 │   ├── config/           # Управление конфигурацией
-│   ├── diff/             # Разбор git-диффов
+│   ├── diff/             # Провайдеры diff для Git и Subversion
 │   ├── llm/              # Клиент LLM API (Anthropic и OpenAI)
 │   ├── model/            # Модели данных
 │   ├── session/          # Управление сессиями ревью

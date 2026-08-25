@@ -56,7 +56,7 @@ Output review spec for host-agent delegation (no LLM required).`,
 var delegatePreviewCmd = &cobra.Command{
 	Use:   "preview [flags]",
 	Short: "Preview reviewable files with mode/ref metadata",
-	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	Long:  "Outputs reviewable file list with mode/ref and version-control metadata for the host agent.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
@@ -99,10 +99,15 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
-	// Security: reject ref-option injection.
+	// Security: reject ref-option injection before any Git command uses it.
 	reviewOpts := reviewOptions{from: opts.from, to: opts.to, commit: opts.commit}
-	if err := validateReviewRefs(cc.RepoDir, reviewOpts); err != nil {
+	if err := validateRepositoryReviewMode(cc.RepositoryKind, reviewOpts); err != nil {
 		return nil, err
+	}
+	if cc.IsGitRepo {
+		if err := validateReviewRefs(cc.RepoDir, reviewOpts); err != nil {
+			return nil, err
+		}
 	}
 
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
@@ -117,12 +122,13 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 // preview runs the agent's file-selection logic and returns the preview result.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
 	return agent.Preview(ctx, agent.Args{
-		RepoDir:    dc.cc.RepoDir,
-		From:       dc.opts.from,
-		To:         dc.opts.to,
-		Commit:     dc.opts.commit,
-		FileFilter: dc.cc.FileFilter,
-		GitRunner:  dc.cc.GitRunner,
+		RepoDir:        dc.cc.RepoDir,
+		RepositoryKind: dc.cc.RepositoryKind,
+		From:           dc.opts.from,
+		To:             dc.opts.to,
+		Commit:         dc.opts.commit,
+		FileFilter:     dc.cc.FileFilter,
+		GitRunner:      dc.cc.GitRunner,
 	})
 }
 
@@ -167,6 +173,7 @@ func executeDelegatePreview(opts delegateOptions) error {
 	if opts.format == "json" {
 		return writeDelegateJSON(delegatePreviewJSON{
 			SchemaVersion:   delegateSchemaVersion,
+			VCS:             string(dc.cc.RepositoryKind),
 			Mode:            dc.reviewMode(),
 			Repository:      dc.cc.RepoDir,
 			From:            dc.opts.from,
@@ -186,6 +193,7 @@ func executeDelegatePreview(opts delegateOptions) error {
 
 	fmt.Printf("# Files (%d reviewable / %d total)\n\n", preview.ReviewableCount, preview.TotalFiles)
 	fmt.Printf("- mode: %s\n", dc.reviewMode())
+	fmt.Printf("- vcs: %s\n", dc.cc.RepositoryKind)
 	if dc.opts.from != "" {
 		fmt.Printf("- from: %s\n", dc.opts.from)
 	}
@@ -249,6 +257,7 @@ type delegatePreviewFileJSON struct {
 
 type delegatePreviewJSON struct {
 	SchemaVersion   string                    `json:"schema_version"`
+	VCS             string                    `json:"vcs"`
 	Mode            string                    `json:"mode"`
 	Repository      string                    `json:"repository"`
 	From            string                    `json:"from,omitempty"`

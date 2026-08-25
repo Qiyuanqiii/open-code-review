@@ -122,7 +122,7 @@ make build
 ├── internal/
 │   ├── agent/            # レビューエージェントのロジック
 │   ├── config/           # 設定管理
-│   ├── diff/             # Git diffのパース
+│   ├── diff/             # Git と Subversion の diff provider
 │   ├── llm/              # LLM APIクライアント（Anthropic & OpenAI）
 │   ├── model/            # データモデル
 │   ├── session/          # レビューセッション管理

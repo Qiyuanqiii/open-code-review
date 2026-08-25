@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 const (
@@ -20,7 +21,7 @@ const (
 	fileFindTimeout  = 10 * time.Second
 )
 
-// FileFindProvider finds files by name or pattern in the repository using git ls-files.
+// FileFindProvider finds files by name or pattern in the repository.
 type FileFindProvider struct {
 	FileReader *FileReader
 }
@@ -73,6 +74,9 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
+	if p.FileReader.RepositoryKind == vcs.Subversion && p.FileReader.Ref == "" {
+		return p.listWalkFiles(ctx)
+	}
 
 	var output []byte
 	var err error

@@ -8,7 +8,7 @@ sidebar:
 
 ## 前提条件
 
-- **Git ≥ 2.41**
+- Git レビューには **Git ≥ 2.41**、SVN ワーキングコピーのレビューには **Subversion ≥ 1.7**
 - **Node.js ≥ 18**
 - **LLM API key**（[委任モード](../integrations/delegate/)使用時は不要）
 
@@ -58,12 +58,12 @@ ocr llm test
 
 ## ステップ 4 —— 初回のレビューを実行する
 
-任意の Git リポジトリに移動して実行します。
+Git リポジトリまたは SVN ワーキングコピーに移動して実行します。
 
 ```bash
 cd path/to/your-repo
 
-# ワークスペースモード —— staged + unstaged + untracked の変更をレビュー（デフォルト）
+# Git ワーキングコピー —— staged + unstaged + untracked の変更をレビュー（デフォルト）
 ocr review
 
 # ブランチ区間 —— main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
@@ -72,6 +72,9 @@ ocr review --from main --to feature-branch
 # 単一 commit —— その commit が導入した diff をレビュー
 ocr review --commit abc123
 ```
+
+SVN はワークスペースモードのみをサポートします。`ocr review` は管理対象および未管理の
+ローカル変更を含めます。上記のブランチ範囲と commit の例には Git が必要です。
 
 > `ocr review` の完全な引数（並行数のチューニング、出力形式、audience モード、背景コンテキストなど）と、その他すべてのサブコマンドは [CLI リファレンス](../cli-reference/) を参照してください。
 

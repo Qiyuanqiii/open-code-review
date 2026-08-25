@@ -15,7 +15,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -52,6 +52,11 @@ flowchart TD
 | `Workspace` | без флагов | индексированные, неиндексированные и неотслеживаемые изменения |
 | `Commit` | `--commit <sha>` / `-c <sha>` | изменения, внесённые `<sha>` (через `git show <sha>`, что эквивалентно diff `<sha>^..<sha>`) |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`internal/diff/svn.go` реализует режим рабочей области для Subversion 1.7+.
+OCR автоматически определяет тип рабочей копии, преобразует пути из
+`svn diff --git` в локальные пути рабочей копии и добавляет неверсионируемые
+файлы из `svn status --xml`. Режимы коммита и диапазона остаются только для Git.
 
 Каждый diff содержит старый и новый пути, старые и новые фрагменты, количество
 добавлений и удалений, признак бинарного файла и сведения о переименовании.

@@ -72,8 +72,8 @@ markdown prompt），上面的文件复制方法就是安装路径：把 `open-c
 ```
 
 prompt 解析你的请求并选择正确的 `ocr review` 参数：无参数 → 工作区模式
-（staged + unstaged + untracked），提到 commit → `--commit`，提到分支区间 →
-`--from` / `--to`。你也可以直接透传 OCR 参数
+（Git staged + unstaged + untracked，或 SVN 已纳管 + 未纳管），提到 Git commit →
+`--commit`，提到 Git 分支区间 → `--from` / `--to`。你也可以直接透传 OCR 参数
 （如 `/open-code-review:review --commit abc123` 或 `--from main --to feature`）。
 
 ## 命令做什么

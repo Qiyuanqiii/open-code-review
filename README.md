@@ -38,7 +38,7 @@
 
 Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba Group's internal official AI code review assistant — over the past two years, it has served tens of thousands of developers and identified millions of code defects. After thorough validation at massive scale, we incubated it into an open source project for the community. Simply configure a model endpoint to get started.
 
-It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback. Beyond diff review, `ocr scan` reviews entire files for auditing unfamiliar codebases or directories that have no meaningful diff.
+It reads Git and Subversion working-copy diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback. Beyond diff review, `ocr scan` reviews entire files for auditing unfamiliar codebases or directories that have no meaningful diff.
 
 Visit the [official website](https://open-codereview.ai) for more details.
 
@@ -98,7 +98,8 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 ### Prerequisites
 
-- **Git >= 2.41** — Open Code Review relies on Git for diff generation, code search, and repository operations.
+- **Git >= 2.41** — required for Git workspace, commit, and range reviews.
+- **Subversion >= 1.7 (optional)** — required only for SVN workspace reviews. Git commit and range modes remain Git-only.
 
 ### CLI
 
@@ -134,7 +135,11 @@ For CLI setup, environment variables, custom providers, and other advanced confi
 ```bash
 cd your-project
 
-# Workspace mode — review all staged, unstaged, and untracked changes
+# Git workspace — review all staged, unstaged, and untracked changes
+ocr review
+
+# Subversion workspace — review versioned and unversioned local changes
+cd your-svn-working-copy
 ocr review
 
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)

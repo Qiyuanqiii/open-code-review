@@ -85,7 +85,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## `ocr review`
 
-主命令。解析 Git diff，把语义相关的文件分组，为每组分发一个子 agent，收集评审评论并打印。
+主命令。解析 Git 或 Subversion 工作副本 diff，把语义相关的文件分组，为每组分发一个子 agent，收集评审评论并打印。
 
 ### 概要
 
@@ -94,17 +94,17 @@ ocr review [flags]
 ocr r      [flags]   (alias)
 ```
 
-若不传任何参数，OCR 以**工作区模式**运行——评审当前目录所在仓库中所有 staged +
-unstaged + untracked 变更。
+若不传任何参数，OCR 以**工作区模式**运行——评审当前目录中所有 Git 或 Subversion
+工作副本的本地变更。
 
 ### 参数
 
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
-| `--repo <path>` | — | 当前目录 | Git 仓库根。 |
-| `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
-| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
-| `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
+| `--repo <path>` | — | 当前目录 | Git 仓库或 Subversion 工作副本根。 |
+| `--from <ref>` | — | — | Git diff 起始 ref（如 `main`）。 |
+| `--to <ref>` | — | — | Git diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
+| `--commit <sha>` | `-c` | — | 评审单个 Git commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
@@ -128,7 +128,8 @@ unstaged + untracked 变更。
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
-> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。Subversion
+> 仅支持工作区模式。
 
 ### 单次运行的 LLM 选择
 
@@ -154,7 +155,7 @@ ocr scan --provider openai --model gpt-5.4 --format json
 ocr review
 ```
 
-OCR 从两条 git 命令组装工作树变更：
+在 Git 中，OCR 从两条命令组装工作树变更：
 
 - 通过 `git diff HEAD` 获取已跟踪变更（staged + unstaged 合并对比 `HEAD`；
   若为空则回退到 `git diff --staged`）
@@ -162,6 +163,10 @@ OCR 从两条 git 命令组装工作树变更：
   读取并作为整文件新增处理
 
 这通常是 commit 前你想要的。如需更小的范围，请选择性暂存。
+
+在 Subversion 1.7+ 工作副本中，OCR 会自动检测 SVN，并将 `svn diff --git` 的
+Git 兼容输出与 `svn status --xml` 报告的未纳管文件合并。纯属性变更没有可按行定位的
+源代码变更，因此会被忽略。SVN 不支持 `--from`、`--to` 和 `--commit`。
 
 #### 区间模式
 
@@ -431,7 +436,7 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    Git or Subversion working-copy root (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

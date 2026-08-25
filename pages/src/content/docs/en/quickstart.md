@@ -8,7 +8,7 @@ Get your first code review running in a few minutes.
 
 ## Prerequisites
 
-- **Git ≥ 2.41**
+- **Git ≥ 2.41** for Git reviews, or **Subversion ≥ 1.7** for SVN workspace reviews
 - **Node.js ≥ 18**
 - **LLM API key** (not needed if using [Delegation Mode](../integrations/delegate/))
 
@@ -58,12 +58,12 @@ If you get an error like `no valid LLM endpoint configured`, recheck the Step 2 
 
 ## Step 4 — Run your first review
 
-Move into any Git repository and run:
+Move into a Git repository or SVN working copy and run:
 
 ```bash
 cd path/to/your-repo
 
-# Workspace mode — reviews staged + unstaged + untracked changes (default)
+# Git workspace — reviews staged + unstaged + untracked changes (default)
 ocr review
 
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
@@ -72,6 +72,10 @@ ocr review --from main --to feature-branch
 # Single commit — reviews the diff that commit introduced
 ocr review --commit abc123
 ```
+
+SVN supports workspace mode only: `ocr review` includes versioned and
+unversioned local changes. The branch-range and commit examples above require
+Git.
 
 > See [CLI Reference](../cli-reference/) for the complete list of `ocr review` flags (concurrency tuning, output format, audience mode, background context, and more) plus every other sub-command.
 

@@ -45,6 +45,7 @@ ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [
 ```
 
 This outputs:
+- **vcs** (git / svn)
 - **mode** (workspace / range / commit)
 - **from / to / commit / merge_base** — ref metadata for constructing git commands
 - **Reviewable file list** — paths, status, insertions/deletions
@@ -68,7 +69,7 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content �
 
 ### Step 3: Get Diffs
 
-Use git directly based on the mode/ref info from Step 1:
+Use the reported `vcs` and mode/ref info from Step 1:
 
 **Range mode** (merge_base provided in preview output):
 ```bash
@@ -82,11 +83,15 @@ git show <commit> -- <path>
 
 **Workspace mode**:
 ```bash
-# Tracked files
+# Git tracked files
 git diff HEAD -- <path>
-# New untracked files — read directly (entire file is new code)
+# SVN versioned files
+svn diff --git --internal-diff --show-copies-as-adds -- <path>
+# New untracked/unversioned files — read directly (entire file is new code)
 cat <path>
 ```
+
+Range and commit modes are Git-only.
 
 ### Step 4: Review Each File
 
@@ -137,7 +142,7 @@ If the user requested "review and fix":
 
 | Command | Purpose |
 |---------|---------|
-| `ocr delegate preview` | Which files to review + mode/ref metadata |
+| `ocr delegate preview` | Which files to review + VCS/mode/ref metadata |
 | `ocr delegate rule <path...>` | Review rules grouped by content |
 
 ## Shared Flags
@@ -158,7 +163,7 @@ If the user requested "review and fix":
 
 - **No LLM needed on OCR side** — delegation mode never calls an LLM. All intelligence comes from the host agent.
 - **Rules are grouped** — Files sharing the same rule are grouped together in the output. You can pass any number of paths per call; for large changes, fetch rules per-batch as you review.
-- **Working directory matters** — `ocr delegate` operates on the Git repo at the current directory. Use `--repo /path` to override.
-- **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
+- **Working directory matters** — `ocr delegate` operates on the Git repository or SVN working copy at the current directory. Use `--repo /path` to override.
+- **Untracked files in workspace mode** — `preview` includes Git-untracked and SVN-unversioned files. Read these directly instead of using a VCS diff command.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
 - **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.

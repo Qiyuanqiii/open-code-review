@@ -586,37 +586,7 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var results []string
-	for _, f := range files {
-		content, rerr := readWorkspaceFileForDiff(p.repoDir, f)
-		if rerr != nil {
-			continue
-		}
-
-		lineCount := bytes.Count(content, []byte{'\n'})
-		if len(content) > 0 && content[len(content)-1] != '\n' {
-			lineCount++
-		}
-
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", f, f))
-		sb.WriteString("--- /dev/null\n")
-		sb.WriteString(fmt.Sprintf("+++ b/%s\n", f))
-		sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", lineCount))
-
-		lines := bytes.Split(content, []byte{'\n'})
-		if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-			lines = lines[:len(lines)-1]
-		}
-		for _, line := range lines {
-			sb.WriteByte('+')
-			sb.Write(line)
-			sb.WriteByte('\n')
-		}
-		results = append(results, sb.String())
-	}
-	return results, nil
+	return workspaceFileDiffs(p.repoDir, files), nil
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {

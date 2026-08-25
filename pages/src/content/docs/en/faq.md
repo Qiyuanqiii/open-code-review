@@ -47,11 +47,11 @@ OpenAI use different auth headers and different URL shapes — make sure
 - OpenAI / OpenAI-compatible: URL ends `/v1/chat/completions`,
   `use_anthropic=false`.
 
-### `not a git repository`
+### `not a git repository or Subversion working copy`
 
-`ocr review` runs `git diff` (and `git ls-files` for untracked files)
-against the current directory. If you're not inside a Git working tree,
-it exits early. Either `cd` into a repo, or pass `--repo /path/to/repo`.
+`ocr review` auto-detects a Git working tree or Subversion working copy. If the
+current directory is neither, it exits early. Either `cd` into a supported
+working copy, or pass `--repo /path/to/repo`.
 
 ### "No tool calls parsed" (local models / Ollama)
 
@@ -360,9 +360,10 @@ A "redaction rule" feature is on the roadmap; track
 
 ### Does OCR support non-Git VCS?
 
-No. The diff providers shell out to `git`. SVN / Mercurial / etc. would
-need new providers; an issue for Hg support is open
-[here](https://github.com/alibaba/open-code-review/issues).
+Yes, SVN working-copy review is supported with Subversion 1.7 or newer. It
+includes versioned and unversioned local changes, but only in workspace mode;
+Git remains required for commit and range review. Mercurial and other VCSs do
+not yet have providers.
 
 ### Why is the binary called `opencodereview` but the CLI is `ocr`?
 

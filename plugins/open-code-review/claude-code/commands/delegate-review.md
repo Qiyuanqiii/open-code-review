@@ -12,13 +12,13 @@ Invoke OpenCodeReview (OCR) in delegation mode. OCR determines which files to re
 ocr delegate preview [user-args]
 ```
 
-- Default (no user arguments): workspace mode (staged + unstaged + untracked).
+- Default (no user arguments): workspace mode (Git staged/unstaged/untracked or SVN versioned/unversioned changes).
 - If the user provides `--commit` or `-c`: pass through as-is.
 - If the user provides `--from` and `--to`: pass through as-is.
 - (Optional) Provide `--background "context"` or `-b "context"` for business context.
 - If `ocr` is not found, install it: `npm i -g @alibaba-group/open-code-review`.
 
-This outputs mode/ref metadata and the reviewable file list.
+This outputs VCS/mode/ref metadata and the reviewable file list.
 
 ### Step 2: Get Rules
 
@@ -30,10 +30,13 @@ ocr delegate rule <path1> <path2> ...
 
 ### Step 3: Get Diffs and Review
 
-For each reviewable file, get its diff using git (based on mode/ref from Step 1):
-- Range: `git diff <merge_base>..<to> -- <path>`
-- Commit: `git show <commit> -- <path>`
-- Workspace: `git diff HEAD -- <path>` (or read directly for untracked files)
+For each reviewable file, get its diff using the VCS/mode metadata from Step 1:
+- Git range: `git diff <merge_base>..<to> -- <path>`
+- Git commit: `git show <commit> -- <path>`
+- Git workspace: `git diff HEAD -- <path>` (or read directly for untracked files)
+- SVN workspace: `svn diff --git --internal-diff --show-copies-as-adds -- <path>` (or read directly for unversioned files)
+
+Range and commit modes are Git-only.
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 

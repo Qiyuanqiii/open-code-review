@@ -70,6 +70,7 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 
 Outputs:
 
+- **vcs** — git / svn
 - **mode** — workspace / range / commit
 - **ref metadata** — from, to, commit, merge\_base
 - **Reviewable file list** — paths, status, insertions/deletions
@@ -95,7 +96,7 @@ repetition.
 
 ### Step 3: Get diffs
 
-Use git directly, based on the mode/ref info from Step 1:
+Use the VCS and mode/ref info from Step 1:
 
 **Range mode** (merge\_base provided):
 ```bash
@@ -109,9 +110,12 @@ git show <commit> -- <path>
 
 **Workspace mode**:
 ```bash
-git diff HEAD -- <path>        # tracked files
-cat <path>                     # new untracked files
+git diff HEAD -- <path>        # Git tracked files
+svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN versioned files
+cat <path>                     # Git untracked / SVN unversioned files
 ```
+
+Range and commit modes are Git-only.
 
 ### Step 4: Review each file
 
@@ -133,7 +137,7 @@ Classify each finding by severity:
 
 | Command | Purpose |
 |---------|---------|
-| `ocr delegate preview` | List reviewable files + mode/ref metadata |
+| `ocr delegate preview` | List reviewable files + VCS/mode/ref metadata |
 | `ocr delegate rule <path...>` | Resolve review rules grouped by content |
 
 ## Shared flags

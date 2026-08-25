@@ -13,9 +13,9 @@ Run the OCR command:
 ```bash
 ocr review --audience agent [user-args]
 ```
-- Default (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode).
-- If the user provides `--commit` or `--c`: pass through as-is.
-- If the user provides `--from` and `--to`: pass through as-is.
+- Default (no user arguments): reviews Git staged/unstaged/untracked changes or SVN versioned/unversioned changes (workspace mode).
+- If the user provides Git `--commit` or `-c`: pass through as-is.
+- If the user provides Git `--from` and `--to`: pass through as-is.
 - (Optional) Provide `--background "requirement context"` to review whether the requirements are correctly implemented.
 - (Optional) Provide `--background-file ./requirements.md` to load the same context from a Markdown file (sanitised and limited to 8000 characters). Takes precedence over `--background` when both are set.
 - Capture full stdout. Set a 5-minute timeout.

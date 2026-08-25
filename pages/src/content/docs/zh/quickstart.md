@@ -8,7 +8,7 @@ sidebar:
 
 ## 前置条件
 
-- **Git ≥ 2.41**
+- Git 评审需要 **Git ≥ 2.41**，SVN 工作副本评审需要 **Subversion ≥ 1.7**
 - **Node.js ≥ 18**
 - **LLM API key**（使用[委托模式](../integrations/delegate/)时不需要）
 
@@ -58,12 +58,12 @@ ocr llm test
 
 ## 第 4 步 —— 运行第一次评审
 
-进入任意 Git 仓库并运行：
+进入 Git 仓库或 SVN 工作副本并运行：
 
 ```bash
 cd path/to/your-repo
 
-# 工作区模式 —— 评审 staged + unstaged + untracked 变更（默认）
+# Git 工作区 —— 评审 staged + unstaged + untracked 变更（默认）
 ocr review
 
 # 分支区间 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
@@ -72,6 +72,9 @@ ocr review --from main --to feature-branch
 # 单个 commit —— 评审该 commit 引入的 diff
 ocr review --commit abc123
 ```
+
+SVN 仅支持工作区模式：`ocr review` 会包含已纳管和未纳管的本地变更。上面的分支范围与
+commit 示例需要 Git。
 
 > `ocr review` 的完整参数（并发调优、输出格式、audience模式、背景上下文等）及其他所有子命令见 [CLI 参考](../cli-reference/)。
 

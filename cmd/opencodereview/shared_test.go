@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/svncmd"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 func TestResolveMaxTokensPrecedence(t *testing.T) {
@@ -159,23 +162,23 @@ func TestResolveWorkingDir_CurrentDir(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	absPath, isGit, err := resolveWorkingDir("", false)
+	absPath, kind, err := resolveWorkingDir("", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if absPath == "" {
 		t.Error("expected non-empty absPath")
 	}
-	if isGit {
-		t.Error("temp dir should not be a git repo")
+	if kind != vcs.Unknown {
+		t.Errorf("repository kind = %q, want unknown", kind)
 	}
 }
 
-func TestResolveWorkingDir_RequireGitFails(t *testing.T) {
+func TestResolveWorkingDir_RequireRepositoryFails(t *testing.T) {
 	dir := t.TempDir()
 	_, _, err := resolveWorkingDir(dir, true)
 	if err == nil {
-		t.Fatal("expected error for non-git dir with requireGit=true")
+		t.Fatal("expected error for unsupported directory with requireRepository=true")
 	}
 }
 
@@ -189,7 +192,7 @@ func TestResolveWorkingDir_NonExistent(t *testing.T) {
 // TestResolveWorkingDir_MonorepoSubdir reproduces #287: running `ocr review`
 // from a subdirectory of a git repo must anchor RepoDir at the git top-level
 // (git reports diff / `git show HEAD:<path>` paths relative to the repo root),
-// while `ocr scan` (requireGit=false) must keep the subdirectory so its walk
+// while `ocr scan` (requireRepository=false) must keep the subdirectory so its walk
 // stays scoped.
 func TestResolveWorkingDir_MonorepoSubdir(t *testing.T) {
 	root := t.TempDir()
@@ -218,12 +221,12 @@ func TestResolveWorkingDir_MonorepoSubdir(t *testing.T) {
 	}
 
 	// review path: hoisted to the git top-level.
-	got, isGit, err := resolveWorkingDir(sub, true)
+	got, kind, err := resolveWorkingDir(sub, true)
 	if err != nil {
 		t.Fatalf("resolveWorkingDir(sub, true) error: %v", err)
 	}
-	if !isGit {
-		t.Error("expected isGit=true for a git subdirectory")
+	if kind != vcs.Git {
+		t.Errorf("repository kind = %q, want git", kind)
 	}
 	gotResolved, err := filepath.EvalSymlinks(got)
 	if err != nil {
@@ -251,9 +254,45 @@ func TestResolveWorkingDir_MonorepoSubdir(t *testing.T) {
 	}
 }
 
+func TestResolveWorkingDir_SubversionSubdir(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "src", "package")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	original := readSVNWorkingCopyInfo
+	readSVNWorkingCopyInfo = func(_ context.Context, _ string) (svncmd.WorkingCopyInfo, error) {
+		return svncmd.WorkingCopyInfo{Root: root}, nil
+	}
+	t.Cleanup(func() { readSVNWorkingCopyInfo = original })
+
+	got, kind, err := resolveWorkingDir(sub, true)
+	if err != nil {
+		t.Fatalf("resolveWorkingDir(Subversion review): %v", err)
+	}
+	if kind != vcs.Subversion {
+		t.Errorf("repository kind = %q, want svn", kind)
+	}
+	if filepath.Clean(got) != filepath.Clean(root) {
+		t.Errorf("review root = %q, want %q", got, root)
+	}
+
+	got, kind, err = resolveWorkingDir(sub, false)
+	if err != nil {
+		t.Fatalf("resolveWorkingDir(Subversion scan): %v", err)
+	}
+	if kind != vcs.Subversion {
+		t.Errorf("scan repository kind = %q, want svn", kind)
+	}
+	if filepath.Clean(got) != filepath.Clean(sub) {
+		t.Errorf("scan root = %q, want scoped path %q", got, sub)
+	}
+}
+
 // TestResolveWorkingDir_BareRepoFailsLoudly guards the #287 fix: a bare repo has
 // no work tree, so `git rev-parse --git-dir` succeeds (isGit=true) but
-// `--show-toplevel` fails. The review path (requireGit=true) must return an
+// `--show-toplevel` fails. The review path (requireRepository=true) must return an
 // error rather than silently reusing the input dir, which would reproduce the
 // original root-relative-path bug.
 func TestResolveWorkingDir_BareRepoFailsLoudly(t *testing.T) {
@@ -276,12 +315,12 @@ func TestResolveWorkingDir_GitRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	absPath, isGit, err := resolveWorkingDir(dir, false)
+	absPath, kind, err := resolveWorkingDir(dir, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if absPath == "" {
 		t.Error("expected non-empty absPath")
 	}
-	_ = isGit
+	_ = kind
 }

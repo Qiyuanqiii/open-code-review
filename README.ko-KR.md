@@ -38,7 +38,7 @@
 
 Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group의 내부 공식 AI 코드 리뷰 어시스턴트에서 시작했으며, 지난 2년 동안 수만 명의 개발자에게 제공되어 수백만 건의 코드 결함을 찾아냈습니다. 대규모 환경에서 충분히 검증한 뒤 커뮤니티를 위해 오픈 소스 프로젝트로 공개했습니다. 모델 endpoint만 설정하면 바로 사용할 수 있습니다.
 
-이 도구는 Git diff를 읽고, 변경 파일을 tool-use 기능을 가진 agent를 통해 설정 가능한 LLM으로 전달한 뒤, 라인 단위 위치 정보가 포함된 구조화된 리뷰 코멘트를 생성합니다. agent는 전체 파일 내용 읽기, 코드베이스 검색, 다른 변경 파일 확인 등을 통해 맥락을 확보하고 표면적인 diff 피드백이 아닌 깊이 있는 리뷰를 수행할 수 있습니다. diff 리뷰 외에도 `ocr scan`은 전체 파일을 리뷰할 수 있어, 익숙하지 않은 코드베이스를 감사하거나 의미 있는 diff가 없는 디렉터리를 검토하는 데 유용합니다.
+이 도구는 Git 및 Subversion working copy의 diff를 읽고, 변경 파일을 tool-use 기능을 가진 agent를 통해 설정 가능한 LLM으로 전달한 뒤, 라인 단위 위치 정보가 포함된 구조화된 리뷰 코멘트를 생성합니다. agent는 전체 파일 내용 읽기, 코드베이스 검색, 다른 변경 파일 확인 등을 통해 맥락을 확보하고 표면적인 diff 피드백이 아닌 깊이 있는 리뷰를 수행할 수 있습니다. diff 리뷰 외에도 `ocr scan`은 전체 파일을 리뷰할 수 있어, 익숙하지 않은 코드베이스를 감사하거나 의미 있는 diff가 없는 디렉터리를 검토하는 데 유용합니다.
 
 자세한 내용은 [공식 웹사이트](https://open-codereview.ai)를 참조하세요.
 
@@ -98,7 +98,8 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 
 ### 사전 요구 사항
 
-- **Git >= 2.41** — Open Code Review는 diff 생성, 코드 검색, 저장소 작업에 Git을 사용합니다.
+- **Git >= 2.41** — Git working copy, commit 및 range 리뷰에 필요합니다.
+- **Subversion >= 1.7(선택 사항)** — SVN working copy 리뷰에만 필요하며 commit 및 range 모드는 계속 Git 전용입니다.
 
 ### CLI
 
@@ -134,7 +135,11 @@ CLI 설정, 환경 변수, 커스텀 provider 등 고급 설정은 [설정 가�
 ```bash
 cd your-project
 
-# Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
+# Git working copy: staged, unstaged, untracked 변경을 모두 리뷰
+ocr review
+
+# Subversion working copy: versioned 및 unversioned 로컬 변경 리뷰
+cd your-svn-working-copy
 ocr review
 
 # 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)

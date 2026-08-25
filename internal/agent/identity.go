@@ -12,6 +12,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // SealedInput is what a pre-flight resolve froze: the identity it computed, and
@@ -66,6 +67,9 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 // before the diff used for admission is loaded. Range mode then computes its
 // merge-base against that frozen head; commit mode needs only the frozen head.
 func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+	if args.RepositoryKind == vcs.Subversion && (args.Commit != "" || args.From != "" || args.To != "") {
+		return nil, fmt.Errorf("Subversion supports workspace review only; commit and range identity require Git")
+	}
 	switch {
 	case args.Commit != "":
 		head, err := resolveCommitHead(ctx, args, args.Commit)

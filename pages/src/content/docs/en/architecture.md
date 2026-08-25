@@ -15,7 +15,7 @@ the source code with confidence.
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -45,6 +45,11 @@ that mirror the CLI flags:
 | `Workspace` | no flags | staged + unstaged + untracked changes |
 | `Commit` | `--commit <sha>` / `-c <sha>` | the changes introduced by `<sha>` (via `git show <sha>`, equivalent to the `<sha>^..<sha>` diff) |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`internal/diff/svn.go` provides workspace mode for Subversion 1.7+. OCR
+auto-detects the working-copy type, converts `svn diff --git` into paths local
+to the working copy, and merges in unversioned files from `svn status --xml`.
+Commit and range modes remain Git-only.
 
 Each diff carries: old/new path, old/new hunks, insertion/deletion counts,
 binary flag, and rename detection. `DiffContextLines` is fixed at **3** —

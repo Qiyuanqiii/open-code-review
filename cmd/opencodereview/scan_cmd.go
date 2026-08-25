@@ -189,9 +189,10 @@ func executeScan(opts scanOptions) (retErr error) {
 
 	// Scan mode always reads file contents from the working tree.
 	fileReader := &tool.FileReader{
-		RepoDir: cc.RepoDir,
-		Mode:    tool.ModeWorkspace,
-		Runner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		RepositoryKind: cc.RepositoryKind,
+		Mode:           tool.ModeWorkspace,
+		Runner:         cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 

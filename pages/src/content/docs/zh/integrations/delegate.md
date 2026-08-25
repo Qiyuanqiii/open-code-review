@@ -58,6 +58,7 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 
 输出内容：
 
+- **vcs** — git / svn
 - **mode** — workspace / range / commit
 - **ref 元数据** — from、to、commit、merge\_base
 - **可审查文件列表** — 路径、状态、插入/删除行数
@@ -81,7 +82,7 @@ ocr delegate rule <path1> <path2> ...
 
 ### 第 3 步：获取 diff
 
-根据第 1 步的 mode/ref 信息，使用 git 直接获取：
+根据第 1 步的 VCS 与 mode/ref 信息获取：
 
 **Range 模式**（有 merge\_base）：
 ```bash
@@ -95,9 +96,12 @@ git show <commit> -- <path>
 
 **Workspace 模式**：
 ```bash
-git diff HEAD -- <path>        # 已跟踪文件
-cat <path>                     # 新的未跟踪文件
+git diff HEAD -- <path>        # Git 已跟踪文件
+svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN 已纳管文件
+cat <path>                     # Git 未跟踪 / SVN 未纳管文件
 ```
+
+Range 与 Commit 模式仅支持 Git。
 
 ### 第 4 步：审查每个文件
 
@@ -119,7 +123,7 @@ cat <path>                     # 新的未跟踪文件
 
 | 命令 | 用途 |
 |------|------|
-| `ocr delegate preview` | 列出可审查文件 + mode/ref 元数据 |
+| `ocr delegate preview` | 列出可审查文件 + VCS/mode/ref 元数据 |
 | `ocr delegate rule <path...>` | 按内容分组解析审查规则 |
 
 ## 通用标志

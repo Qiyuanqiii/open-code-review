@@ -47,10 +47,10 @@ OpenAI は異なる auth header と URL フォーマットを使います——`
 - OpenAI / OpenAI 互換: URL は `/v1/chat/completions` で終わり、
   `use_anthropic=false`。
 
-### `not a git repository`
+### `not a git repository or Subversion working copy`
 
-`ocr review` はカレントディレクトリに対して `git diff`（および untracked ファイルに対する
-`git ls-files`）を実行します。Git ワークツリー内にいない場合は、早期に終了します。リポジトリに
+`ocr review` は Git ワークツリーまたは Subversion ワーキングコピーを自動検出します。
+カレントディレクトリがどちらでもない場合は早期に終了します。サポート対象のワーキングコピーに
 `cd` するか、`--repo /path/to/repo` を渡してください。
 
 ### "No tool calls parsed"（ローカルモデル / Ollama）
@@ -324,9 +324,9 @@ collector にエクスポートされることは決してありません。予�
 
 ### OCR は Git 以外の VCS をサポートするか？
 
-しません。diff provider は shell 経由で `git` を呼び出します。SVN / Mercurial などには新しい
-provider が必要です。Hg サポートの issue は[こちら](https://github.com/alibaba/open-code-review/issues)で
-オープンになっています。
+SVN をサポートします。Subversion 1.7 以降では、ワーキングコピーのレビューに管理対象および
+未管理のローカル変更が含まれます。ただしワークスペースモードのみで、commit と範囲レビューには
+引き続き Git が必要です。Mercurial などその他の VCS にはまだ provider がありません。
 
 ### なぜバイナリは `opencodereview` なのに CLI は `ocr` なのか？
 

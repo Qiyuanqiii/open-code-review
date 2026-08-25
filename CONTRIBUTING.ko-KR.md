@@ -123,7 +123,7 @@ make build
 ├── internal/
 │   ├── agent/            # Review agent logic
 │   ├── config/           # Configuration management
-│   ├── diff/             # Git diff parsing
+│   ├── diff/             # Git 및 Subversion diff provider
 │   ├── llm/              # LLM API client (Anthropic & OpenAI)
 │   ├── model/            # Data models
 │   ├── session/          # Review session management

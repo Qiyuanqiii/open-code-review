@@ -24,8 +24,10 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/svncmd"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // commonContext bundles the state that both `ocr review` and `ocr scan`
@@ -38,9 +40,11 @@ type commonContext struct {
 	Resolver   rules.Resolver
 	FileFilter *rules.FileFilter
 	GitRunner  *gitcmd.Runner
-	// IsGitRepo reports whether RepoDir is inside a git repository. Always
-	// true when requireGit was set; may be false when scan accepts non-git
-	// directories.
+	// RepositoryKind identifies the working-copy implementation used by review.
+	// Scan may leave it Unknown when operating on a plain directory.
+	RepositoryKind vcs.Kind
+	// IsGitRepo reports whether RepoDir is inside a Git repository. It is false
+	// for Subversion working copies and plain directories.
 	IsGitRepo bool
 }
 
@@ -80,10 +84,10 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 // the global git subprocess limiter. Both review and scan callers go
 // through this so the startup sequence stays consistent.
 //
-// requireGit=true fails fast when the directory is not a git repo (review
-// path: diff concept requires git). requireGit=false allows non-git
-// directories (scan path: provider falls back to filepath.Walk).
-func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+// requireRepository=true fails fast when the directory is not a supported
+// working copy. false allows plain directories for scan, whose provider falls
+// back to filepath.Walk.
+func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int, requireRepository bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -95,7 +99,7 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	repoDir, isGit, err := resolveWorkingDir(repoDirInput, requireGit)
+	repoDir, repositoryKind, err := resolveWorkingDir(repoDirInput, requireRepository)
 	if err != nil {
 		return nil, err
 	}
@@ -106,45 +110,45 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 	}
 
 	return &commonContext{
-		Template:   tpl,
-		RepoDir:    repoDir,
-		Resolver:   resolver,
-		FileFilter: fileFilter,
-		GitRunner:  gitcmd.New(maxGitProcs),
-		IsGitRepo:  isGit,
+		Template:       tpl,
+		RepoDir:        repoDir,
+		Resolver:       resolver,
+		FileFilter:     fileFilter,
+		GitRunner:      gitcmd.New(maxGitProcs),
+		RepositoryKind: repositoryKind,
+		IsGitRepo:      repositoryKind == vcs.Git,
 	}, nil
 }
 
-// resolveWorkingDir returns (absPath, isGitRepo, err). When requireGit is
-// true, returns an error if the directory is not a git repo. When false,
-// returns IsGitRepo=false instead of erroring (scan path uses this).
-func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
+var readSVNWorkingCopyInfo = svncmd.Info
+
+// resolveWorkingDir returns (absPath, repositoryKind, err). Review and rule
+// commands are anchored at the Git top-level or Subversion working-copy root;
+// scan keeps the requested subdirectory so its walk remains scoped.
+func resolveWorkingDir(input string, requireRepository bool) (string, vcs.Kind, error) {
 	if input == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			return "", false, fmt.Errorf("get working directory: %w", err)
+			return "", vcs.Unknown, fmt.Errorf("get working directory: %w", err)
 		}
 		input = wd
 	}
 	absPath, err := filepath.Abs(input)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve absolute path: %w", err)
+		return "", vcs.Unknown, fmt.Errorf("resolve absolute path: %w", err)
 	}
 	if _, statErr := os.Stat(absPath); statErr != nil {
-		return "", false, fmt.Errorf("stat %s: %w", absPath, statErr)
+		return "", vcs.Unknown, fmt.Errorf("stat %s: %w", absPath, statErr)
 	}
 	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
 	isGit := err == nil && len(out) > 0
-	if !isGit && requireGit {
-		return "", false, fmt.Errorf("%s is not a git repository", absPath)
-	}
 	// #287: git reports diff and `git show HEAD:<path>` paths relative to the
 	// repository root, not the current directory. When `ocr review` runs from a
 	// subdirectory of a monorepo, anchor RepoDir at the git top-level so those
 	// root-relative paths resolve for both disk reads and git-show reads.
-	// requireGit is true only for the review path; scan (requireGit=false) keeps
-	// the CWD so its `git ls-files` walk stays scoped to the subdirectory.
-	if isGit && requireGit {
+	// requireRepository is true only for working-copy commands; scan keeps the
+	// CWD so its file walk stays scoped to the requested subdirectory.
+	if isGit && requireRepository {
 		// runGitCmdStdout captures stdout only so git stderr notices can't
 		// pollute the resolved path. --show-toplevel fails (or is empty) when
 		// there is no work tree — e.g. a bare repo, where --git-dir succeeds so
@@ -153,11 +157,31 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 		top, topErr := runGitCmdStdout(absPath, "rev-parse", "--show-toplevel")
 		t := strings.TrimSpace(string(top))
 		if topErr != nil || t == "" {
-			return "", false, fmt.Errorf("%s is a git repository without a work tree (bare repo?); cannot resolve its top level for review", absPath)
+			return "", vcs.Unknown, fmt.Errorf("%s is a git repository without a work tree (bare repo?); cannot resolve its top level for review", absPath)
 		}
 		absPath = t
 	}
-	return absPath, isGit, nil
+	if isGit {
+		return absPath, vcs.Git, nil
+	}
+
+	infoCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	info, svnErr := readSVNWorkingCopyInfo(infoCtx, absPath)
+	cancel()
+	if svnErr == nil {
+		if requireRepository {
+			root, rootErr := filepath.Abs(info.Root)
+			if rootErr != nil {
+				return "", vcs.Unknown, fmt.Errorf("resolve Subversion working-copy root: %w", rootErr)
+			}
+			absPath = filepath.Clean(root)
+		}
+		return absPath, vcs.Subversion, nil
+	}
+	if requireRepository {
+		return "", vcs.Unknown, fmt.Errorf("%s is not a git repository or Subversion working copy", absPath)
+	}
+	return absPath, vcs.Unknown, nil
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've

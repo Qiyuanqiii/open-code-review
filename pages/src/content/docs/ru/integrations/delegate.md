@@ -68,6 +68,7 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 
 Вывод содержит:
 
+- **vcs** — git / svn;
 - **режим** — workspace / range / commit;
 - **метаданные ссылок** — from, to, commit, merge\_base;
 - **список проверяемых файлов** — пути, статусы, добавления/удаления;
@@ -93,7 +94,7 @@ ocr delegate rule <path1> <path2> ...
 
 ### Шаг 3. Получить diff
 
-Используйте Git напрямую на основе режима и сведений о ссылках из шага 1:
+Используйте сведения о VCS, режиме и ссылках из шага 1:
 
 **Режим диапазона** (предоставлен merge\_base):
 ```bash
@@ -107,9 +108,12 @@ git show <commit> -- <path>
 
 **Режим рабочей области**:
 ```bash
-git diff HEAD -- <path>        # tracked files
-cat <path>                     # new untracked files
+git diff HEAD -- <path>        # файлы под управлением Git
+svn diff --git --internal-diff --show-copies-as-adds -- <path>  # файлы под управлением SVN
+cat <path>                     # неотслеживаемые Git / неверсионируемые SVN файлы
 ```
+
+Режимы диапазона и коммита доступны только для Git.
 
 ### Шаг 4. Проверить каждый файл
 
@@ -131,7 +135,7 @@ cat <path>                     # new untracked files
 
 | Команда | Назначение |
 |---------|---------|
-| `ocr delegate preview` | Выводит проверяемые файлы и метаданные режима/ссылок. |
+| `ocr delegate preview` | Выводит проверяемые файлы и метаданные VCS/режима/ссылок. |
 | `ocr delegate rule <path...>` | Разрешает правила ревью и группирует их по содержимому. |
 
 ## Общие флаги

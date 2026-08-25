@@ -85,7 +85,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## `ocr review`
 
-メインコマンドです。Git diff を解析し、意味的に関連するファイルをグループにまとめ、グループごとにサブエージェントをディスパッチし、レビューコメントを収集して出力します。
+メインコマンドです。Git または Subversion ワーキングコピーの diff を解析し、意味的に関連するファイルをグループにまとめ、グループごとにサブエージェントをディスパッチし、レビューコメントを収集して出力します。
 
 ### 概要
 
@@ -94,16 +94,16 @@ ocr review [flags]
 ocr r      [flags]   (alias)
 ```
 
-引数を何も渡さない場合、OCR は**ワークスペースモード**で動作します。カレントディレクトリのリポジトリ内にある staged + unstaged + untracked のすべての変更をレビューします。
+引数を何も渡さない場合、OCR は**ワークスペースモード**で動作し、カレントディレクトリにある Git または Subversion ワーキングコピーのローカル変更をすべてレビューします。
 
 ### 引数
 
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
-| `--repo <path>` | — | カレントディレクトリ | Git リポジトリのルート。 |
-| `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
-| `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
-| `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
+| `--repo <path>` | — | カレントディレクトリ | Git リポジトリまたは Subversion ワーキングコピーのルート。 |
+| `--from <ref>` | — | — | Git diff の開始 ref（例: `main`）。 |
+| `--to <ref>` | — | — | Git diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
+| `--commit <sha>` | `-c` | — | 単一の Git commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
@@ -128,6 +128,7 @@ ocr r      [flags]   (alias)
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+> Subversion はワークスペースモードのみをサポートします。
 
 ### 実行単位の LLM 選択
 
@@ -154,12 +155,17 @@ ocr scan --provider openai --model gpt-5.4 --format json
 ocr review
 ```
 
-OCR は 2 つの git コマンドからワークツリーの変更を組み立てます:
+Git では、OCR は 2 つのコマンドからワークツリーの変更を組み立てます:
 
 - `git diff HEAD` で追跡済みの変更を取得します（staged + unstaged をまとめて `HEAD` と比較。空の場合は `git diff --staged` にフォールバック）
 - `git ls-files --others --exclude-standard` で untracked ファイルを取得し、ディスクから読み込んでファイル全体の新規追加として扱います
 
 これは通常、commit 前に確認したい内容そのものです。より小さな範囲が必要なら、選択的に stage してください。
+
+Subversion 1.7+ のワーキングコピーでは、OCR が SVN を自動検出し、`svn diff --git` の
+Git 互換出力と `svn status --xml` が報告する未管理ファイルを結合します。行単位で特定できる
+ソース変更がないため、プロパティのみの変更は無視されます。SVN では `--from`、`--to`、
+`--commit` はサポートされません。
 
 #### 範囲モード
 
@@ -431,7 +437,7 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    Git or Subversion working-copy root (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

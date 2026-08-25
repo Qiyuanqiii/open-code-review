@@ -58,6 +58,7 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 
 出力内容：
 
+- **vcs** — git / svn
 - **mode** — workspace / range / commit
 - **ref メタデータ** — from、to、commit、merge\_base
 - **レビュー可能ファイルリスト** — パス、ステータス、挿入/削除行数
@@ -81,7 +82,7 @@ ocr delegate rule <path1> <path2> ...
 
 ### ステップ 3：diff の取得
 
-ステップ 1 の mode/ref 情報に基づき、git を直接使用：
+ステップ 1 の VCS と mode/ref 情報に基づいて取得します：
 
 **Range モード**（merge\_base あり）：
 ```bash
@@ -95,9 +96,12 @@ git show <commit> -- <path>
 
 **Workspace モード**：
 ```bash
-git diff HEAD -- <path>        # 追跡ファイル
-cat <path>                     # 新規未追跡ファイル
+git diff HEAD -- <path>        # Git 追跡ファイル
+svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN 管理対象ファイル
+cat <path>                     # Git 未追跡 / SVN 未管理ファイル
 ```
+
+Range と Commit モードは Git 専用です。
 
 ### ステップ 4：各ファイルのレビュー
 
@@ -119,7 +123,7 @@ cat <path>                     # 新規未追跡ファイル
 
 | コマンド | 目的 |
 |----------|------|
-| `ocr delegate preview` | レビュー可能ファイル＋mode/ref メタデータの一覧 |
+| `ocr delegate preview` | レビュー可能ファイル＋VCS/mode/ref メタデータの一覧 |
 | `ocr delegate rule <path...>` | 内容別にグループ化されたレビュールールの解決 |
 
 ## 共通フラグ

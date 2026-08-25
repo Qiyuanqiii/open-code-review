@@ -13,7 +13,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -40,6 +40,10 @@ flowchart TD
 | `Workspace` | 无参数 | staged + unstaged + untracked 变更 |
 | `Commit` | `--commit <sha>` / `-c <sha>` | `<sha>` 引入的变更（经 `git show <sha>`，等价于 `<sha>^..<sha>` diff） |
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+
+`internal/diff/svn.go` 为 Subversion 1.7+ 提供工作区模式。OCR 自动检测工作副本类型，
+将 `svn diff --git` 转换为工作副本内的本地路径，并合并 `svn status --xml` 中的未纳管
+文件。commit 与范围模式仍只支持 Git。
 
 每个 diff 携带：old/new path、old/new hunk、插入/删除计数、二进制标志、重命名
 检测。`DiffContextLines` 固定为 **3**——与 Git 默认一致。

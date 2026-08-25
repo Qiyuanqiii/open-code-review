@@ -1,7 +1,7 @@
 ---
 name: open-code-review
 description: >
-  Performs AI-powered code review on Git changes using the `ocr` CLI from
+  Performs AI-powered code review on Git or Subversion working-copy changes using the `ocr` CLI from
   alibaba/open-code-review. Use when the user asks to review code, review
   a pull request, review staged/unstaged changes, review a commit, or
   compare branches for code quality issues. Produces line-level review
@@ -26,7 +26,7 @@ This Codex plugin skill intentionally mirrors the canonical skill at
 OCR agent instructions; a symlink is avoided because plugin installs may only
 materialize the plugin subtree.
 
-A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
+A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git or Subversion working-copy diffs and generates structured, line-level review comments.
 
 ## Workflow
 
@@ -45,9 +45,9 @@ ocr review --audience agent --background "business context here" [user-args]
 **Argument handling:**
 
 - **Background context** (RECOMMENDED): use `--background "context"` or `-b "context"` to provide business context for better review quality
-- **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
-- **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
-- **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
+- **Default** (no user arguments): reviews Git staged/unstaged/untracked changes or SVN versioned/unversioned changes (workspace mode)
+- **Specific Git commit**: use `--commit` or `-c` to review a single commit against its parent
+- **Git branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
 - **Timeout**: default timeout is 10 minutes per file; adjust with `--timeout <minutes>`
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
@@ -173,8 +173,8 @@ ocr rules check src/main/java/com/example/Foo.java
 ## Gotchas
 
 - **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. See the Troubleshooting section below if this happens.
-- **Working directory matters** — `ocr review` operates on the Git repo at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
-- **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes staged, unstaged, *and* untracked changes. Stage selectively if you want narrower scope.
+- **Working directory matters** — `ocr review` operates on the Git repository or SVN working copy at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
+- **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes Git staged/unstaged/untracked changes or SVN versioned/unversioned changes. Git commit/range flags are not supported for SVN.
 - **Large diffs may hit token limits** — files with very large diffs may be truncated. The default `MAX_TOKENS` is 58888 per request.
 - **Plan phase triggers at 50 lines** — diffs exceeding 50 changed lines run an extra risk-analysis phase before main review. This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.

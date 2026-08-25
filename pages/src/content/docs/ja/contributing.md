@@ -117,7 +117,7 @@ open-code-review/
 ├── internal/
 │   ├── agent/                 # レビューエージェントのロジック、サブエージェントのディスパッチ
 │   ├── config/                # テンプレート、ルール、ホワイトリスト、埋め込み JSON
-│   ├── diff/                  # Git diff の解析、3 つのモード
+│   ├── diff/                  # Git と Subversion の diff provider
 │   ├── gitcmd/                # Git サブプロセスランナー
 │   ├── llm/                   # LLM client（Anthropic と OpenAI）、エンドポイント解決
 │   ├── model/                 # データ構造（LlmComment、Diff……）

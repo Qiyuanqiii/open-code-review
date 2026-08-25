@@ -34,6 +34,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -53,8 +54,12 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
-	// RepoDir is the root of the git repository.
+	// RepoDir is the root of the version-control working copy.
 	RepoDir string
+
+	// RepositoryKind selects the diff implementation. The zero value preserves
+	// the historical Git behavior for direct API callers.
+	RepositoryKind vcs.Kind
 
 	// From and To define the diff range (e.g., "main..feature-branch").
 	From string
@@ -131,7 +136,8 @@ type Args struct {
 	GitRunner *gitcmd.Runner
 
 	// Session is an optional session history instance for collecting conversation records.
-	// When nil, a default one is created automatically with git branch auto-detected from repoDir.
+	// When nil, a default one is created automatically. Git branches are detected
+	// for Git repositories; Subversion sessions leave the branch empty.
 	Session *session.SessionHistory
 
 	// Resume is an optional read-only checkpoint index from a previous review session.
@@ -212,7 +218,10 @@ func New(args Args) *Agent {
 		args.CommentCollector = tool.NewCommentCollector()
 	}
 	if args.Session == nil {
-		gitBranch := detectGitBranch(context.Background(), args.RepoDir)
+		gitBranch := ""
+		if args.RepositoryKind != vcs.Subversion {
+			gitBranch = detectGitBranch(context.Background(), args.RepoDir)
+		}
 		mode := args.ReviewMode
 		if mode == "" {
 			mode = reviewModeString(args.From, args.To, args.Commit)
@@ -511,7 +520,12 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 
 // loadDiffs populates the diff-related fields.
 func (a *Agent) loadDiffs(ctx context.Context) error {
-	var provider *diff.Provider
+	type providerAPI interface {
+		GetDiff(context.Context) ([]model.Diff, error)
+		ResolveInput(context.Context) diff.InputResolution
+		RemoteIdentity(context.Context) string
+	}
+	var provider providerAPI
 
 	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
 	// for the refs the user typed. Both loads then read the same immutable objects,
@@ -532,13 +546,20 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 		}
 	}
 
-	switch {
-	case commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
-	case from != "" && to != "":
-		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
-	default:
-		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
+	if a.args.RepositoryKind == vcs.Subversion {
+		if commit != "" || from != "" || to != "" {
+			return fmt.Errorf("Subversion supports workspace review only; --commit and --from/--to require Git")
+		}
+		provider = diff.NewSVNWorkspaceProvider(a.args.RepoDir)
+	} else {
+		switch {
+		case commit != "":
+			provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+		case from != "" && to != "":
+			provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
+		default:
+			provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
+		}
 	}
 
 	parsed, err := provider.GetDiff(ctx)
@@ -548,8 +569,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 
 	a.diffs = parsed
 
-	// Freeze this run's real commit endpoints and repository identity while the
-	// git-backed provider and a live context are in hand; finalizeManifest reads
+	// Freeze this run's real endpoints and repository identity while the
+	// working-copy provider and a live context are in hand; finalizeManifest reads
 	// these (never re-resolving) so the manifest records the input as it was at
 	// dispatch time, even on a later skipped or failed path.
 	a.inputResolution = provider.ResolveInput(ctx)

@@ -107,9 +107,9 @@ Git or Subversion working-copy changes.
 | Flag | Short | Default | Description |
 |---|---|---|---|
 | `--repo <path>` | — | current dir | Git or Subversion working-copy root. |
-| `--from <ref>` | — | — | Git source ref to start the diff from (e.g., `main`). |
-| `--to <ref>` | — | — | Git target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
-| `--commit <sha>` | `-c` | — | Single Git commit to review (vs its parent). |
+| `--from <ref>` | — | — | Source Git ref or SVN revision. Git uses merge-base semantics; SVN uses the exact resolved revision. |
+| `--to <ref>` | — | — | Destination Git ref or SVN revision. Git computes `merge-base(from, to)..to`; SVN compares the exact endpoints. |
+| `--commit <ref>` | `-c` | — | Single Git commit or SVN revision to review against its predecessor. |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
@@ -134,7 +134,7 @@ Git or Subversion working-copy changes.
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
-> with `--preview`. Subversion supports workspace mode only.
+> with `--preview`.
 
 ### Per-run LLM selection
 
@@ -176,8 +176,7 @@ narrower scope.
 In a Subversion 1.7+ working copy, OCR auto-detects SVN and combines
 Git-compatible output from `svn diff --git` with unversioned files reported by
 `svn status --xml`. Property-only changes are ignored because they have no
-line-addressable source change. `--from`, `--to`, and `--commit` are not
-supported for SVN.
+line-addressable source change.
 
 #### Range mode
 
@@ -189,6 +188,18 @@ OCR computes `merge-base(main, feature-branch)..feature-branch` so you only
 see the diff *introduced by* the feature branch — not unrelated changes
 that landed on `main` since branching.
 
+For SVN, both values are revisions and OCR compares the exact frozen endpoints:
+
+```bash
+ocr review --from 120 --to 128
+```
+
+Numeric revisions, `HEAD`, and `{DATE}` revisions are accepted. Moving or
+date-based values are resolved to repository-wide numbers before diff loading,
+file tools, filtering, manifest creation, or resume identity checks. The
+working-copy-relative keywords `BASE`, `COMMITTED`, and `PREV` are rejected
+because mixed-revision working copies make them ambiguous.
+
 #### Commit mode
 
 ```bash
@@ -198,6 +209,11 @@ ocr review -c abc123
 
 Reviews the diff produced by `git show abc123` (i.e., the changes that
 single commit introduced).
+
+For SVN, `--commit 128` reviews the exact `127:128` change scoped to the
+working-copy URL. Revision 0 is an empty input because it has no predecessor.
+New-file content and repository search tools read revision 128 rather than the
+current working tree.
 
 ### Resuming interrupted reviews
 

@@ -298,8 +298,10 @@ OCR 把你的 **diff**（及可选 read-tool 片段）发到你配置的 LLM 端
 
 ### OCR 支持非 Git VCS 吗？
 
-支持 SVN。使用 Subversion 1.7 或更新版本时，工作副本评审会包含已纳管和未纳管的本地变更，
-但仅支持工作区模式；commit 与范围评审仍需要 Git。Mercurial 等其他 VCS 暂无 provider。
+支持。使用 Subversion 1.7 或更新版本时，OCR 可评审已纳管和未纳管的工作副本变更，
+也可通过 `--commit REV` 评审单个不可变 revision，或通过 `--from REV --to REV`
+评审精确 revision 范围。`HEAD` 与日期 revision 会先冻结为数字端点。跨分支 URL 比较与
+merge server 自动化属于后续工作。Mercurial 等其他 VCS 暂无 provider。
 
 ### 为什么二进制叫 `opencodereview` 而 CLI 是 `ocr`？
 

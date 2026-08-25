@@ -99,7 +99,7 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 ### Prerequisites
 
 - **Git >= 2.41** — required for Git workspace, commit, and range reviews.
-- **Subversion >= 1.7 (optional)** — required only for SVN workspace reviews. Git commit and range modes remain Git-only.
+- **Subversion >= 1.7 (optional)** — required for SVN workspace, revision, and revision-range reviews.
 
 ### CLI
 
@@ -142,10 +142,14 @@ ocr review
 cd your-svn-working-copy
 ocr review
 
-# Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
+# Immutable Subversion history — one revision or an explicit revision range
+ocr review --commit 128
+ocr review --from 120 --to 128
+
+# Git branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch
 
-# Single commit
+# Single Git commit
 ocr review --commit abc123
 
 # Resume an interrupted range or commit review

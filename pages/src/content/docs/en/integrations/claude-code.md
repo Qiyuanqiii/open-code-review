@@ -82,8 +82,8 @@ you copied the file directly:
 
 The prompt parses your request and picks the right `ocr review` flags:
 no arguments → workspace mode (Git staged + unstaged + untracked, or SVN
-versioned + unversioned), mention of a Git commit → `--commit`, mention of a
-Git branch range → `--from` / `--to`.
+versioned + unversioned), mention of a Git commit or SVN revision → `--commit`,
+mention of a Git branch range or SVN revision range → `--from` / `--to`.
 You can also pass OCR flags through directly (e.g.
 `/open-code-review:review --commit abc123` or `--from main --to feature`).
 

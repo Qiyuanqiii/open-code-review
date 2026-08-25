@@ -74,7 +74,7 @@ func (s *ResumeState) ValidateResume(req ResumeRequest) error {
 // something derived from the input.
 //
 // This runs once, at admission, and is never repeated during the run: the caller
-// pins the run to the commit endpoints this comparison was made against (see
+// pins the run to the VCS endpoints this comparison was made against (see
 // agent.SealedInput), so a second comparison could only ever confirm the first.
 func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 	if s == nil {

@@ -12,7 +12,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status / cat<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -30,13 +30,15 @@ flowchart TD
 | モード | トリガー方法 | 返す内容 |
 |---|---|---|
 | `Workspace` | 引数なし | staged + unstaged + untracked の変更 |
-| `Commit` | `--commit <sha>` / `-c <sha>` | `<sha>` が導入した変更（`git show <sha>` 経由。`<sha>^..<sha>` の diff に相当） |
-| `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+| `Commit` | `--commit <ref>` / `-c <ref>` | Git：`<ref>` が導入した変更。SVN：厳密な `REV-1:REV` の変更 |
+| `Range` | `--from <a> --to <b>` | Git：`merge-base(a, b)..b`。SVN：厳密な数値 revision の端点 |
 
-`internal/diff/svn.go` は Subversion 1.7+ のワークスペースモードを提供します。OCR は
+`internal/diff/svn.go` は Subversion 1.7+ の 3 モードを提供します。OCR は
 ワーキングコピーの種類を自動検出し、`svn diff --git` をワーキングコピー内のローカルパスへ
-変換して、`svn status --xml` の未管理ファイルを結合します。commit と範囲モードは引き続き
-Git 専用です。
+変換し、ワークスペースモードでは `svn status --xml` の未管理ファイルを結合します。
+commit と範囲の入力は最初に数値 revision へ解決され、その後 provider は明示的な
+old/new URL peg と `svn cat` を使用するため、宛先の内容はワーキングコピーやリポジトリの
+`HEAD` によって変動しません。
 
 各 diff は次を保持します: old/new path、old/new hunk、挿入/削除カウント、バイナリフラグ、リネーム検出。`DiffContextLines` は **3** に固定されており、Git のデフォルトと一致します。
 

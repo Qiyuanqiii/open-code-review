@@ -15,7 +15,7 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status / cat<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -50,13 +50,16 @@ flowchart TD
 | Режим | Условие | Результат |
 |---|---|---|
 | `Workspace` | без флагов | индексированные, неиндексированные и неотслеживаемые изменения |
-| `Commit` | `--commit <sha>` / `-c <sha>` | изменения, внесённые `<sha>` (через `git show <sha>`, что эквивалентно diff `<sha>^..<sha>`) |
-| `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+| `Commit` | `--commit <ref>` / `-c <ref>` | Git: изменение из `<ref>`; SVN: точное изменение `REV-1:REV` |
+| `Range` | `--from <a> --to <b>` | Git: `merge-base(a, b)..b`; SVN: точные числовые границы ревизий |
 
-`internal/diff/svn.go` реализует режим рабочей области для Subversion 1.7+.
+`internal/diff/svn.go` реализует все три режима для Subversion 1.7+.
 OCR автоматически определяет тип рабочей копии, преобразует пути из
-`svn diff --git` в локальные пути рабочей копии и добавляет неверсионируемые
-файлы из `svn status --xml`. Режимы коммита и диапазона остаются только для Git.
+`svn diff --git` в локальные пути рабочей копии и в режиме рабочей области
+добавляет неверсионируемые файлы из `svn status --xml`. Входы коммита и диапазона
+сначала разрешаются в числовые ревизии; затем provider использует явные old/new
+URL peg и `svn cat`, поэтому целевое содержимое не меняется вместе с рабочей
+копией или `HEAD` репозитория.
 
 Каждый diff содержит старый и новый пути, старые и новые фрагменты, количество
 добавлений и удалений, признак бинарного файла и сведения о переименовании.

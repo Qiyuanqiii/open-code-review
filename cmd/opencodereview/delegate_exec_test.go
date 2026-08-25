@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -148,6 +150,65 @@ func TestExecuteDelegatePreview_Commit(t *testing.T) {
 			t.Fatalf("executeDelegatePreview(commit) error: %v", err)
 		}
 	})
+}
+
+func TestExecuteDelegatePreview_SubversionCommitJSON(t *testing.T) {
+	for _, name := range []string{"svn", "svnadmin"} {
+		if _, err := exec.LookPath(name); err != nil {
+			t.Skipf("%s is not installed", name)
+		}
+	}
+	home := freshOCRHome(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	wc := filepath.Join(root, "wc")
+	runDelegateSVN(t, root, "svnadmin", "create", repo)
+	repoURL := delegateSVNURL(repo)
+	runDelegateSVN(t, root, "svn", "mkdir", repoURL+"/trunk", "-m", "create trunk")
+	runDelegateSVN(t, root, "svn", "checkout", repoURL+"/trunk", wc)
+	if err := os.WriteFile(filepath.Join(wc, "review.go"), []byte("package review\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDelegateSVN(t, wc, "svn", "add", "review.go")
+	runDelegateSVN(t, wc, "svn", "commit", "-m", "add review target")
+
+	out := captureDelegateStdout(t, func() {
+		if err := executeDelegatePreview(delegateOptions{repoDir: wc, commit: "HEAD", format: "json"}); err != nil {
+			t.Fatalf("executeDelegatePreview(Subversion commit) error: %v", err)
+		}
+	})
+	var got delegatePreviewJSON
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode preview JSON: %v\n%s", err, out)
+	}
+	if got.VCS != "svn" || got.Mode != "commit" {
+		t.Fatalf("unexpected envelope: %#v", got)
+	}
+	if got.ResolvedBase != "1" || got.ResolvedHead != "2" || got.ExactRange != "1:2" {
+		t.Fatalf("resolved endpoints = %q/%q (%q)", got.ResolvedBase, got.ResolvedHead, got.ExactRange)
+	}
+	if len(got.ReviewableFiles) != 1 || got.ReviewableFiles[0].Path != "review.go" {
+		t.Fatalf("reviewable_files = %#v", got.ReviewableFiles)
+	}
+	assertNoSessionStore(t, home)
+}
+
+func delegateSVNURL(path string) string {
+	slashPath := filepath.ToSlash(path)
+	if runtime.GOOS == "windows" && !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath}).String()
+}
+
+func runDelegateSVN(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
+	}
 }
 
 // TestExecuteDelegatePreviewCreatesNoSession covers the third preview entry

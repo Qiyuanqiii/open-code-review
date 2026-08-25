@@ -21,9 +21,9 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 }
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
-	cmd.Flags().StringVar(from, "from", "", "Git source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "Git target ref to end diff at (e.g., 'feature-branch')")
-	cmd.Flags().StringVarP(commit, "commit", "c", "", "single Git commit hash or tag to review (vs its parent)")
+	cmd.Flags().StringVar(from, "from", "", "source Git ref or SVN revision to start the diff from")
+	cmd.Flags().StringVar(to, "to", "", "destination Git ref or SVN revision to end the diff at")
+	cmd.Flags().StringVarP(commit, "commit", "c", "", "single Git commit or SVN revision to review against its predecessor")
 }
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {

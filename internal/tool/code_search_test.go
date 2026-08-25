@@ -462,6 +462,41 @@ func TestCodeSearch_SubversionWorkspaceRegexp(t *testing.T) {
 	}
 }
 
+func TestCodeSearchSubversionRevision(t *testing.T) {
+	fr := &FileReader{
+		RepoDir:        t.TempDir(),
+		Mode:           ModeCommit,
+		Ref:            "12",
+		SVNTarget:      "https://svn.example.com/project/trunk",
+		RepositoryKind: vcs.Subversion,
+	}
+	fr.SVNOutput = func(_ context.Context, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "list":
+			return []byte(`<lists><list><entry kind="file"><name>src/main.go</name></entry><entry kind="file"><name>src/other.go</name></entry></list></lists>`), nil
+		case "cat":
+			target := args[len(args)-1]
+			if strings.Contains(target, "main.go") {
+				return []byte("package main\nfunc FrozenValue() int { return 12 }\n"), nil
+			}
+			return []byte("package other\n"), nil
+		default:
+			return nil, errors.New("unexpected SVN command")
+		}
+	}
+	p := NewCodeSearch(fr)
+	result, err := p.gitGrep(context.Background(), "FrozenValue", true, false, []string{"src/*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "File: src/main.go") || !strings.Contains(result, "2|func FrozenValue") {
+		t.Fatalf("unexpected result: %s", result)
+	}
+	if strings.Contains(result, "other.go") {
+		t.Fatalf("unmatched file leaked into result: %s", result)
+	}
+}
+
 func TestMatchesSearchPathspecExclusions(t *testing.T) {
 	tests := []struct {
 		name     string

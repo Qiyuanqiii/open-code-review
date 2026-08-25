@@ -46,13 +46,13 @@ No LLM configuration is needed for delegation mode.
 ### Step 1: Preview — Determine What to Review
 
 ```bash
-ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <ref>] [--exclude <patterns>]
 ```
 
 This outputs:
 - **vcs** (git / svn)
 - **mode** (workspace / range / commit)
-- **from / to / commit / merge_base** — ref metadata for constructing git commands
+- **from / to / commit / merge_base / resolved_base / resolved_head / exact_range** — frozen VCS endpoint metadata
 - **Reviewable file list** — paths, status, insertions/deletions
 - **Excluded files** — with exclusion reason
 
@@ -63,6 +63,7 @@ This outputs:
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
 | Single commit | `ocr delegate preview -c abc123` |
+| SVN revision range | `ocr delegate preview --from 120 --to 128` |
 
 ### Step 2: Get Rules for Files
 
@@ -86,6 +87,12 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
+**SVN range or commit mode** (get the selected URL from `svn info --show-item url`, then use the numeric resolved endpoints):
+```bash
+svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>
+svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<resolved_head>
+```
+
 **Workspace mode**:
 ```bash
 # Git tracked files
@@ -95,8 +102,6 @@ svn diff --git --internal-diff --show-copies-as-adds -- <path>
 # New untracked/unversioned files — read directly (entire file is new code)
 cat <path>
 ```
-
-Range and commit modes are Git-only.
 
 ### Step 4: Review Each File
 

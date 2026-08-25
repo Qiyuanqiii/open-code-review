@@ -102,9 +102,9 @@ ocr r      [flags]   (alias)
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
 | `--repo <path>` | — | 当前目录 | Git 仓库或 Subversion 工作副本根。 |
-| `--from <ref>` | — | — | Git diff 起始 ref（如 `main`）。 |
-| `--to <ref>` | — | — | Git diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
-| `--commit <sha>` | `-c` | — | 评审单个 Git commit（相对其父）。 |
+| `--from <ref>` | — | — | 起始 Git ref 或 SVN revision。Git 使用 merge-base；SVN 使用解析后的精确 revision。 |
+| `--to <ref>` | — | — | 目标 Git ref 或 SVN revision。Git 计算 `merge-base(from, to)..to`；SVN 比较精确端点。 |
+| `--commit <ref>` | `-c` | — | 评审单个 Git commit 或 SVN revision（相对其前一端点）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
@@ -128,8 +128,7 @@ ocr r      [flags]   (alias)
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
-> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。Subversion
-> 仅支持工作区模式。
+> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
 
 ### 单次运行的 LLM 选择
 
@@ -166,7 +165,7 @@ ocr review
 
 在 Subversion 1.7+ 工作副本中，OCR 会自动检测 SVN，并将 `svn diff --git` 的
 Git 兼容输出与 `svn status --xml` 报告的未纳管文件合并。纯属性变更没有可按行定位的
-源代码变更，因此会被忽略。SVN 不支持 `--from`、`--to` 和 `--commit`。
+源代码变更，因此会被忽略。
 
 #### 区间模式
 
@@ -177,6 +176,17 @@ ocr review --from main --to feature-branch
 OCR 计算 `merge-base(main, feature-branch)..feature-branch`，因此你只看到
 feature 分支*引入*的 diff——而非分支切出后落到 `main` 上的无关变更。
 
+对于 SVN，两个值都是 revision，OCR 会比较冻结后的精确端点：
+
+```bash
+ocr review --from 120 --to 128
+```
+
+支持数字 revision、`HEAD` 和 `{DATE}` revision。可移动值或日期值会在加载 diff、
+调用文件工具、执行过滤、生成 manifest 或校验 resume 标识前解析为仓库级数字。
+`BASE`、`COMMITTED` 和 `PREV` 依赖工作副本状态，在混合 revision 工作副本中有歧义，
+因此会被拒绝。
+
 #### Commit 模式
 
 ```bash
@@ -185,6 +195,10 @@ ocr review -c abc123
 ```
 
 评审 `git show abc123` 产生的 diff（即该 commit 引入的变更）。
+
+对于 SVN，`--commit 128` 评审工作副本 URL 范围内精确的 `127:128` 变更。
+revision 0 没有前一端点，因此是空输入。新增文件内容与仓库搜索工具读取 revision 128，
+而不是当前工作树。
 
 ### 恢复中断的评审
 

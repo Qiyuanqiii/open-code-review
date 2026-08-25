@@ -143,12 +143,10 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
-	// SealedInput pins this run to commit endpoints a pre-flight resolve already
-	// froze, instead of resolving From/To/Commit again. Set only on the resume
-	// path, where admission compared an identity derived from those endpoints:
-	// re-resolving a raw ref here could read a commit the admitted identity never
-	// covered, and the mismatch would surface only after the child session and
-	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	// SealedInput pins this run to endpoints a pre-flight resolve already froze,
+	// instead of resolving From/To/Commit again. Resume always sets it after
+	// identity admission; immutable SVN review also sets it for ordinary runs so
+	// HEAD cannot move between diff loading and repository file-tool reads.
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
@@ -198,10 +196,10 @@ type Agent struct {
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
-	// inputResolution holds this run's frozen commit endpoints (resolved_base/
+	// inputResolution holds this run's frozen VCS endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
-	// identity. Both are captured from git during loadDiffs (which has a context)
-	// and consumed by finalizeManifest to fill the manifest input/repository.
+	// identity. Both are captured during loadDiffs and consumed by
+	// finalizeManifest to fill the manifest input/repository.
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
 }
@@ -527,31 +525,38 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	}
 	var provider providerAPI
 
-	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
-	// for the refs the user typed. Both loads then read the same immutable objects,
-	// which is what makes this run's input provably the admitted one: a ref moving
-	// after admission can no longer change what gets reviewed. Neither mode's
-	// semantics shift under the substitution — range keeps its merge-base, because
-	// the sealed base already is that merge-base and merge-base(base, head) is base
-	// whenever base is an ancestor of head; commit mode keeps its first-parent
-	// comparison, which is derived from the commit rather than from its spelling.
-	// Workspace mode seals no head and is left alone.
+	// A sealed input substitutes the immutable endpoints a pre-flight resolve
+	// already froze for the refs or revisions the user typed. Both loads then read
+	// the same objects, so a moving Git ref or SVN HEAD cannot change the admitted
+	// input. Workspace mode seals no head and is left alone.
 	from, to, commit := a.args.From, a.args.To, a.args.Commit
-	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
-		switch {
-		case commit != "":
-			commit = s.ResolvedHead
-		case s.ResolvedBase != "":
-			from, to = s.ResolvedBase, s.ResolvedHead
-		}
-	}
 
 	if a.args.RepositoryKind == vcs.Subversion {
-		if commit != "" || from != "" || to != "" {
-			return fmt.Errorf("Subversion supports workspace review only; --commit and --from/--to require Git")
+		var svnProvider *diff.SVNProvider
+		switch {
+		case commit != "":
+			svnProvider = diff.NewSVNCommitProvider(a.args.RepoDir, commit)
+		case from != "" && to != "":
+			svnProvider = diff.NewSVNRangeProvider(a.args.RepoDir, from, to)
+		default:
+			svnProvider = diff.NewSVNWorkspaceProvider(a.args.RepoDir)
 		}
-		provider = diff.NewSVNWorkspaceProvider(a.args.RepoDir)
+		if a.args.SealedInput != nil {
+			svnProvider.SealInput(*a.args.SealedInput)
+		}
+		provider = svnProvider
 	} else {
+		// Git range keeps its merge-base because a sealed base is already the
+		// merge-base and remains an ancestor of the sealed head. Commit mode keeps
+		// first-parent semantics because that comparison derives from the commit.
+		if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
+			switch {
+			case commit != "":
+				commit = s.ResolvedHead
+			case s.ResolvedBase != "":
+				from, to = s.ResolvedBase, s.ResolvedHead
+			}
+		}
 		switch {
 		case commit != "":
 			provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
@@ -933,7 +938,7 @@ func reviewItemFingerprint(mode string, d model.Diff) string {
 // initManifest seeds the run manifest with this run's input identity and
 // execution provenance. It is nil-safe (the builder is absent on the delegate
 // preview path, which never runs a review) and records the direct parent run for
-// a resume. The resolved commit SHAs, source-artifact and config hashes, and
+// a resume. The resolved VCS endpoints, source-artifact and config hashes, and
 // repository identity are filled by a later phase; the mandatory input.mode is
 // set here so the manifest is always constructible.
 func (a *Agent) initManifest() {
@@ -982,7 +987,7 @@ func (a *Agent) manifestInput() session.ManifestInput {
 // identity, then hands them to the builder through its single setters. It is the
 // one authoritative assembly point (called from finalizeManifest, which runs on
 // every terminal path): requested refs and mode come from manifestInput, the
-// resolved commit endpoints from the git resolution captured in loadDiffs, and
+// resolved VCS endpoints from the resolution captured in loadDiffs, and
 // source_artifact_sha256 from the current selected set — so a skipped or failed
 // run still records the real input it was given. Caller ensures b != nil.
 func (a *Agent) applyInputIdentity(b *session.ManifestBuilder) {

@@ -360,10 +360,12 @@ A "redaction rule" feature is on the roadmap; track
 
 ### Does OCR support non-Git VCS?
 
-Yes, SVN working-copy review is supported with Subversion 1.7 or newer. It
-includes versioned and unversioned local changes, but only in workspace mode;
-Git remains required for commit and range review. Mercurial and other VCSs do
-not yet have providers.
+Yes. With Subversion 1.7 or newer, OCR supports versioned and unversioned
+working-copy changes, one immutable revision via `--commit REV`, and exact
+revision ranges via `--from REV --to REV`. `HEAD` and date revisions are frozen
+to numeric endpoints first. Cross-branch URL comparisons and merge-server
+automation are separate follow-up work. Mercurial and other VCSs do not yet
+have providers.
 
 ### Why is the binary called `opencodereview` but the CLI is `ocr`?
 

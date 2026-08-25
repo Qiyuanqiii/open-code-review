@@ -20,6 +20,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/svncmd"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/alibaba/open-code-review/internal/vcs"
@@ -69,6 +70,10 @@ var reviewCmd = &cobra.Command{
   # Review local changes in a Subversion 1.7+ working copy
   ocr review --preview
   ocr review
+
+  # Review one immutable SVN revision or a numeric revision range
+  ocr review --commit 128
+  ocr review --from 120 --to 128
 
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
@@ -146,9 +151,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 	opts.background = bg
+	sealedInput, err := resolveSVNReviewInput(ctx, cc, opts)
+	if err != nil {
+		return err
+	}
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts, out)
+		return runPreviewContextWithSealed(ctx, cc, opts, sealedInput, out)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -178,19 +187,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
 	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	sealed, err := validateResumeIdentityWithSealed(ctx, cc, opts, rt, resumeState, sealedInput)
 	if err != nil {
 		return err
+	}
+	if sealed != nil {
+		sealedInput = &sealed.Resolution
 	}
 
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
-	}
-
-	var sealedInput *diff.InputResolution
-	if sealed != nil {
-		sealedInput = &sealed.Resolution
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
@@ -199,6 +206,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		RepositoryKind: cc.RepositoryKind,
 		Mode:           mode,
 		Ref:            fileReadRef(mode, opts, sealedInput),
+		SVNTarget:      svnFileReadTarget(sealedInput),
 		Runner:         cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
@@ -389,6 +397,10 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
 func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
+	return validateResumeIdentityWithSealed(ctx, cc, opts, rt, state, nil)
+}
+
+func validateResumeIdentityWithSealed(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState, presealed *diff.InputResolution) (*agent.SealedInput, error) {
 	if state == nil {
 		return nil, nil
 	}
@@ -403,6 +415,7 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		SystemRule:     cc.Resolver,
 		FileFilter:     cc.FileFilter,
 		GitRunner:      cc.GitRunner,
+		SealedInput:    presealed,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -419,13 +432,30 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	return sealed, nil
 }
 
+func resolveSVNReviewInput(ctx context.Context, cc *commonContext, opts reviewOptions) (*diff.InputResolution, error) {
+	if cc.RepositoryKind != vcs.Subversion || (opts.commit == "" && opts.from == "" && opts.to == "") {
+		return nil, nil
+	}
+	resolved, err := diff.ResolveSVNInput(ctx, cc.RepoDir, opts.from, opts.to, opts.commit)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Subversion input: %w", err)
+	}
+	return &resolved, nil
+}
+
+func svnFileReadTarget(sealed *diff.InputResolution) string {
+	if sealed == nil {
+		return ""
+	}
+	return sealed.RepositoryTarget
+}
+
 // fileReadRef picks the ref file_read resolves paths against.
 //
-// A sealed input replaces the ref the user typed with the commit that ref
-// resolved to at admission. The diff under review is pinned to that same commit,
-// so leaving the reader on a moving ref would let the model read one version of a
-// file while reviewing the diff of another. Workspace mode has no ref at all, and
-// keeps none: its content is the working tree, which is what the diff describes.
+// A sealed input replaces the ref or revision the user typed with the immutable
+// destination resolved at admission. The diff is pinned to that same endpoint,
+// so leaving the reader on a moving value could make the model read one file
+// version while reviewing another. Workspace content remains the working tree.
 func fileReadRef(mode tool.ReviewMode, opts reviewOptions, sealed *diff.InputResolution) string {
 	ref, ok := mode.RefValue(opts.to, opts.commit)
 	if !ok {
@@ -448,8 +478,23 @@ func reviewModeFromOptions(opts reviewOptions) string {
 }
 
 func validateRepositoryReviewMode(kind vcs.Kind, opts reviewOptions) error {
-	if kind == vcs.Subversion && (opts.from != "" || opts.to != "" || opts.commit != "") {
-		return fmt.Errorf("Subversion supports workspace review only; --commit and --from/--to require Git")
+	if kind != vcs.Subversion {
+		return nil
+	}
+	for _, item := range []struct {
+		flag     string
+		revision string
+	}{
+		{"--from", opts.from},
+		{"--to", opts.to},
+		{"--commit", opts.commit},
+	} {
+		if item.revision == "" {
+			continue
+		}
+		if err := svncmd.ValidateRevision(item.revision); err != nil {
+			return fmt.Errorf("%s value: %w", item.flag, err)
+		}
 	}
 	return nil
 }
@@ -474,7 +519,7 @@ func requireGitRepo(dir string) error {
 	return nil
 }
 
-// validateReviewRefs rejects ref-option injection (#112): any --from/--to/
+// validateReviewRefs rejects Git ref-option injection (#112): any --from/--to/
 // --commit value must be a real commit ref and must not start with '-'.
 func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	refs := []struct {
@@ -504,6 +549,10 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	return runPreviewContextWithSealed(ctx, cc, opts, nil, out)
+}
+
+func runPreviewContextWithSealed(ctx context.Context, cc *commonContext, opts reviewOptions, sealed *diff.InputResolution, out io.Writer) error {
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:        cc.RepoDir,
 		RepositoryKind: cc.RepositoryKind,
@@ -512,6 +561,7 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 		Commit:         opts.commit,
 		FileFilter:     cc.FileFilter,
 		GitRunner:      cc.GitRunner,
+		SealedInput:    sealed,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

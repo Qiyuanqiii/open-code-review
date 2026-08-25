@@ -35,8 +35,7 @@ For each reviewable file, get its diff using the VCS/mode metadata from Step 1:
 - Git commit: `git show <commit> -- <path>`
 - Git workspace: `git diff HEAD -- <path>` (or read directly for untracked files)
 - SVN workspace: `svn diff --git --internal-diff --show-copies-as-adds -- <path>` (or read directly for unversioned files)
-
-Range and commit modes are Git-only.
+- SVN range/commit: get the selected URL from `svn info --show-item url`, then use explicit URL pegs: `svn diff --git --internal-diff --show-copies-as-adds --old <url>@<resolved_base> --new <url>@<resolved_head>` and `svn cat --revision <resolved_head> -- <url>/<url-escaped-path>@<resolved_head>`
 
 Then review focusing on: correctness, security, performance, error handling, concurrency, maintainability. Only comment on changed code (+ lines).
 

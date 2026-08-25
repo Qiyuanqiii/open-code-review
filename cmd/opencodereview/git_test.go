@@ -165,16 +165,27 @@ func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	}
 }
 
-func TestValidateRepositoryReviewMode_SubversionWorkspaceOnly(t *testing.T) {
+func TestValidateRepositoryReviewMode_SubversionRevisions(t *testing.T) {
 	if err := validateRepositoryReviewMode(vcs.Subversion, reviewOptions{}); err != nil {
 		t.Fatalf("workspace review rejected: %v", err)
 	}
 	for _, opts := range []reviewOptions{
 		{commit: "42"},
 		{from: "41", to: "42"},
+		{commit: "HEAD"},
+		{from: "{2026-01-01}", to: "HEAD"},
+	} {
+		if err := validateRepositoryReviewMode(vcs.Subversion, opts); err != nil {
+			t.Errorf("options %+v were rejected for Subversion: %v", opts, err)
+		}
+	}
+	for _, opts := range []reviewOptions{
+		{commit: "-42"},
+		{commit: "BASE"},
+		{from: "41:42", to: "43"},
 	} {
 		if err := validateRepositoryReviewMode(vcs.Subversion, opts); err == nil {
-			t.Errorf("options %+v were accepted for Subversion", opts)
+			t.Errorf("unsafe options %+v were accepted for Subversion", opts)
 		}
 	}
 	if err := validateRepositoryReviewMode(vcs.Git, reviewOptions{commit: "HEAD"}); err != nil {

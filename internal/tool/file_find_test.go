@@ -92,6 +92,29 @@ func TestFileFind_SubversionWorkspace(t *testing.T) {
 	}
 }
 
+func TestFileFindSubversionRevision(t *testing.T) {
+	p := NewFileFind(&FileReader{
+		RepoDir:        t.TempDir(),
+		Mode:           ModeRange,
+		Ref:            "9",
+		SVNTarget:      "https://svn.example.com/project/trunk",
+		RepositoryKind: vcs.Subversion,
+		SVNOutput: func(_ context.Context, args ...string) ([]byte, error) {
+			if len(args) == 0 || args[0] != "list" {
+				t.Fatalf("unexpected SVN command: %v", args)
+			}
+			return []byte(`<lists><list><entry kind="file"><name>src/service.go</name></entry><entry kind="file"><name>README.md</name></entry></list></lists>`), nil
+		},
+	})
+	out, err := p.Execute(context.Background(), map[string]any{"query_name": "service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "src/service.go" {
+		t.Fatalf("Execute = %q", out)
+	}
+}
+
 func TestFileFindProvider_Tool(t *testing.T) {
 	p := NewFileFind(&FileReader{RepoDir: "/tmp"})
 	if p.Tool() != FileFind {

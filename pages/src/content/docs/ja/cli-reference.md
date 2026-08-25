@@ -101,9 +101,9 @@ ocr r      [flags]   (alias)
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
 | `--repo <path>` | — | カレントディレクトリ | Git リポジトリまたは Subversion ワーキングコピーのルート。 |
-| `--from <ref>` | — | — | Git diff の開始 ref（例: `main`）。 |
-| `--to <ref>` | — | — | Git diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
-| `--commit <sha>` | `-c` | — | 単一の Git commit をレビューします（その親との差分）。 |
+| `--from <ref>` | — | — | 開始 Git ref または SVN revision。Git は merge-base、SVN は解決済みの正確な revision を使用します。 |
+| `--to <ref>` | — | — | 宛先 Git ref または SVN revision。Git は `merge-base(from, to)..to` を計算し、SVN は正確な端点を比較します。 |
+| `--commit <ref>` | `-c` | — | 単一の Git commit または SVN revision を直前の端点と比較してレビューします。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
@@ -128,7 +128,6 @@ ocr r      [flags]   (alias)
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
-> Subversion はワークスペースモードのみをサポートします。
 
 ### 実行単位の LLM 選択
 
@@ -164,8 +163,7 @@ Git では、OCR は 2 つのコマンドからワークツリーの変更を組
 
 Subversion 1.7+ のワーキングコピーでは、OCR が SVN を自動検出し、`svn diff --git` の
 Git 互換出力と `svn status --xml` が報告する未管理ファイルを結合します。行単位で特定できる
-ソース変更がないため、プロパティのみの変更は無視されます。SVN では `--from`、`--to`、
-`--commit` はサポートされません。
+ソース変更がないため、プロパティのみの変更は無視されます。
 
 #### 範囲モード
 
@@ -175,6 +173,17 @@ ocr review --from main --to feature-branch
 
 OCR は `merge-base(main, feature-branch)..feature-branch` を計算するため、feature ブランチが*導入した* diff だけが表示されます。ブランチを切ったあとに `main` へ入った無関係な変更は含まれません。
 
+SVN では両方の値が revision であり、OCR は固定された正確な端点を比較します。
+
+```bash
+ocr review --from 120 --to 128
+```
+
+数値 revision、`HEAD`、`{DATE}` revision を使用できます。可動値または日付値は、
+diff の読み込み、ファイルツール、フィルタリング、manifest 作成、resume identity の
+確認より前にリポジトリ全体の数値へ解決されます。`BASE`、`COMMITTED`、`PREV` は
+混在 revision のワーキングコピーで曖昧になるため拒否されます。
+
 #### Commit モード
 
 ```bash
@@ -183,6 +192,10 @@ ocr review -c abc123
 ```
 
 `git show abc123` が生成する diff（すなわちその commit が導入した変更）をレビューします。
+
+SVN では `--commit 128` がワーキングコピー URL の正確な `127:128` の変更をレビューします。
+revision 0 には直前の端点がないため空の入力です。新規ファイルの内容とリポジトリ検索ツールは、
+現在のワークツリーではなく revision 128 を読み取ります。
 
 ### 中断したレビューの再開
 

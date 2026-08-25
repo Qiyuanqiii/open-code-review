@@ -11,7 +11,7 @@ func TestParseInfo(t *testing.T) {
   <entry kind="dir" path="." revision="42">
     <url>https://svn.example.com/repos/project/trunk</url>
     <relative-url>^/project/trunk</relative-url>
-    <repository><root>https://svn.example.com/repos</root></repository>
+    <repository><root>https://svn.example.com/repos</root><uuid>repo-uuid</uuid></repository>
     <wc-info><wcroot-abspath>C:/work/project</wcroot-abspath></wc-info>
   </entry>
 </info>`)
@@ -32,11 +32,29 @@ func TestParseInfo(t *testing.T) {
 	if got.RelativeURL != "^/project/trunk" {
 		t.Errorf("RelativeURL = %q", got.RelativeURL)
 	}
+	if got.RepositoryUUID != "repo-uuid" || got.Revision != "42" {
+		t.Errorf("repository UUID/revision = %q/%q", got.RepositoryUUID, got.Revision)
+	}
 }
 
 func TestParseInfoRejectsMissingRoot(t *testing.T) {
 	_, err := ParseInfo([]byte(`<info><entry><url>https://example.com/repo</url></entry></info>`))
 	if err == nil {
 		t.Fatal("expected missing working-copy root error")
+	}
+}
+
+func TestParseInfoRejectsInvalidOrEmptyXML(t *testing.T) {
+	for _, data := range []string{"<info>", "<info></info>"} {
+		if _, err := ParseInfo([]byte(data)); err == nil {
+			t.Errorf("ParseInfo(%q) unexpectedly succeeded", data)
+		}
+	}
+}
+
+func TestSafeCommandTextRedactsURLUserinfo(t *testing.T) {
+	got := safeCommandText("svn cat https://alice:secret@svn.example.com/repo/file@7")
+	if got != "svn cat https://<redacted>@svn.example.com/repo/file@7" {
+		t.Fatalf("safeCommandText = %q", got)
 	}
 }

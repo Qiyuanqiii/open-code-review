@@ -15,7 +15,7 @@ the source code with confidence.
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status<br/>produce []model.Diff</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>Git: diff / ls-files / show · SVN: diff / status / cat<br/>produce []model.Diff</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
@@ -43,13 +43,15 @@ that mirror the CLI flags:
 | Mode | Triggered by | What it returns |
 |---|---|---|
 | `Workspace` | no flags | staged + unstaged + untracked changes |
-| `Commit` | `--commit <sha>` / `-c <sha>` | the changes introduced by `<sha>` (via `git show <sha>`, equivalent to the `<sha>^..<sha>` diff) |
-| `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
+| `Commit` | `--commit <ref>` / `-c <ref>` | Git: the change introduced by `<ref>`; SVN: the exact `REV-1:REV` change |
+| `Range` | `--from <a> --to <b>` | Git: `merge-base(a, b)..b`; SVN: the exact numeric endpoints |
 
-`internal/diff/svn.go` provides workspace mode for Subversion 1.7+. OCR
+`internal/diff/svn.go` provides all three modes for Subversion 1.7+. OCR
 auto-detects the working-copy type, converts `svn diff --git` into paths local
-to the working copy, and merges in unversioned files from `svn status --xml`.
-Commit and range modes remain Git-only.
+to the working copy, and merges unversioned files from `svn status --xml` in
+workspace mode. Commit and range inputs are first resolved to numeric revisions;
+the provider then uses explicit old/new URL pegs and `svn cat` so destination
+content cannot drift with the working copy or repository HEAD.
 
 Each diff carries: old/new path, old/new hunks, insertion/deletion counts,
 binary flag, and rename detection. `DiffContextLines` is fixed at **3** —

@@ -108,14 +108,24 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
+For SVN range or commit mode, first obtain the selected URL with
+`svn info --show-item url`, then use the numeric `resolved_base` and
+`resolved_head` returned by preview:
+
+```bash
+svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>
+svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<resolved_head>
+```
+
+The explicit URL pegs keep both the diff and destination content independent
+of a dirty, stale, or mixed-revision working copy.
+
 **Workspace mode**:
 ```bash
 git diff HEAD -- <path>        # Git tracked files
 svn diff --git --internal-diff --show-copies-as-adds -- <path>  # SVN versioned files
 cat <path>                     # Git untracked / SVN unversioned files
 ```
-
-Range and commit modes are Git-only.
 
 ### Step 4: Review each file
 

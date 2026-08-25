@@ -74,8 +74,21 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
-	if p.FileReader.RepositoryKind == vcs.Subversion && p.FileReader.Ref == "" {
-		return p.listWalkFiles(ctx)
+	if p.FileReader.RepositoryKind == vcs.Subversion {
+		if p.FileReader.Ref == "" {
+			return p.listWalkFiles(ctx)
+		}
+		files, err := p.FileReader.listSVNFiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		filtered := files[:0]
+		for _, file := range files {
+			if !shouldSkipFile(file) {
+				filtered = append(filtered, file)
+			}
+		}
+		return filtered, nil
 	}
 
 	var output []byte

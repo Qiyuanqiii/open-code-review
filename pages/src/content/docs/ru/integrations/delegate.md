@@ -106,14 +106,24 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
+Для режима диапазона или коммита SVN сначала получите выбранный URL командой
+`svn info --show-item url`, затем используйте числовые `resolved_base` и
+`resolved_head`, возвращённые preview:
+
+```bash
+svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>
+svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<resolved_head>
+```
+
+Явные peg-ревизии URL отделяют diff и содержимое назначения от грязной,
+устаревшей или mixed-revision рабочей копии.
+
 **Режим рабочей области**:
 ```bash
 git diff HEAD -- <path>        # файлы под управлением Git
 svn diff --git --internal-diff --show-copies-as-adds -- <path>  # файлы под управлением SVN
 cat <path>                     # неотслеживаемые Git / неверсионируемые SVN файлы
 ```
-
-Режимы диапазона и коммита доступны только для Git.
 
 ### Шаг 4. Проверить каждый файл
 

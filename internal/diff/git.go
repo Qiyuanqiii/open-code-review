@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"

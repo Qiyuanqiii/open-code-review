@@ -116,6 +116,108 @@ func TestSVNRevisionProviderIntegration(t *testing.T) {
 	}
 }
 
+func TestSVNRemoteBranchProviderIntegrationWithoutWorkingCopy(t *testing.T) {
+	svnIntegrationTools(t)
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	trunkWC := filepath.Join(root, "trunk-wc")
+	branchWC := filepath.Join(root, "branch-wc")
+	configDir := filepath.Join(root, "automation-config")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runSVNFixtureCommand(t, root, "svnadmin", "create", repository)
+	repositoryURL := localRepositoryURL(repository)
+	runSVNFixtureCommand(t, root, "svn", "mkdir", repositoryURL+"/trunk", repositoryURL+"/branches", "-m", "create layout")
+	runSVNFixtureCommand(t, root, "svn", "checkout", repositoryURL+"/trunk", trunkWC)
+	writeFixtureFile(t, trunkWC, "shared.txt", []byte("base\n"))
+	runSVNFixtureCommand(t, trunkWC, "svn", "add", "shared.txt")
+	runSVNFixtureCommand(t, trunkWC, "svn", "commit", "-m", "add baseline")
+	runSVNFixtureCommand(t, root, "svn", "copy", repositoryURL+"/trunk@2", repositoryURL+"/branches/feature", "-m", "create feature branch")
+
+	writeFixtureFile(t, trunkWC, "shared.txt", []byte("trunk value\n"))
+	writeFixtureFile(t, trunkWC, "trunk-only.txt", []byte("trunk only\n"))
+	runSVNFixtureCommand(t, trunkWC, "svn", "add", "trunk-only.txt")
+	runSVNFixtureCommand(t, trunkWC, "svn", "commit", "-m", "advance trunk")
+
+	runSVNFixtureCommand(t, root, "svn", "checkout", repositoryURL+"/branches/feature", branchWC)
+	writeFixtureFile(t, branchWC, "shared.txt", []byte("branch value\n"))
+	writeFixtureFile(t, branchWC, "branch-only.txt", []byte("branch only\n"))
+	runSVNFixtureCommand(t, branchWC, "svn", "add", "branch-only.txt")
+	runSVNFixtureCommand(t, branchWC, "svn", "commit", "-m", "advance branch")
+
+	provider := NewSVNTargetRangeProvider(
+		configDir,
+		"4", "5",
+		repositoryURL+"/trunk@4",
+		repositoryURL+"/branches/feature@5",
+	)
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := diffsByEffectivePath(diffs)
+	if got := byPath["shared.txt"].NewFileContent; got != "branch value\n" {
+		t.Fatalf("destination content = %q, want branch content", got)
+	}
+	if d, ok := byPath["trunk-only.txt"]; !ok || !d.IsDeleted {
+		t.Fatalf("trunk-only diff = %+v, present=%v", d, ok)
+	}
+	if d, ok := byPath["branch-only.txt"]; !ok || !d.IsNew || d.NewFileContent != "branch only\n" {
+		t.Fatalf("branch-only diff = %+v, present=%v", d, ok)
+	}
+	resolved := provider.ResolveInput(context.Background())
+	if resolved.ResolvedBase != "4" || resolved.ResolvedHead != "5" || resolved.SourcePegRevision != "4" || resolved.TargetPegRevision != "5" {
+		t.Fatalf("resolution = %+v", resolved)
+	}
+	if resolved.RepositorySourceTarget != repositoryURL+"/trunk" || resolved.RepositoryTarget != repositoryURL+"/branches/feature" {
+		t.Fatalf("resolved targets = %+v", resolved)
+	}
+}
+
+func TestSVNRemoteTargetPegTracksMovedPathIntegration(t *testing.T) {
+	svnIntegrationTools(t)
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	trunkWC := filepath.Join(root, "trunk-wc")
+	mainWC := filepath.Join(root, "main-wc")
+	configDir := filepath.Join(root, "automation-config")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runSVNFixtureCommand(t, root, "svnadmin", "create", repository)
+	repositoryURL := localRepositoryURL(repository)
+	runSVNFixtureCommand(t, root, "svn", "mkdir", repositoryURL+"/trunk", "-m", "create trunk")
+	runSVNFixtureCommand(t, root, "svn", "checkout", repositoryURL+"/trunk", trunkWC)
+	writeFixtureFile(t, trunkWC, "value.txt", []byte("before move\n"))
+	runSVNFixtureCommand(t, trunkWC, "svn", "add", "value.txt")
+	runSVNFixtureCommand(t, trunkWC, "svn", "commit", "-m", "add baseline")
+	runSVNFixtureCommand(t, root, "svn", "move", repositoryURL+"/trunk", repositoryURL+"/main", "-m", "rename trunk")
+	runSVNFixtureCommand(t, root, "svn", "checkout", repositoryURL+"/main", mainWC)
+	writeFixtureFile(t, mainWC, "value.txt", []byte("after move\n"))
+	runSVNFixtureCommand(t, mainWC, "svn", "commit", "-m", "change renamed path")
+
+	provider := NewSVNTargetRangeProvider(
+		configDir,
+		"2", "4",
+		repositoryURL+"/main@4",
+		repositoryURL+"/main@4",
+	)
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := diffsByEffectivePath(diffs)["value.txt"].NewFileContent; got != "after move\n" {
+		t.Fatalf("destination content = %q; diffs = %+v", got, diffs)
+	}
+	resolved := provider.ResolveInput(context.Background())
+	if resolved.RepositorySourceTarget != repositoryURL+"/trunk" || resolved.RepositoryTarget != repositoryURL+"/main" || resolved.SourcePegRevision != "4" {
+		t.Fatalf("source target lost its peg route across the move: %+v", resolved)
+	}
+}
+
 func svnIntegrationTools(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{"svn", "svnadmin"} {

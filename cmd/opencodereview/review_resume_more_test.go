@@ -339,3 +339,13 @@ func TestFileReadRef(t *testing.T) {
 		})
 	}
 }
+
+func TestSVNFileReadPegUsesResolvedHistoricalEndpoint(t *testing.T) {
+	sealed := &diff.InputResolution{ResolvedHead: "20", TargetPegRevision: "25"}
+	if got := svnFileReadPeg(sealed); got != "20" {
+		t.Fatalf("svnFileReadPeg = %q, want operative revision 20", got)
+	}
+	if got := svnFileReadPeg(nil); got != "" {
+		t.Fatalf("svnFileReadPeg(nil) = %q", got)
+	}
+}

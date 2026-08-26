@@ -66,10 +66,13 @@ type FileReader struct {
 	// Ref is the frozen Git ref or numeric SVN revision used for immutable reads.
 	// Empty for ModeWorkspace.
 	Ref string
-	// SVNTarget is the selected working-copy URL. It is runtime-only and may
-	// contain repository routing details, so it must never be persisted.
+	// SVNTarget is the selected or historically resolved destination URL. It is
+	// runtime-only and may contain routing details, so it must never be persisted.
 	SVNTarget string
-	Runner    *gitcmd.Runner
+	// SVNPegRevision is the frozen peg used to locate SVNTarget. It can differ
+	// from Ref when a path moved between the operative endpoints.
+	SVNPegRevision string
+	Runner         *gitcmd.Runner
 	// SVNOutput optionally overrides SVN command execution for tests.
 	SVNOutput func(context.Context, ...string) ([]byte, error)
 }
@@ -96,13 +99,17 @@ func (fr *FileReader) readFromSVN(parentCtx context.Context, path string) (strin
 	if fr.Ref == "" || fr.SVNTarget == "" {
 		return "", fmt.Errorf("immutable Subversion file read is missing a target or revision")
 	}
-	target, err := svncmd.ChildTarget(fr.SVNTarget, path, fr.Ref)
+	peg := fr.SVNPegRevision
+	if peg == "" {
+		peg = fr.Ref
+	}
+	target, err := svncmd.ChildTarget(fr.SVNTarget, path, peg)
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
-	output, err := fr.runSVNOutput(ctx, "cat", "--revision", fr.Ref, "--", target)
+	output, err := fr.runSVNOutput(ctx, "cat", "--non-interactive", "--revision", fr.Ref, "--", target)
 	if err != nil {
 		return "", fmt.Errorf("svn cat %s at revision %s: %w", path, fr.Ref, err)
 	}
@@ -120,7 +127,11 @@ func (fr *FileReader) listSVNFiles(ctx context.Context) ([]string, error) {
 	if fr.Ref == "" || fr.SVNTarget == "" {
 		return nil, fmt.Errorf("immutable Subversion file listing is missing a target or revision")
 	}
-	out, err := fr.runSVNOutput(ctx, "list", "--xml", "--recursive", "--revision", fr.Ref, "--", svncmd.PegTarget(fr.SVNTarget, fr.Ref))
+	peg := fr.SVNPegRevision
+	if peg == "" {
+		peg = fr.Ref
+	}
+	out, err := fr.runSVNOutput(ctx, "list", "--xml", "--recursive", "--non-interactive", "--revision", fr.Ref, "--", svncmd.PegTarget(fr.SVNTarget, peg))
 	if err != nil {
 		return nil, err
 	}

@@ -496,6 +496,33 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## Subversion repository hooks and merge automation
+
+Repository-side SVN automation uses exact old/new targets rather than Git
+merge-base semantics. The repository includes a reusable wrapper at
+`examples/svn/remote-branch-review.sh`:
+
+```bash
+examples/svn/remote-branch-review.sh \
+  /srv/ocr-config \
+  120 'https://svn.example.com/repos/app/trunk@120' \
+  128 'https://svn.example.com/repos/app/branches/feature@128' \
+  > /var/tmp/ocr-svn-review-128.json
+```
+
+The five arguments are the OCR configuration directory, source operative
+revision, source target, destination operative revision, and destination
+target. A `post-commit` hook or merge service should derive these values from
+its event payload and enqueue the wrapper outside the repository lock. Absolute
+URLs allow `/srv/ocr-config` to be a plain directory; no checkout is required.
+
+The wrapper emits JSON and never accepts credentials as arguments. Provision an
+SVN auth cache and trusted server certificate for the service account before
+the job starts. Every SVN command is non-interactive; missing authentication or
+certificate trust fails immediately with remediation guidance. Target URLs may
+not contain userinfo, query strings, or fragments, and are not included in OCR
+manifests, session logs, delegate output, or telemetry.
+
 ## See Also
 
 - [CLI Reference](../cli-reference/#json) — the JSON output shape both pipelines

@@ -12,6 +12,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // initIdentityRepo builds a workspace with two reviewable files, one the
@@ -195,5 +196,21 @@ func TestResolveInputBeforeDiffRejectsInvalidRefs(t *testing.T) {
 				t.Fatal("unresolvable ref must fail before loading the diff")
 			}
 		})
+	}
+}
+
+func TestSVNTargetsWithoutRangeNeverFallBackToWorkspace(t *testing.T) {
+	args := Args{
+		RepoDir:        t.TempDir(),
+		RepositoryKind: vcs.Subversion,
+		SVNFromTarget:  "https://svn.example.com/repo/trunk@7",
+		SVNToTarget:    "https://svn.example.com/repo/branches/feature@9",
+	}
+	if _, err := resolveInputBeforeDiff(context.Background(), args); err == nil || !strings.Contains(err.Error(), "explicit Subversion targets require") {
+		t.Fatalf("pre-flight error = %v", err)
+	}
+	a := &Agent{args: args}
+	if err := a.loadDiffs(context.Background()); err == nil || !strings.Contains(err.Error(), "explicit Subversion targets require") {
+		t.Fatalf("loadDiffs error = %v", err)
 	}
 }

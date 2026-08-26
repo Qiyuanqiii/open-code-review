@@ -34,11 +34,14 @@ type SVNProvider struct {
 	from            string
 	to              string
 	commit          string
+	fromTarget      string
+	toTarget        string
 	input           InputResolution
 	inputResolved   bool
 	run             func(context.Context, ...string) (string, error)
 	info            func(context.Context) (svncmd.WorkingCopyInfo, error)
 	resolveRevision func(context.Context, string, string) (string, error)
+	resolveTargets  func(context.Context, string, string, string, string) (svncmd.ResolvedTargetPair, error)
 }
 
 // NewSVNWorkspaceProvider creates a provider for local Subversion changes.
@@ -49,6 +52,15 @@ func NewSVNWorkspaceProvider(repoDir string) *SVNProvider {
 // NewSVNRangeProvider creates a provider comparing two SVN revisions.
 func NewSVNRangeProvider(repoDir, from, to string) *SVNProvider {
 	return newSVNProvider(repoDir, svnModeRange, from, to, "")
+}
+
+// NewSVNTargetRangeProvider creates a provider comparing two explicit remote
+// SVN directory targets at exact operative and peg revisions.
+func NewSVNTargetRangeProvider(repoDir, from, to, fromTarget, toTarget string) *SVNProvider {
+	p := newSVNProvider(repoDir, svnModeRange, from, to, "")
+	p.fromTarget = fromTarget
+	p.toTarget = toTarget
+	return p
 }
 
 // NewSVNCommitProvider creates a provider for the change introduced by one SVN
@@ -66,6 +78,9 @@ func newSVNProvider(repoDir string, mode svnReviewMode, from, to, commit string)
 	p.resolveRevision = func(ctx context.Context, repositoryRoot, raw string) (string, error) {
 		return svncmd.ResolveRevision(ctx, repoDir, repositoryRoot, raw)
 	}
+	p.resolveTargets = func(ctx context.Context, from, to, fromTarget, toTarget string) (svncmd.ResolvedTargetPair, error) {
+		return svncmd.ResolveTargetPair(ctx, repoDir, from, to, fromTarget, toTarget)
+	}
 	return p
 }
 
@@ -73,8 +88,19 @@ func newSVNProvider(repoDir string, mode svnReviewMode, from, to, commit string)
 // repository endpoints and captures the selected repository URL for immutable
 // file reads.
 func ResolveSVNInput(ctx context.Context, repoDir, from, to, commit string) (InputResolution, error) {
+	return ResolveSVNInputWithTargets(ctx, repoDir, from, to, commit, "", "")
+}
+
+// ResolveSVNInputWithTargets freezes either a working-copy-selected immutable
+// SVN input or an explicit source/destination target pair.
+func ResolveSVNInputWithTargets(ctx context.Context, repoDir, from, to, commit, fromTarget, toTarget string) (InputResolution, error) {
 	var provider *SVNProvider
 	switch {
+	case fromTarget != "" || toTarget != "":
+		if commit != "" || from == "" || to == "" || fromTarget == "" || toTarget == "" {
+			return InputResolution{}, fmt.Errorf("explicit Subversion targets require --from, --to, --svn-from-target, and --svn-to-target")
+		}
+		provider = NewSVNTargetRangeProvider(repoDir, from, to, fromTarget, toTarget)
 	case commit != "":
 		provider = NewSVNCommitProvider(repoDir, commit)
 	case from != "" && to != "":
@@ -156,9 +182,18 @@ func (p *SVNProvider) getImmutableDiff(ctx context.Context) ([]model.Diff, error
 		return []model.Diff{}, nil
 	}
 
-	oldTarget := svncmd.PegTarget(p.input.RepositoryTarget, p.input.ResolvedBase)
+	sourceTarget := p.input.RepositorySourceTarget
+	if sourceTarget == "" {
+		sourceTarget = p.input.RepositoryTarget
+	}
+	oldTarget := svncmd.PegTarget(sourceTarget, p.input.ResolvedBase)
 	newTarget := svncmd.PegTarget(p.input.RepositoryTarget, p.input.ResolvedHead)
-	tracked, err := p.run(ctx, "diff", "--git", "--internal-diff", "--show-copies-as-adds", "--depth", "infinity", "--old", oldTarget, "--new", newTarget)
+	diffArgs := []string{"diff", "--non-interactive", "--git", "--internal-diff", "--show-copies-as-adds", "--depth", "infinity"}
+	if p.input.RepositorySourceTarget != "" {
+		diffArgs = append(diffArgs, "--notice-ancestry")
+	}
+	diffArgs = append(diffArgs, "--old", oldTarget, "--new", newTarget)
+	tracked, err := p.run(ctx, diffArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("svn revision diff failed (Subversion 1.7 or newer is required): %w", err)
 	}
@@ -169,7 +204,7 @@ func (p *SVNProvider) getImmutableDiff(ctx context.Context) ([]model.Diff, error
 		if err != nil {
 			return nil, err
 		}
-		out, err := p.run(ctx, "cat", "--revision", p.input.ResolvedHead, "--", target)
+		out, err := p.run(ctx, "cat", "--non-interactive", "--revision", p.input.ResolvedHead, "--", target)
 		return []byte(out), err
 	}
 	diffs, err := parseDiffTextWithReader(ctx, normalized, readContent)
@@ -198,6 +233,26 @@ func (p *SVNProvider) ensureInputResolved(ctx context.Context) error {
 		}
 	default:
 		return fmt.Errorf("unknown Subversion review mode")
+	}
+	if p.mode == svnModeRange && (p.fromTarget != "" || p.toTarget != "") {
+		if p.fromTarget == "" || p.toTarget == "" {
+			return fmt.Errorf("explicit Subversion targets must be supplied as a pair")
+		}
+		pair, err := p.resolveTargets(ctx, p.from, p.to, p.fromTarget, p.toTarget)
+		if err != nil {
+			return err
+		}
+		p.input.ResolvedBase = pair.Source.OperativeRevision
+		p.input.ResolvedHead = pair.Destination.OperativeRevision
+		p.input.ExactRange = pair.Source.OperativeRevision + ":" + pair.Destination.OperativeRevision
+		p.input.RepositorySourceTarget = pair.Source.URL
+		p.input.RepositoryTarget = pair.Destination.URL
+		p.input.RepositoryRoot = pair.Source.RepositoryRoot
+		p.input.RepositoryUUID = pair.Source.RepositoryUUID
+		p.input.SourcePegRevision = pair.Source.PegRevision
+		p.input.TargetPegRevision = pair.Destination.PegRevision
+		p.inputResolved = true
+		return nil
 	}
 	info, err := p.info(ctx)
 	if err != nil {
@@ -238,6 +293,8 @@ func (p *SVNProvider) ensureInputResolved(ctx context.Context) error {
 		p.input.ResolvedBase = base
 		p.input.ResolvedHead = head
 		p.input.ExactRange = base + ":" + head
+		p.input.SourcePegRevision = base
+		p.input.TargetPegRevision = head
 	case svnModeCommit:
 		head, err := resolve(p.commit)
 		if err != nil {
@@ -249,6 +306,8 @@ func (p *SVNProvider) ensureInputResolved(ctx context.Context) error {
 		}
 		p.input.ResolvedBase = base
 		p.input.ResolvedHead = head
+		p.input.SourcePegRevision = base
+		p.input.TargetPegRevision = head
 		if base != "" {
 			p.input.ExactRange = base + ":" + head
 		}
@@ -268,24 +327,27 @@ func (p *SVNProvider) ResolveInput(ctx context.Context) InputResolution {
 // repository UUID survives URL moves and also identifies local file repositories;
 // older servers that omit it fall back to a canonical credential-free URL.
 func (p *SVNProvider) RemoteIdentity(ctx context.Context) string {
+	identity := ""
 	if uuid := strings.TrimSpace(p.input.RepositoryUUID); uuid != "" {
-		return "svn:" + strings.ToLower(uuid)
+		identity = "svn:" + strings.ToLower(uuid)
+	} else if p.input.RepositoryRoot != "" {
+		identity = canonicalRemote(p.input.RepositoryRoot)
+	} else {
+		info, err := p.info(ctx)
+		if err != nil {
+			return ""
+		}
+		if uuid := strings.TrimSpace(info.RepositoryUUID); uuid != "" {
+			identity = "svn:" + strings.ToLower(uuid)
+		} else {
+			remote := info.RepositoryRoot
+			if remote == "" {
+				remote = info.URL
+			}
+			identity = canonicalRemote(remote)
+		}
 	}
-	if p.input.RepositoryRoot != "" {
-		return canonicalRemote(p.input.RepositoryRoot)
-	}
-	info, err := p.info(ctx)
-	if err != nil {
-		return ""
-	}
-	if uuid := strings.TrimSpace(info.RepositoryUUID); uuid != "" {
-		return "svn:" + strings.ToLower(uuid)
-	}
-	identity := info.RepositoryRoot
-	if identity == "" {
-		identity = info.URL
-	}
-	return canonicalRemote(identity)
+	return identity
 }
 
 func (p *SVNProvider) runSVN(ctx context.Context, args ...string) (string, error) {

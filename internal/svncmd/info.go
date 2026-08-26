@@ -16,7 +16,12 @@ import (
 	"unicode/utf8"
 )
 
-var svnURLUserinfoRE = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
+var (
+	svnURLUserinfoRE = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
+	svnURLQueryRE    = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^\s?#]+)\?[^\s]*`)
+	svnAuthUserRE    = regexp.MustCompile(`(?i)(authentication failed for )["'][^"']+["']`)
+	svnUsernameRE    = regexp.MustCompile(`(?im)(username\s*[:=]\s*)\S+`)
+)
 
 // WorkingCopyInfo is the stable subset of `svn info --xml` needed by the
 // review pipeline.
@@ -161,7 +166,35 @@ func CombinedOutput(ctx context.Context, dir string, args ...string) ([]byte, er
 }
 
 func safeCommandText(text string) string {
-	return svnURLUserinfoRE.ReplaceAllString(text, `${1}<redacted>@`)
+	text = svnURLUserinfoRE.ReplaceAllString(text, `${1}<redacted>@`)
+	text = svnURLQueryRE.ReplaceAllString(text, `${1}?<redacted>`)
+	text = svnAuthUserRE.ReplaceAllString(text, `${1}<redacted>`)
+	return svnUsernameRE.ReplaceAllString(text, `${1}<redacted>`)
+}
+
+func safeCommandArgs(args []string) string {
+	redacted := make([]string, len(args))
+	sensitiveValue := false
+	for i, arg := range args {
+		lower := strings.ToLower(arg)
+		if sensitiveValue {
+			redacted[i] = "<redacted>"
+			sensitiveValue = false
+			continue
+		}
+		switch lower {
+		case "--password", "--username", "--config-option":
+			redacted[i] = arg
+			sensitiveValue = true
+			continue
+		}
+		if strings.HasPrefix(lower, "--password=") || strings.HasPrefix(lower, "--username=") || strings.HasPrefix(lower, "--config-option=") {
+			redacted[i] = strings.SplitN(arg, "=", 2)[0] + "=<redacted>"
+			continue
+		}
+		redacted[i] = safeCommandText(arg)
+	}
+	return strings.Join(redacted, " ")
 }
 
 const diagnosticLimit = 2000
@@ -171,6 +204,7 @@ func commandErrorWithDiagnostic(ctx context.Context, args []string, err error, d
 		return ctx.Err()
 	}
 	diagnostic = strings.TrimSpace(safeCommandText(diagnostic))
+	guidance := svnFailureGuidance(diagnostic)
 	if len(diagnostic) > diagnosticLimit {
 		diagnostic = diagnostic[len(diagnostic)-diagnosticLimit:]
 		for len(diagnostic) > 0 && !utf8.RuneStart(diagnostic[0]) {
@@ -179,7 +213,19 @@ func commandErrorWithDiagnostic(ctx context.Context, args []string, err error, d
 		diagnostic = "..." + diagnostic
 	}
 	if diagnostic != "" {
-		return fmt.Errorf("svn %s: %w: %s", safeCommandText(strings.Join(args, " ")), err, diagnostic)
+		return fmt.Errorf("svn %s: %w: %s%s", safeCommandArgs(args), err, diagnostic, guidance)
 	}
-	return fmt.Errorf("svn %s: %w", safeCommandText(strings.Join(args, " ")), err)
+	return fmt.Errorf("svn %s: %w", safeCommandArgs(args), err)
+}
+
+func svnFailureGuidance(diagnostic string) string {
+	lower := strings.ToLower(diagnostic)
+	switch {
+	case strings.Contains(lower, "certificate") || strings.Contains(lower, "e230001"):
+		return "; non-interactive certificate validation failed; pre-trust the server certificate in the SVN configuration available to this process"
+	case strings.Contains(lower, "authentication") || strings.Contains(lower, "authorization failed") || strings.Contains(lower, "e170001") || strings.Contains(lower, "e215004"):
+		return "; non-interactive authentication failed; preconfigure credentials in the SVN authentication cache available to this process"
+	default:
+		return ""
+	}
 }

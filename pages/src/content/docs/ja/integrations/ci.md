@@ -401,6 +401,30 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## Subversion リポジトリ hook と merge 自動化
+
+サーバー側の SVN 自動化では Git merge-base ではなく、厳密な old/new 対象を使います。
+リポジトリには再利用可能な `examples/svn/remote-branch-review.sh` があります。
+
+```bash
+examples/svn/remote-branch-review.sh \
+  /srv/ocr-config \
+  120 'https://svn.example.com/repos/app/trunk@120' \
+  128 'https://svn.example.com/repos/app/branches/feature@128' \
+  > /var/tmp/ocr-svn-review-128.json
+```
+
+5 つの引数は OCR 設定ディレクトリ、ソース operative revision、ソース対象、宛先 operative
+revision、宛先対象です。`post-commit` hook または merge サービスはイベント payload から
+これらを取得し、リポジトリロックの外でスクリプトをキュー実行してください。絶対 URL を
+使う場合、`/srv/ocr-config` は通常のディレクトリでよく、checkout は不要です。
+
+スクリプトは JSON を出力し、認証情報を引数として受け取りません。ジョブ開始前にサービス
+アカウント用の SVN 認証キャッシュと信頼済みサーバー証明書を用意してください。全 SVN
+コマンドは非対話型であり、認証または証明書の信頼が不足すると修正案付きで直ちに失敗します。
+対象 URL に userinfo、query string、fragment は指定できず、OCR の manifest、session log、
+delegate 出力、telemetry にも含まれません。
+
 ## 関連項目
 
 - [CLI リファレンス](../cli-reference/#json)——2 つのパイプラインが消費する JSON の構造。ゼロから CI スクリプトを書くときに役立ちます。

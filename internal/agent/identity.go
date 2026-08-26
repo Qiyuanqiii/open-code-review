@@ -71,10 +71,10 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 // semantics; SVN ranges retain their exact numeric endpoints.
 func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	if args.RepositoryKind == vcs.Subversion {
-		if args.Commit == "" && args.From == "" && args.To == "" {
+		if args.Commit == "" && args.From == "" && args.To == "" && args.SVNFromTarget == "" && args.SVNToTarget == "" {
 			return nil, nil
 		}
-		resolved, err := diff.ResolveSVNInput(ctx, args.RepoDir, args.From, args.To, args.Commit)
+		resolved, err := diff.ResolveSVNInputWithTargets(ctx, args.RepoDir, args.From, args.To, args.Commit, args.SVNFromTarget, args.SVNToTarget)
 		if err != nil {
 			return nil, err
 		}

@@ -106,10 +106,12 @@ Git or Subversion working-copy changes.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--repo <path>` | — | current dir | Git or Subversion working-copy root. |
+| `--repo <path>` | — | current dir | Git or Subversion working-copy root. For an explicit remote SVN comparison, this may instead be a plain directory containing OCR rules/configuration. |
 | `--from <ref>` | — | — | Source Git ref or SVN revision. Git uses merge-base semantics; SVN uses the exact resolved revision. |
 | `--to <ref>` | — | — | Destination Git ref or SVN revision. Git computes `merge-base(from, to)..to`; SVN compares the exact endpoints. |
 | `--commit <ref>` | `-c` | — | Single Git commit or SVN revision to review against its predecessor. |
+| `--svn-from-target <url[@peg]>` | — | — | Source SVN directory target for a remote range comparison. Must be paired with `--svn-to-target` and `--from`/`--to`. |
+| `--svn-to-target <url[@peg]>` | — | — | Destination SVN directory target. Destination file tools read this target at the frozen operative and peg revisions. |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
@@ -221,6 +223,34 @@ date-based values are resolved to repository-wide numbers before diff loading,
 file tools, filtering, manifest creation, or resume identity checks. The
 working-copy-relative keywords `BASE`, `COMMITTED`, and `PREV` are rejected
 because mixed-revision working copies make them ambiguous.
+
+To compare two repository paths—such as trunk and a branch after a server-side
+merge—provide both targets explicitly:
+
+```bash
+ocr review \
+  --repo ./ocr-config \
+  --from 120 \
+  --to 128 \
+  --svn-from-target 'https://svn.example.com/repos/app/trunk@120' \
+  --svn-to-target 'https://svn.example.com/repos/app/branches/feature@128'
+```
+
+This is an exact SVN comparison: operative revisions are `120:128`, while the
+two `@PEG` values identify the historical source and destination paths. OCR
+does **not** invent a Git merge base. Both targets must be directories in the
+same SVN repository. A working copy is optional when absolute URLs are used;
+`^/` targets require `--repo` to point to an SVN working copy.
+
+All operative and peg spellings, including `HEAD` and `{DATE}`, are resolved
+once to numeric revisions before `svn diff`, `svn cat`, filtering, or resume
+identity is computed. Paths from the diff are normalized relative to the two
+selected directory targets, and destination content is always read from
+`--svn-to-target`, never from disk. Commands run with `--non-interactive` so a
+hook cannot hang on a prompt. Preconfigure the SVN authentication and server
+certificate cache available to the hook account. URLs containing userinfo,
+query strings, or fragments are rejected, and target URLs are never written to
+manifests, session logs, delegate JSON, or telemetry.
 
 #### Commit mode
 
@@ -500,7 +530,7 @@ Rule introspection. There is exactly one subcommand:
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git or Subversion working-copy root (default: current dir)
+  --repo <path>    Git/SVN working-copy root, or config directory for scan/remote SVN (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

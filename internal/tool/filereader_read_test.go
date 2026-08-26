@@ -166,9 +166,32 @@ func TestFileReaderReadSubversionRevision(t *testing.T) {
 	}
 	for _, call := range calls {
 		joined := strings.Join(call, " ")
-		if !strings.Contains(joined, "cat --revision 17") || !strings.Contains(joined, "a%20b.go@17") {
+		if !strings.Contains(joined, "cat --non-interactive --revision 17") || !strings.Contains(joined, "a%20b.go@17") {
 			t.Errorf("svn call is not pinned: %s", joined)
 		}
+	}
+}
+
+func TestFileReaderReadSubversionUsesDistinctPegRevision(t *testing.T) {
+	var call []string
+	fr := &FileReader{
+		RepoDir:        t.TempDir(),
+		RepositoryKind: vcs.Subversion,
+		Mode:           ModeRange,
+		Ref:            "21",
+		SVNTarget:      "https://svn.example.com/project/branches/feature",
+		SVNPegRevision: "25",
+		SVNOutput: func(_ context.Context, args ...string) ([]byte, error) {
+			call = append([]string(nil), args...)
+			return []byte("sealed\n"), nil
+		},
+	}
+	if _, err := fr.Read(context.Background(), "src/value.go"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(call, " ")
+	if !strings.Contains(joined, "--revision 21") || !strings.Contains(joined, "value.go@25") {
+		t.Fatalf("SVN read did not keep operative and peg revisions distinct: %s", joined)
 	}
 }
 

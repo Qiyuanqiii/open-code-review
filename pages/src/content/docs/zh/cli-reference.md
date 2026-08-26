@@ -101,10 +101,12 @@ ocr r      [flags]   (alias)
 
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
-| `--repo <path>` | — | 当前目录 | Git 仓库或 Subversion 工作副本根。 |
+| `--repo <path>` | — | 当前目录 | Git 仓库或 Subversion 工作副本根。显式远端 SVN 比较时，也可以是存放 OCR 规则/配置的普通目录。 |
 | `--from <ref>` | — | — | 起始 Git ref 或 SVN revision。Git 使用 merge-base；SVN 使用解析后的精确 revision。 |
 | `--to <ref>` | — | — | 目标 Git ref 或 SVN revision。Git 计算 `merge-base(from, to)..to`；SVN 比较精确端点。 |
 | `--commit <ref>` | `-c` | — | 评审单个 Git commit 或 SVN revision（相对其前一端点）。 |
+| `--svn-from-target <url[@peg]>` | — | — | 远端范围比较的源 SVN 目录目标。必须与 `--svn-to-target` 和 `--from`/`--to` 一起使用。 |
+| `--svn-to-target <url[@peg]>` | — | — | 目标 SVN 目录。文件工具从冻结后的 operative/peg revision 读取该目标。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
@@ -203,6 +205,28 @@ ocr review --from 120 --to 128
 调用文件工具、执行过滤、生成 manifest 或校验 resume 标识前解析为仓库级数字。
 `BASE`、`COMMITTED` 和 `PREV` 依赖工作副本状态，在混合 revision 工作副本中有歧义，
 因此会被拒绝。
+
+要比较两个仓库路径（例如服务端合并前后的 trunk 与分支），请显式提供两个目标：
+
+```bash
+ocr review \
+  --repo ./ocr-config \
+  --from 120 \
+  --to 128 \
+  --svn-from-target 'https://svn.example.com/repos/app/trunk@120' \
+  --svn-to-target 'https://svn.example.com/repos/app/branches/feature@128'
+```
+
+这是精确的 SVN 比较：operative revision 是 `120:128`，两个 `@PEG` 用来定位历史源路径和
+目标路径。OCR **不会**虚构 Git merge base。两个目标必须是同一 SVN 仓库中的目录。使用
+绝对 URL 时不需要工作副本；`^/` 目标则要求 `--repo` 指向 SVN 工作副本。
+
+包括 `HEAD` 和 `{DATE}` 在内的所有 operative/peg 写法都会在 `svn diff`、`svn cat`、
+过滤或 resume identity 计算前一次性解析成数字。diff 路径相对两个选定目录规范化，目标
+内容始终从 `--svn-to-target` 读取，而不是从磁盘读取。命令使用 `--non-interactive`，避免
+hook 因提示而挂起；请预先为 hook 账号配置 SVN 认证缓存并信任服务器证书。含 userinfo、
+query string 或 fragment 的 URL 会被拒绝，目标 URL 也不会写入 manifest、session 日志、
+delegate JSON 或 telemetry。
 
 #### Commit 模式
 
@@ -467,7 +491,7 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git or Subversion working-copy root (default: current dir)
+  --repo <path>    Git/SVN working-copy root, or config directory for scan/remote SVN (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

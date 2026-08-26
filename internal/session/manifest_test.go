@@ -495,12 +495,15 @@ func TestIdentityAndExecutionFields(t *testing.T) {
 	b := newBuilderWith("a")
 	b.SetParentRunID("run-parent")
 	b.SetRepository(ManifestRepository{IdentitySHA256: "sha256:repo"})
-	b.SetInput(ManifestInput{Mode: InputModeRange, ResolvedBase: "8f6c", ResolvedHead: "c2d1", ExactRange: "8f6c..c2d1"})
+	b.SetInput(ManifestInput{Mode: InputModeRange, ResolvedBase: "8f6c", ResolvedHead: "c2d1", ExactRange: "8f6c..c2d1", ResolvedBasePeg: "8", ResolvedHeadPeg: "9"})
 	b.SetExecution(ManifestExecution{Provider: "anthropic", Model: "claude", ConfiguredConcurrency: 16})
 	b.MarkCompleted("a")
 	m := mustFinalize(t, b)
 	if m.ParentRunID != "run-parent" || m.Repository.IdentitySHA256 != "sha256:repo" {
 		t.Fatalf("identity not set: %+v", m)
+	}
+	if m.Input.ResolvedBasePeg != "8" || m.Input.ResolvedHeadPeg != "9" {
+		t.Fatalf("resolved pegs not set: %+v", m.Input)
 	}
 	if m.Input.Mode != InputModeRange || m.Input.ExactRange != "8f6c..c2d1" || m.Execution.ConfiguredConcurrency != 16 {
 		t.Fatalf("input/execution not set: %+v", m)

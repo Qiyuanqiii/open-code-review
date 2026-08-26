@@ -100,10 +100,12 @@ ocr r      [flags]   (alias)
 
 | 引数 | 短縮形 | デフォルト | 説明 |
 |---|---|---|---|
-| `--repo <path>` | — | カレントディレクトリ | Git リポジトリまたは Subversion ワーキングコピーのルート。 |
+| `--repo <path>` | — | カレントディレクトリ | Git リポジトリまたは Subversion ワーキングコピーのルート。明示的なリモート SVN 比較では、OCR のルール／設定を置く通常のディレクトリも指定できます。 |
 | `--from <ref>` | — | — | 開始 Git ref または SVN revision。Git は merge-base、SVN は解決済みの正確な revision を使用します。 |
 | `--to <ref>` | — | — | 宛先 Git ref または SVN revision。Git は `merge-base(from, to)..to` を計算し、SVN は正確な端点を比較します。 |
 | `--commit <ref>` | `-c` | — | 単一の Git commit または SVN revision を直前の端点と比較してレビューします。 |
+| `--svn-from-target <url[@peg]>` | — | — | リモート範囲比較のソース SVN ディレクトリ。`--svn-to-target` および `--from`/`--to` と組み合わせます。 |
+| `--svn-to-target <url[@peg]>` | — | — | 宛先 SVN ディレクトリ。ファイルツールは固定済みの operative/peg revision からこの対象を読み取ります。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
@@ -200,6 +202,31 @@ ocr review --from 120 --to 128
 diff の読み込み、ファイルツール、フィルタリング、manifest 作成、resume identity の
 確認より前にリポジトリ全体の数値へ解決されます。`BASE`、`COMMITTED`、`PREV` は
 混在 revision のワーキングコピーで曖昧になるため拒否されます。
+
+trunk とサーバー側 merge 後のブランチなど、2 つのリポジトリパスを比較する場合は、
+両方の対象を明示します。
+
+```bash
+ocr review \
+  --repo ./ocr-config \
+  --from 120 \
+  --to 128 \
+  --svn-from-target 'https://svn.example.com/repos/app/trunk@120' \
+  --svn-to-target 'https://svn.example.com/repos/app/branches/feature@128'
+```
+
+これは厳密な SVN 比較です。operative revision は `120:128`、2 つの `@PEG` は履歴上の
+ソース／宛先パスを識別します。OCR は Git merge base を作りません。両対象は同じ SVN
+リポジトリ内のディレクトリでなければなりません。絶対 URL ならワーキングコピーは不要です。
+`^/` 対象では `--repo` が SVN ワーキングコピーを指す必要があります。
+
+`HEAD` と `{DATE}` を含む operative/peg の表記は、`svn diff`、`svn cat`、filter、
+resume identity の計算より前に 1 回だけ数値へ解決されます。diff パスは選択した 2 つの
+ディレクトリに対して正規化され、宛先内容はディスクではなく常に `--svn-to-target` から
+読み取られます。hook がプロンプトで停止しないようコマンドは `--non-interactive` で実行されます。
+hook アカウント用の SVN 認証キャッシュとサーバー証明書の信頼を事前設定してください。
+userinfo、query string、fragment を含む URL は拒否され、対象 URL は manifest、session log、
+delegate JSON、telemetry に保存されません。
 
 #### Commit モード
 
@@ -467,7 +494,7 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git or Subversion working-copy root (default: current dir)
+  --repo <path>    Git/SVN working-copy root, or config directory for scan/remote SVN (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

@@ -17,6 +17,7 @@ func TestValidateDelegateOptions(t *testing.T) {
 		{"workspace", delegateOptions{format: "text"}, false},
 		{"commit", delegateOptions{commit: "abc", format: "text"}, false},
 		{"range", delegateOptions{from: "main", to: "dev", format: "text"}, false},
+		{"SVN target range", delegateOptions{from: "7", to: "9", svnFromTarget: "https://svn.example.com/repo/trunk@7", svnToTarget: "https://svn.example.com/repo/branches/feature@9", format: "text"}, false},
 		{"json format", delegateOptions{format: "json"}, false},
 		{"empty format", delegateOptions{}, true},
 		{"invalid format", delegateOptions{format: "yaml"}, true},
@@ -24,6 +25,8 @@ func TestValidateDelegateOptions(t *testing.T) {
 		{"from without to", delegateOptions{from: "main"}, true},
 		{"to without from", delegateOptions{to: "dev"}, true},
 		{"commit and range mixed", delegateOptions{commit: "abc", from: "main", to: "dev"}, true},
+		{"one SVN target", delegateOptions{from: "7", to: "9", svnFromTarget: "https://svn.example.com/repo/trunk@7", format: "text"}, true},
+		{"SVN targets outside range mode", delegateOptions{commit: "9", svnFromTarget: "https://svn.example.com/repo/trunk@7", svnToTarget: "https://svn.example.com/repo/trunk@9", format: "text"}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

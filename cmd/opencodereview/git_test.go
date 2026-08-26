@@ -174,6 +174,7 @@ func TestValidateRepositoryReviewMode_SubversionRevisions(t *testing.T) {
 		{from: "41", to: "42"},
 		{commit: "HEAD"},
 		{from: "{2026-01-01}", to: "HEAD"},
+		{from: "41", to: "42", svnFromTarget: "https://svn.example.com/repo/trunk@41", svnToTarget: "https://svn.example.com/repo/branches/feature@42"},
 	} {
 		if err := validateRepositoryReviewMode(vcs.Subversion, opts); err != nil {
 			t.Errorf("options %+v were rejected for Subversion: %v", opts, err)
@@ -183,6 +184,8 @@ func TestValidateRepositoryReviewMode_SubversionRevisions(t *testing.T) {
 		{commit: "-42"},
 		{commit: "BASE"},
 		{from: "41:42", to: "43"},
+		{from: "41", to: "42", svnFromTarget: "https://alice:secret@svn.example.com/repo/trunk@41", svnToTarget: "https://svn.example.com/repo/trunk@42"},
+		{from: "41", to: "42", svnFromTarget: "https://svn.example.com/repo/trunk?token=secret@41", svnToTarget: "https://svn.example.com/repo/trunk@42"},
 	} {
 		if err := validateRepositoryReviewMode(vcs.Subversion, opts); err == nil {
 			t.Errorf("unsafe options %+v were accepted for Subversion", opts)

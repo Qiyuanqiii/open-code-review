@@ -10,8 +10,9 @@
 
 ## 功能
 
-- **三种审查模式**：工作区变更、分支对比（`--from` / `--to`）、单次提交（`--commit`）。
-- **待审查文件预览**：基于当前 Git 状态展示变更文件列表，点击文件可在原生 diff 视图中查看改动。
+- **自动检测 Git 与 SVN**：侧边栏明确显示当前 VCS，并分别使用 Git 分支/提交或 SVN revision。
+- **三种审查模式**：工作区变更、Git 分支对比 / 精确 SVN revision 范围（`--from` / `--to`）、单个 Git commit / SVN revision（`--commit`）。SVN 范围模式还可成对填写远端源/目标路径。
+- **待审查文件预览**：Git 使用仓库状态；SVN 使用 `ocr delegate preview`，复用 CLI 的精确 revision 语义与过滤规则，不依赖 VS Code Git 插件。
 - **自定义审查提示词**：可选地为本次审查追加 `--background` 提示。
 - **流式日志**：审查过程中实时滚动 CLI 输出，支持随时取消。
 - **结果展示 + 双向同步**：完成后在侧边栏列出评论卡片，同时在编辑器内渲染 CommentThread；应用/忽略/误报操作在两侧同步。
@@ -40,6 +41,11 @@
 
    配置写入 `~/.opencodereview/config.json`。
 
+3. SVN 评审还需安装 1.7 或更新版本的 `svn` 命令行客户端，并确保其位于 `PATH`。打开 VS Code 前，请在 SVN 客户端中配置好仓库认证与证书信任；目标 URL 不得包含凭据。
+
+SVN 工作区评论可挂载到本地编辑器文件。不可变 SVN revision / 远端评审的评论仅显示在侧边栏，
+因为 VS Code 内置的快照 URI provider 只支持 Git；实际评审内容仍来自 OCR 冻结后的 SVN 目标 revision。
+
 ---
 
 ## 开发
@@ -59,7 +65,7 @@ yarn watch        # 监听式开发构建（推荐：改代码自动重新打包
 ```
 
 然后在 VS Code 中打开 `extensions/vscode` 目录，按 **F5** 启动 Extension Development Host
-（调试配置已在 `.vscode/launch.json` 提供）。在弹出的新窗口里打开一个有 Git 变更的项目，
+（调试配置已在 `.vscode/launch.json` 提供）。在弹出的新窗口里打开一个有 Git 或 SVN 变更的项目，
 即可在活动栏看到 Open Code Review 图标并发起审查。
 
 > 改了代码后：WebView 改动需在开发宿主窗口里 **重新打开侧边栏**（或执行命令 `Developer: Reload Webviews`）；
@@ -132,7 +138,7 @@ code --install-extension open-code-review-vscode-<version>.vsix
 采用 **Monolithic WebView + Thin Extension Host** 方案：
 
 - **WebView** 是独立构建的 Preact SPA，还原原型的全部视觉与交互。
-- **Extension Host** 层轻薄，只负责 CLI 调用、文件系统、Git 操作、编辑器评论。
+- **Extension Host** 层轻薄，只负责 CLI 调用、VCS 检测与路由、文件系统、Git 原生 diff 和编辑器评论。SVN 文件选择委托给 OCR，不经过 Git 服务。
 - 两者通过 `postMessage` 通信，用 `src/shared/` 中的 TypeScript 共享类型保证类型安全。
 
 ```

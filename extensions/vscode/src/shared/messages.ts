@@ -16,8 +16,8 @@ export type WebviewToHost =
   | { type: 'activateCustomProvider'; name: string }
   | { type: 'closeConfigPanel' }
   | { type: 'getGitState'; mode: ReviewMode }
-  | { type: 'getModeFiles'; mode: ReviewMode; from?: string; to?: string; commit?: string }
-  | { type: 'openFileDiff'; path: string; status: FileChange['status']; mode: ReviewMode; from?: string; to?: string; commit?: string }
+  | { type: 'getModeFiles'; requestId: number; options: CliRunOptions }
+  | { type: 'openFileDiff'; path: string; status: FileChange['status']; options: CliRunOptions }
   | { type: 'startReview'; options: CliRunOptions }
   | { type: 'cancelReview' }
   | { type: 'getConfig' }
@@ -34,7 +34,7 @@ export type WebviewToHost =
 export type HostToWebview =
   | { type: 'init'; config: OcrConfig | null; gitState: GitState; locale: SupportedLocale }
   | { type: 'gitState'; gitState: GitState }
-  | { type: 'modeFiles'; mode: ReviewMode; files: FileChange[] }
+  | { type: 'modeFiles'; requestId: number; mode: ReviewMode; files: FileChange[] }
   | { type: 'logLine'; line: LogLine }
   | { type: 'stateChange'; state: ReviewState; error?: string }
   | { type: 'reviewDone'; result: CliResult }

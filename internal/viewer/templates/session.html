@@ -14,14 +14,22 @@
     <h2>Session: {{.Session.Summary.SessionID}}</h2>
     <div class="meta">
         <span><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
-        <span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
+        <span><strong>VCS:</strong> {{if .Session.Summary.VCS}}{{.Session.Summary.VCS}}{{else if .Session.Summary.GitBranch}}git{{else}}-{{end}}</span>
+        {{if .Session.Summary.GitBranch}}<span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>{{end}}
         <span><strong>Mode:</strong> {{if .Session.Summary.ReviewMode}}{{.Session.Summary.ReviewMode}}{{else}}-{{end}}</span>
         {{if eq .Session.Summary.ReviewMode "range"}}
         <span><strong>From:</strong> <code>{{.Session.Summary.DiffFrom}}</code></span>
         <span><strong>To:</strong> <code>{{.Session.Summary.DiffTo}}</code></span>
         {{end}}
         {{if eq .Session.Summary.ReviewMode "commit"}}
-        <span><strong>Commit:</strong> <code>{{.Session.Summary.DiffCommit}}</code></span>
+        <span><strong>{{if eq .Session.Summary.VCS "svn"}}Revision{{else}}Commit{{end}}:</strong> <code>{{.Session.Summary.DiffCommit}}</code></span>
+        {{end}}
+        {{with .Session.Summary.RunManifest}}
+        {{if .Input.ResolvedBase}}<span><strong>Resolved base:</strong> <code>{{.Input.ResolvedBase}}</code></span>{{end}}
+        {{if .Input.ResolvedHead}}<span><strong>Resolved head:</strong> <code>{{.Input.ResolvedHead}}</code></span>{{end}}
+        {{if .Input.ExactRange}}<span><strong>Exact range:</strong> <code>{{.Input.ExactRange}}</code></span>{{end}}
+        {{if .Input.ResolvedBasePeg}}<span><strong>Base peg:</strong> <code>{{.Input.ResolvedBasePeg}}</code></span>{{end}}
+        {{if .Input.ResolvedHeadPeg}}<span><strong>Head peg:</strong> <code>{{.Input.ResolvedHeadPeg}}</code></span>{{end}}
         {{end}}
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
         <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>

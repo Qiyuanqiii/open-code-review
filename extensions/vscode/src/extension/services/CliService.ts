@@ -4,8 +4,11 @@
 import { t, resolveLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
-import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '../../shared/types';
-import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
+import { CliResult, CliRunOptions, DelegatePreview, EnvCheckResult, LogLine } from '../../shared/types';
+import {
+  buildDelegatePreviewArgs, buildReviewArgs, extractCliError, parseCliResult,
+  parseDelegatePreview, parseLogLine, redactCliError,
+} from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
 
 export class CliService {
@@ -112,6 +115,9 @@ export class CliService {
     envExtra?: Record<string, string>,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
+      const sensitiveTargets = args.flatMap((arg, index) => (
+        arg === '--svn-from-target' || arg === '--svn-to-target' ? [args[index + 1]] : []
+      ));
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
         env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
@@ -119,18 +125,26 @@ export class CliService {
       this.current = proc;
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d) => {
-        const text = d.toString();
-        stderr += text;
-        for (const line of text.split('\n')) {
+      let stderrPending = '';
+      const emitStderr = (chunk: string, flush = false) => {
+        stderrPending += chunk;
+        const lines = stderrPending.replace(/\r\n/g, '\n').split('\n');
+        const remainder = lines.pop() ?? '';
+        stderrPending = flush ? '' : remainder;
+        if (flush && remainder) lines.push(remainder);
+        for (const rawLine of lines) {
+          const line = redactCliError(rawLine, sensitiveTargets);
+          stderr += `${line}\n`;
           const parsed = parseLogLine(line);
           if (parsed) onLog(parsed);
         }
-      });
+      };
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr.on('data', (d) => emitStderr(d.toString()));
       proc.on('error', (err) => { this.current = null; reject(err); });
       proc.on('close', (code) => {
         this.current = null;
+        emitStderr('', true);
         if (code === 0) { resolve(stdout); return; }
         reject(new Error(extractCliError(stderr) || `CLI exited with code ${code}`));
       });
@@ -140,6 +154,11 @@ export class CliService {
   async review(opts: CliRunOptions, cwd: string, onLog: (l: LogLine) => void): Promise<CliResult> {
     const stdout = await this.runRaw(buildReviewArgs(opts), cwd, onLog);
     return parseCliResult(stdout);
+  }
+
+  async delegatePreview(opts: CliRunOptions, cwd: string): Promise<DelegatePreview> {
+    const stdout = await this.runRaw(buildDelegatePreviewArgs(opts), cwd, () => {});
+    return parseDelegatePreview(stdout);
   }
 
   async testConnection(options?: { configPath?: string; home?: string }): Promise<{ ok: boolean; message?: string }> {

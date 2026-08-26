@@ -58,7 +58,19 @@ export class CommentProvider {
     const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
     if (!root) return;
 
-    await this.git.prepareReviewFileStatus(ctx);
+    // VS Code's immutable snapshot URI provider belongs to the Git extension.
+    // Keep SVN revision comments in the sidebar instead of accidentally asking
+    // Git to resolve them. SVN workspace comments still mount to local files.
+    if (ctx.vcs === 'svn' && ctx.mode !== ReviewMode.Workspace) {
+      for (let i = 0; i < this.comments.length; i++) {
+        this.status.set(i, 'pending');
+        this.jumpBlockReasons.set(i, 'missing-file');
+      }
+      this.emitSync();
+      return;
+    }
+
+    if (ctx.vcs !== 'svn') await this.git.prepareReviewFileStatus(ctx);
     const deps = this.buildAnchorDeps(root, ctx);
 
     let firstShown = -1;

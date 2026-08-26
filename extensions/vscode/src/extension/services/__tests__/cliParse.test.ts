@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from '../cliParse';
+import {
+  buildDelegatePreviewArgs, buildReviewArgs, extractCliError, parseCliResult,
+  parseDelegatePreview, parseLogLine, redactCliError,
+} from '../cliParse';
 import { ReviewMode } from '../../../shared/types';
 
 describe('buildReviewArgs', () => {
@@ -20,6 +23,29 @@ describe('buildReviewArgs', () => {
       .toEqual(['review', '--commit', 'abc123', '--format', 'json']);
   });
 
+  it('SVN 范围模式透传两个远端目标', () => {
+    const options = {
+      mode: ReviewMode.Branch,
+      vcs: 'svn' as const,
+      from: '120',
+      to: '128',
+      svnFromTarget: '^/trunk@HEAD',
+      svnToTarget: '^/branches/feature@HEAD',
+    };
+    expect(buildReviewArgs(options)).toEqual([
+      'review', '--from', '120', '--to', '128',
+      '--svn-from-target', '^/trunk@HEAD',
+      '--svn-to-target', '^/branches/feature@HEAD',
+      '--format', 'json',
+    ]);
+    expect(buildDelegatePreviewArgs(options)).toEqual([
+      'delegate', 'preview', '--from', '120', '--to', '128',
+      '--svn-from-target', '^/trunk@HEAD',
+      '--svn-to-target', '^/branches/feature@HEAD',
+      '--format', 'json',
+    ]);
+  });
+
   it('customPrompt 追加 --background', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Workspace, customPrompt: '关注安全' }))
       .toEqual(['review', '--format', 'json', '--background', '关注安全']);
@@ -28,6 +54,34 @@ describe('buildReviewArgs', () => {
   it('concurrency 追加 --concurrency', () => {
     expect(buildReviewArgs({ mode: ReviewMode.Workspace, concurrency: 4 }))
       .toEqual(['review', '--format', 'json', '--concurrency', '4']);
+  });
+});
+
+describe('parseDelegatePreview', () => {
+  it('解析 SVN 密封端点和可审查文件', () => {
+    const preview = parseDelegatePreview(JSON.stringify({
+      vcs: 'svn',
+      mode: 'range',
+      resolved_base: '120',
+      resolved_head: '128',
+      exact_range: '120:128',
+      resolved_base_peg: '130',
+      resolved_head_peg: '130',
+      reviewable_files: [
+        { path: 'src/a.ts', status: 'modified' },
+        { path: 'src/b.ts', status: 'unsupported' },
+      ],
+    }));
+    expect(preview).toMatchObject({
+      vcs: 'svn',
+      mode: 'range',
+      resolvedBase: '120',
+      resolvedHead: '128',
+      exactRange: '120:128',
+      resolvedBasePeg: '130',
+      resolvedHeadPeg: '130',
+      reviewableFiles: [{ path: 'src/a.ts', status: 'modified' }],
+    });
   });
 });
 
@@ -81,6 +135,12 @@ describe('extractCliError', () => {
   });
   it('空 stderr → 空字符串', () => {
     expect(extractCliError('')).toBe('');
+  });
+  it('从错误中移除带凭据或普通的 SVN URL', () => {
+    expect(extractCliError("Error: svn failed for https://user:secret@example.test/repo/trunk@12\n"))
+      .toBe('svn failed for [SVN target redacted]');
+    expect(redactCliError("missing ^/branches/private@HEAD", ['^/branches/private@HEAD']))
+      .toBe('missing [SVN target redacted]');
   });
 });
 

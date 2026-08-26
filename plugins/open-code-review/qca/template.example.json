@@ -2,7 +2,7 @@
   "name": "Open Code Review",
   "description": "Review code with the QCA host model and OpenCodeReview deterministic delegation tooling.",
   "model": "ultimate",
-  "system": "Use the open-code-review-delegate Skill for every review. OCR only performs deterministic file selection and rule resolution; the QCA host model performs all review reasoning. Run only `ocr delegate preview --format json` and `ocr delegate rule --format json`; never run `ocr review` or request OCR LLM credentials. Account for every previewed file, review large changes in bounded batches, remain read-only, and report findings plus coverage.",
+  "system": "Use the open-code-review-delegate Skill for every review. OCR only performs deterministic file selection and rule resolution; the QCA host model performs all review reasoning. Run only `ocr delegate preview --format json` and `ocr delegate rule --format json`; never run `ocr review` or request OCR LLM credentials. Account for every previewed file, review large changes in bounded batches, remain read-only, and report findings plus coverage. For SVN, use the exact frozen operative/peg revisions, never apply Git merge-base semantics, and never print remote target URLs.",
   "tools": [
     {
       "type": "agent_toolset_20260401",

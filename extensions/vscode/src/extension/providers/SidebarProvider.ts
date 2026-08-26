@@ -5,10 +5,10 @@ import { resolveLocale, toHtmlLang } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '../../shared/configUtils';
 import { HostToWebview, WebviewToHost } from '../../shared/messages';
-import { FileChange, ReviewMode } from '../../shared/types';
+import { ReviewMode } from '../../shared/types';
 import { CliService } from '../services/CliService';
 import { ConfigService } from '../services/ConfigService';
-import { GitService } from '../services/GitService';
+import { RepositoryService } from '../services/RepositoryService';
 import { ReviewSession } from '../services/ReviewSession';
 import { CommentProvider } from './CommentProvider';
 
@@ -22,7 +22,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private extensionUri: vscode.Uri,
     private cli: CliService,
     private config: ConfigService,
-    private git: GitService,
+    private repository: RepositoryService,
     private comments: CommentProvider,
   ) {
     this.comments.onSync((states) => this.post({ type: 'commentSync', comments: states }));
@@ -43,7 +43,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.onDidReceiveMessage((msg: WebviewToHost) => this.handle(msg));
 
     this.gitWatchDisposable?.dispose();
-    this.gitWatchDisposable = this.git.watchWorkspaceChanges((gitState) => {
+    const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? process.cwd();
+    this.gitWatchDisposable = this.repository.watchWorkspaceChanges(cwd, (gitState) => {
       this.post({ type: 'gitState', gitState });
     });
     view.onDidDispose(() => {
@@ -62,30 +63,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case 'ready': {
         const config = this.config.read();
-        const gitState = await this.git.getState(ReviewMode.Workspace);
+        const gitState = await this.repository.getState(ReviewMode.Workspace, cwd);
         const locale = resolveLocale(vscode.env.language);
         this.post({ type: 'init', config, gitState, locale });
         break;
       }
       case 'getGitState': {
-        this.post({ type: 'gitState', gitState: await this.git.getState(msg.mode) });
+        this.post({ type: 'gitState', gitState: await this.repository.getState(msg.mode, cwd) });
         break;
       }
       case 'getModeFiles': {
-        let files: FileChange[] = [];
-        if (msg.mode === ReviewMode.Branch && msg.from && msg.to) {
-          files = await this.git.getBranchDiff(msg.from, msg.to);
-        } else if (msg.mode === ReviewMode.Commit && msg.commit) {
-          files = await this.git.getCommitFiles(msg.commit);
+        try {
+          const files = await this.repository.getModeFiles(msg.options, cwd);
+          this.post({ type: 'modeFiles', requestId: msg.requestId, mode: msg.options.mode, files });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          void vscode.window.showErrorMessage(message);
+          this.post({ type: 'modeFiles', requestId: msg.requestId, mode: msg.options.mode, files: [] });
         }
-        this.post({ type: 'modeFiles', mode: msg.mode, files });
         break;
       }
       case 'openFileDiff':
-        await this.git.openDiff({
-          path: msg.path, status: msg.status, mode: msg.mode,
-          from: msg.from, to: msg.to, commit: msg.commit,
-        });
+        await this.repository.openFile({ path: msg.path, status: msg.status, ...msg.options }, cwd);
         break;
       case 'startReview': {
         this.session = new ReviewSession(this.cli, cwd);
@@ -97,9 +96,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               if (result.comments.length) {
                 await this.comments.show(result.comments, {
                   mode: msg.options.mode,
+                  vcs: msg.options.vcs,
                   from: msg.options.from,
                   to: msg.options.to,
                   commit: msg.options.commit,
+                  svnFromTarget: msg.options.svnFromTarget,
+                  svnToTarget: msg.options.svnToTarget,
                 });
               }
               this.post({ type: 'reviewDone', result });

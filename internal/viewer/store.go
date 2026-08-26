@@ -85,6 +85,7 @@ type SessionSummary struct {
 	SessionID      string
 	Timestamp      time.Time
 	CWD            string
+	VCS            string
 	GitBranch      string
 	Model          string
 	ReviewMode     string
@@ -159,6 +160,9 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 			if cwd, ok := rec["cwd"].(string); ok {
 				summary.CWD = cwd
+			}
+			if vcs, ok := rec["vcs"].(string); ok {
+				summary.VCS = vcs
 			}
 			if branch, ok := rec["gitBranch"].(string); ok {
 				summary.GitBranch = branch
@@ -334,6 +338,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 			if cwd, ok := rec["cwd"].(string); ok {
 				vs.Summary.CWD = cwd
+			}
+			if vcs, ok := rec["vcs"].(string); ok {
+				vs.Summary.VCS = vcs
 			}
 			if branch, ok := rec["gitBranch"].(string); ok {
 				vs.Summary.GitBranch = branch

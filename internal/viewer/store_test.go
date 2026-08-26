@@ -127,7 +127,7 @@ func TestListSessions(t *testing.T) {
 		`{"type":"session_end","duration_seconds":120.5,"files_reviewed":["a.go","b.go"],"llm_failures":1}`)
 
 	writeJSONL(t, filepath.Join(repoDir, "bbb.jsonl"),
-		`{"type":"session_start","timestamp":"2025-03-02T10:00:00Z","cwd":"/home/user/proj","gitBranch":"feat","model":"claude","reviewMode":"commit","diffCommit":"abc123"}`,
+		`{"type":"session_start","timestamp":"2025-03-02T10:00:00Z","cwd":"/home/user/proj","vcs":"svn","model":"claude","reviewMode":"commit","diffCommit":"128"}`,
 		`{"type":"session_end","duration_seconds":60.0,"files_reviewed":["c.go"],"llm_failures":0}`)
 
 	// Non-jsonl file should be skipped
@@ -153,7 +153,10 @@ func TestListSessions(t *testing.T) {
 	if sessions[0].ReviewMode != "commit" {
 		t.Errorf("ReviewMode = %q", sessions[0].ReviewMode)
 	}
-	if sessions[0].DiffCommit != "abc123" {
+	if sessions[0].VCS != "svn" {
+		t.Errorf("VCS = %q", sessions[0].VCS)
+	}
+	if sessions[0].DiffCommit != "128" {
 		t.Errorf("DiffCommit = %q", sessions[0].DiffCommit)
 	}
 	if sessions[0].DurationSec != 60.0 {

@@ -92,6 +92,21 @@ describe('CliService.runRaw', () => {
       '.', () => {},
     )).rejects.toThrow('bad api key');
   });
+
+  it('redacts SVN targets from streamed and final errors', async () => {
+    const svc = new CliService('node');
+    const logs: string[] = [];
+    const target = 'https://user:secret@example.test/repo/trunk@12';
+    const splitAt = target.indexOf('secret') + 3;
+    const script = `process.stderr.write(${JSON.stringify(`Error: failed ${target.slice(0, splitAt)}`)});`
+      + `setTimeout(() => { process.stderr.write(${JSON.stringify(`${target.slice(splitAt)}\n`)}); process.exit(1); }, 10)`;
+    await expect(svc.runRaw(
+      ['-e', script, '--', '--svn-from-target', target],
+      '.', (line) => logs.push(line.text),
+    )).rejects.toThrow('[SVN target redacted]');
+    expect(logs.join('\n')).not.toContain(target);
+    expect(logs.join('\n')).not.toContain('secret');
+  });
 });
 
 describe('CliService.testConnection', () => {

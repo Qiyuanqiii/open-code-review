@@ -252,10 +252,11 @@ func resolveWorkingDirForSession(input string) (string, error) {
 
 func printSessionTable(w io.Writer, summaries []session.Summary) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SESSION ID\tMODE\tRANGE\tFILES\tCOMMENTS\tSTATUS\tSTARTED")
+	fmt.Fprintln(tw, "SESSION ID\tVCS\tMODE\tRANGE\tFILES\tCOMMENTS\tSTATUS\tSTARTED")
 	for _, s := range summaries {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 			s.SessionID,
+			describeVCS(s),
 			displayMode(s.ReviewMode),
 			describeRange(s),
 			describeFiles(s),
@@ -271,6 +272,7 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 	fmt.Fprintf(w, "Session: %s\n", s.SessionID)
 	fmt.Fprintf(w, "  File:      %s\n", s.FilePath)
 	fmt.Fprintf(w, "  Repo:      %s\n", s.RepoDir)
+	fmt.Fprintf(w, "  VCS:       %s\n", describeVCS(*s))
 	if s.GitBranch != "" {
 		fmt.Fprintf(w, "  Branch:    %s\n", s.GitBranch)
 	}
@@ -280,6 +282,25 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 	fmt.Fprintf(w, "  Mode:      %s\n", displayMode(s.ReviewMode))
 	if r := describeRange(*s); r != "" && r != "-" {
 		fmt.Fprintf(w, "  Range:     %s\n", r)
+	}
+	if m := s.RunManifest; m != nil {
+		switch {
+		case m.Input.ResolvedBase != "" && m.Input.ResolvedHead != "":
+			fmt.Fprintf(w, "  Resolved:  %s..%s\n", m.Input.ResolvedBase, m.Input.ResolvedHead)
+		case m.Input.ResolvedBase != "":
+			fmt.Fprintf(w, "  Base:      %s\n", m.Input.ResolvedBase)
+		case m.Input.ResolvedHead != "":
+			fmt.Fprintf(w, "  Head:      %s\n", m.Input.ResolvedHead)
+		}
+		if m.Input.ExactRange != "" {
+			fmt.Fprintf(w, "  Exact:     %s\n", m.Input.ExactRange)
+		}
+		if m.Input.ResolvedBasePeg != "" {
+			fmt.Fprintf(w, "  Base peg:  %s\n", m.Input.ResolvedBasePeg)
+		}
+		if m.Input.ResolvedHeadPeg != "" {
+			fmt.Fprintf(w, "  Head peg:  %s\n", m.Input.ResolvedHeadPeg)
+		}
 	}
 	if s.ResumedFrom != "" {
 		fmt.Fprintf(w, "  Resumed:   from session %s\n", s.ResumedFrom)
@@ -351,6 +372,16 @@ func displayMode(m string) string {
 		return "-"
 	}
 	return m
+}
+
+func describeVCS(s session.Summary) string {
+	if s.VCS != "" {
+		return s.VCS
+	}
+	if s.GitBranch != "" {
+		return "git"
+	}
+	return "-"
 }
 
 func describeRange(s session.Summary) string {

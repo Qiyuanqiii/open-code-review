@@ -53,6 +53,20 @@ OpenAI use different auth headers and different URL shapes — make sure
 current directory is neither, it exits early. Either `cd` into a supported
 working copy, or pass `--repo /path/to/repo`.
 
+### `svn` is missing, too old, or fails authentication
+
+SVN reviews require a command-line client version 1.7 or newer. Run
+`svn --version --quiet`; if the command is missing, follow the
+[platform installation steps](../installation/#subversion-client-for-svn-reviews).
+
+OCR uses `--non-interactive`, so it cannot answer a password or certificate
+prompt. Run `svn info <repository-url>` once as the same OS account to establish
+the normal SVN auth cache and certificate trust, then confirm
+`svn info --non-interactive <repository-url>` works. Do not embed credentials in
+the URL. Revision input may be a number, `HEAD`, or `{date}`; `BASE`, `COMMITTED`,
+and `PREV` are intentionally rejected because they depend on mutable
+working-copy state.
+
 ### "No tool calls parsed" (local models / Ollama)
 
 ```
@@ -363,9 +377,10 @@ A "redaction rule" feature is on the roadmap; track
 Yes. With Subversion 1.7 or newer, OCR supports versioned and unversioned
 working-copy changes, one immutable revision via `--commit REV`, and exact
 revision ranges via `--from REV --to REV`. `HEAD` and date revisions are frozen
-to numeric endpoints first. Cross-branch URL comparisons and merge-server
-automation are separate follow-up work. Mercurial and other VCSs do not yet
-have providers.
+to numeric endpoints first. Exact cross-path comparisons use the paired
+`--svn-from-target` and `--svn-to-target` flags; absolute URLs need no working
+copy, while repository-relative `^/` targets do. Mercurial and other VCSs do not
+yet have providers.
 
 ### Why is the binary called `opencodereview` but the CLI is `ocr`?
 

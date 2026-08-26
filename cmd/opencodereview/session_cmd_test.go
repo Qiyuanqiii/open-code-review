@@ -337,6 +337,13 @@ func TestSessionDisplayUsesManifestStatusAndCoverage(t *testing.T) {
 		WaivedFiles:    1,
 		RunManifest: &session.RunManifest{
 			TerminalState: session.StatePartial,
+			Input: session.ManifestInput{
+				ResolvedBase:    "41",
+				ResolvedHead:    "43",
+				ExactRange:      "41:43",
+				ResolvedBasePeg: "43",
+				ResolvedHeadPeg: "43",
+			},
 		},
 	}
 	if got := describeStatus(summary); got != "partial" {
@@ -348,6 +355,30 @@ func TestSessionDisplayUsesManifestStatusAndCoverage(t *testing.T) {
 	got := captureStdout(t, func() { printSessionDetail(os.Stdout, &summary, nil) })
 	if !strings.Contains(got, "4 selected = 1 completed + 1 reused + 1 failed + 1 waived") {
 		t.Fatalf("detail = %q", got)
+	}
+	for _, want := range []string{"Resolved:  41..43", "Exact:     41:43", "Base peg:  43", "Head peg:  43"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("detail missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestSessionDisplayDoesNotRenderMalformedPartialResolvedRange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input session.ManifestInput
+		want  string
+	}{
+		{name: "base only", input: session.ManifestInput{ResolvedBase: "abc"}, want: "Base:      abc"},
+		{name: "head only", input: session.ManifestInput{ResolvedHead: "def"}, want: "Head:      def"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := session.Summary{RunManifest: &session.RunManifest{Input: tc.input}}
+			got := captureStdout(t, func() { printSessionDetail(os.Stdout, &summary, nil) })
+			if !strings.Contains(got, tc.want) || strings.Contains(got, "..") {
+				t.Fatalf("detail = %q, want %q without a partial range", got, tc.want)
+			}
+		})
 	}
 }
 

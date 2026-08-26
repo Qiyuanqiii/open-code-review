@@ -251,19 +251,102 @@ test("ocr_review rejects incompatible review targets before starting OCR", async
     )
     await assert.rejects(
       hooks.tool.ocr_review.execute(
-        { resume: "session-1", commit: "abc" },
+        { svnFromTarget: "^/trunk", from: "120", to: "128" },
         toolContext(worktree),
       ),
-      /'resume' cannot be combined/,
+      /Both 'svnFromTarget' and 'svnToTarget'/,
     )
     await assert.rejects(
       hooks.tool.ocr_review.execute(
-        { resume: "session-1", from: "main", to: "feature" },
+        { svnToTarget: "^/branches/feature", from: "120", to: "128" },
         toolContext(worktree),
       ),
-      /'resume' cannot be combined/,
+      /Both 'svnFromTarget' and 'svnToTarget'/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { svnFromTarget: "^/trunk", svnToTarget: "^/branches/feature" },
+        toolContext(worktree),
+      ),
+      /require 'from'\/'to' range mode/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { resume: "session-1" },
+        toolContext(worktree),
+      ),
+      /requires the original 'commit' or 'from'\/'to'/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { commit: "128", svnFromTarget: "^/trunk", svnToTarget: "^/branches/feature" },
+        toolContext(worktree),
+      ),
+      /require 'from'\/'to' range mode and cannot be combined with 'commit'/,
     )
   })
+})
+
+test("ocr_review forwards immutable Git resume inputs", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const commitOutput = await hooks.tool.ocr_review.execute(
+        { commit: "abc123", resume: "session-commit" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(commitOutput).argv.slice(-4), [
+        "--commit", "abc123", "--resume", "session-commit",
+      ])
+
+      const rangeOutput = await hooks.tool.ocr_review.execute(
+        { from: "main", to: "feature", resume: "session-range" },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(rangeOutput).argv.slice(-6), [
+        "--from", "main", "--to", "feature", "--resume", "session-range",
+      ])
+    },
+  )
+})
+
+test("ocr_review forwards exact SVN targets and immutable resume input", async () => {
+  await withFakeOcr(
+    "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        {
+          from: "120",
+          to: "128",
+          svnFromTarget: "^/trunk@130",
+          svnToTarget: "^/branches/feature@130",
+          resume: "session-1",
+        },
+        toolContext(worktree),
+      )
+      assert.deepEqual(JSON.parse(output).argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--from",
+        "120",
+        "--to",
+        "128",
+        "--svn-from-target",
+        "^/trunk@130",
+        "--svn-to-target",
+        "^/branches/feature@130",
+        "--resume",
+        "session-1",
+      ])
+    },
+  )
 })
 
 test("preview omits JSON mode and adds --preview", async () => {

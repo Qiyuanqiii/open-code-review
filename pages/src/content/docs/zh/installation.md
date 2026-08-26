@@ -152,6 +152,41 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## Subversion 客户端（用于 SVN 评审）
+
+OCR 不内置 Subversion。工作区、revision 与远端目标评审需要 1.7 或更新版本的
+`svn` 命令行客户端。可从 [Apache Subversion 二进制包列表](https://subversion.apache.org/packages.html)
+选择安装包，或使用平台包管理器：
+
+```powershell
+# Windows：安装 SlikSVN、VisualSVN，或安装 TortoiseSVN 时启用命令行工具，
+# 然后确保包含 svn.exe 的目录已加入 PATH。
+Get-Command svn
+```
+
+```bash
+# macOS
+brew install subversion
+
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install subversion
+
+# Fedora / RHEL
+sudo dnf install subversion    # 较旧发行版使用 yum
+```
+
+安装后验证客户端：
+
+```bash
+svn --version --quiet
+```
+
+OCR 的所有仓库操作均以非交互方式执行。对于受保护的服务器，请先用运行 OCR 的同一
+系统账号执行一次 `svn info <repository-url>`，建立认证缓存并信任证书，再确认
+`svn info --non-interactive <repository-url>` 成功。不要把凭据放进 URL 或 OCR 参数。
+正常评审不需要 `svnadmin`；它只用于本地仓库 fixture 或贡献者测试。
+
 ## 从源码构建
 
 仅当你要修改 OCR 本身，或在某个没有预编译二进制的平台上运行时才需要此方式。

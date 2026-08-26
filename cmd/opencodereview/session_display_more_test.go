@@ -19,6 +19,18 @@ func TestDisplayMode(t *testing.T) {
 	}
 }
 
+func TestDescribeVCS(t *testing.T) {
+	if got := describeVCS(session.Summary{VCS: "svn"}); got != "svn" {
+		t.Errorf("describeVCS(svn) = %q", got)
+	}
+	if got := describeVCS(session.Summary{GitBranch: "main"}); got != "git" {
+		t.Errorf("describeVCS(legacy git) = %q", got)
+	}
+	if got := describeVCS(session.Summary{}); got != "-" {
+		t.Errorf("describeVCS(empty) = %q", got)
+	}
+}
+
 // TestDescribeRange covers each review-mode branch plus the fallthrough.
 func TestDescribeRange(t *testing.T) {
 	tests := []struct {

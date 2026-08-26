@@ -155,6 +155,43 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## Subversion クライアント（SVN レビュー用）
+
+OCR は Subversion を同梱していません。ワークスペース、revision、リモート対象の
+レビューには、バージョン 1.7 以降の `svn` コマンドラインクライアントが必要です。
+[Apache Subversion のバイナリパッケージ一覧](https://subversion.apache.org/packages.html)
+から選ぶか、各プラットフォームのパッケージマネージャーを使用してください。
+
+```powershell
+# Windows: SlikSVN、VisualSVN、または TortoiseSVN のオプションの
+# コマンドラインツールをインストールし、svn.exe のディレクトリを PATH に追加します。
+Get-Command svn
+```
+
+```bash
+# macOS
+brew install subversion
+
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install subversion
+
+# Fedora / RHEL
+sudo dnf install subversion    # 古い release では yum を使用
+```
+
+インストール後にクライアントを確認します。
+
+```bash
+svn --version --quiet
+```
+
+OCR はすべてのリポジトリ操作を非対話モードで実行します。保護されたサーバーでは、
+OCR と同じ OS アカウントで `svn info <repository-url>` を一度実行して認証キャッシュと
+証明書の信頼を設定し、`svn info --non-interactive <repository-url>` が成功することを
+確認してください。URL や OCR 引数に資格情報を含めないでください。通常のレビューに
+`svnadmin` は不要で、ローカルリポジトリ fixture または contributor test でのみ使用します。
+
 ## ソースからビルドする
 
 OCR 自体を変更する場合、またはプリコンパイル済みバイナリのないプラットフォームで実行する場合にのみ、この方法が必要です。

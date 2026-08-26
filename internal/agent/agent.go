@@ -228,7 +228,12 @@ func New(args Args) *Agent {
 		if mode == "" {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
+		repositoryKind := args.RepositoryKind
+		if repositoryKind == vcs.Unknown {
+			repositoryKind = vcs.Git
+		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
+			VCS:         string(repositoryKind),
 			ReviewMode:  mode,
 			DiffFrom:    args.From,
 			DiffTo:      args.To,

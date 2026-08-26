@@ -2,7 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { I18nContext, resolveLocale } from './I18nProvider';
-import { useEffect, useReducer } from 'preact/hooks';
+import { useEffect, useReducer, useRef } from 'preact/hooks';
 import { reducer, initialState } from './store';
 import { bridge } from './bridge';
 import { isConfigReady } from '../shared/configUtils';
@@ -17,6 +17,7 @@ import './styles/global.css';
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const modeFilesRequest = useRef(0);
 
   useEffect(() => {
     const unsub = bridge.onMessage((msg) => dispatch(msg));
@@ -25,20 +26,24 @@ export function App() {
   }, []);
 
   const configured = isConfigReady(state.config);
+  const invalidateModeFiles = () => {
+    dispatch({ type: 'filesLoading', requestId: ++modeFilesRequest.current });
+  };
   const start = (options: CliRunOptions) => {
     dispatch({ type: 'startReview', mode: options.mode });
     bridge.post({ type: 'startReview', options });
   };
   const onModeChange = (mode: ReviewMode) => {
-    dispatch({ type: 'filesLoading' });
+    invalidateModeFiles();
     bridge.post({ type: 'getGitState', mode });
   };
-  const requestModeFiles = (mode: ReviewMode, from?: string, to?: string, commit?: string) => {
-    dispatch({ type: 'filesLoading' });
-    bridge.post({ type: 'getModeFiles', mode, from, to, commit });
+  const requestModeFiles = (options: CliRunOptions) => {
+    const requestId = ++modeFilesRequest.current;
+    dispatch({ type: 'filesLoading', requestId });
+    bridge.post({ type: 'getModeFiles', requestId, options });
   };
-  const openFile = (file: FileChange, mode: ReviewMode, from?: string, to?: string, commit?: string) => {
-    bridge.post({ type: 'openFileDiff', path: file.path, status: file.status, mode, from, to, commit });
+  const openFile = (file: FileChange, options: CliRunOptions) => {
+    bridge.post({ type: 'openFileDiff', path: file.path, status: file.status, options });
   };
 
   return (
@@ -47,11 +52,8 @@ export function App() {
         <div class="action-region">
           <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
             configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
+            onInvalidateModeFiles={invalidateModeFiles}
             onOpenFile={openFile} onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
-            onOpenCustomProviders={() => bridge.post({
-              type: 'openConfigPanel',
-              focus: { step: 2, tab: 'custom', customView: 'list' },
-            })}
             running={state.view === 'running'} />
 
           {state.view !== 'idle' && (
@@ -65,7 +67,7 @@ export function App() {
               )}
               {state.view === 'empty' && <EmptyView logs={state.logs} />}
               {state.view === 'cancelled' && <CancelledView />}
-              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: ReviewMode.Workspace })} />}
+              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: ReviewMode.Workspace, vcs: state.gitState.vcs })} />}
             </div>
           )}
         </div>

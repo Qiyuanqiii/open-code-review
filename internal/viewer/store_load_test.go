@@ -68,7 +68,7 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 
 	writeJSONL(t, filepath.Join(repoDir, "sess1.jsonl"),
-		`{"type":"session_start","timestamp":"2025-06-10T08:00:00Z","cwd":"/home/dev/proj","gitBranch":"feat","model":"claude-3","reviewMode":"commit","diffFrom":"aaa","diffTo":"bbb","diffCommit":"ccc"}`,
+		`{"type":"session_start","timestamp":"2025-06-10T08:00:00Z","cwd":"/home/dev/proj","vcs":"git","gitBranch":"feat","model":"claude-3","reviewMode":"commit","diffFrom":"aaa","diffTo":"bbb","diffCommit":"ccc"}`,
 		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[{"role":"user","content":"review this"}]}`,
 		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50,"cache_read_tokens":10,"cache_write_tokens":5},"tool_calls":[{"name":"search","arguments":"query"}]}`,
 		`{"type":"tool_call","filePath":"main.go","taskType":"main_task","result":"found 3 results","ok":true,"duration_ms":20}`,
@@ -91,6 +91,9 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 	if vs.Summary.GitBranch != "feat" {
 		t.Errorf("GitBranch = %q", vs.Summary.GitBranch)
+	}
+	if vs.Summary.VCS != "git" {
+		t.Errorf("VCS = %q", vs.Summary.VCS)
 	}
 	if vs.Summary.Model != "claude-3" {
 		t.Errorf("Model = %q", vs.Summary.Model)

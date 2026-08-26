@@ -250,10 +250,12 @@ Find files in the repo by filename keyword (substring match).
 | `query_name` | yes | — | Substring matched against each file's **basename** (the part after the last `/`), not the full path. |
 | `case_sensitive` | no | `false` | Set to `true` for exact-case matching. |
 
-The candidate set comes from `git ls-files --cached --others
---exclude-standard` in workspace mode, or `git ls-tree -r --name-only
-<ref>` in range / commit mode. Extensionless files are skipped except
-for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, `Containerfile`.
+For Git, the candidate set comes from `git ls-files --cached --others
+--exclude-standard` in workspace mode or `git ls-tree -r --name-only <ref>`
+in range / commit mode. For SVN, workspace mode walks the working copy while
+honoring exclusion rules, and immutable mode uses recursive `svn list --xml`
+at the frozen destination URL/revision. Extensionless files are skipped except
+for `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`, and `Containerfile`.
 
 ### Output
 
@@ -275,8 +277,10 @@ model needs broader search, it should fall through to `code_search`.
 
 ## `code_search`
 
-Full-text search across the repo. Backed by `git grep`, so it
-understands `pathspec` syntax and respects `.gitignore`.
+Full-text search across the repository. Git uses `git grep`. SVN enumerates
+the provider-selected files and searches working-copy content or immutable
+`svn cat` content at the frozen destination revision, so it does not require
+Git or read a stale working copy during a revision review.
 
 ### Schema
 
@@ -330,15 +334,15 @@ When there are no matches, the tool returns the literal string
 
 ### Limits
 
-- Caps matches at **100 per file** via `git grep --max-count 100`, so
-  total output across many files can exceed 100. When the per-file cap
-  is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
+- Git caps matches at **100 per file** via `git grep --max-count 100`; SVN's
+  bounded content walker stops after **100 total matches**. Truncated output is
+  prefixed with `Note: The results have been truncated. Only showing first 100
+  results.`.
 - Empty / whitespace-only `search_text` returns `Error: search_text is
   blank` instead of expanding to every line.
-- Searches the **current working tree** in workspace mode, or the
-  resolved target ref in range / commit mode (the `FileReader.Ref` is
-  passed as a positional argument to `git grep`).
+- Searches the **current working tree/copy** in workspace mode. Immutable Git
+  searches the resolved target ref; immutable SVN lists and reads the frozen
+  destination target and numeric operative/peg revision.
 
 ## Tool execution & errors
 

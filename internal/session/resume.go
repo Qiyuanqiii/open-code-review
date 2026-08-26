@@ -20,6 +20,7 @@ import (
 type ResumeState struct {
 	SessionID        string
 	RepoDir          string
+	VCS              string
 	GitBranch        string
 	Model            string
 	ReviewMode       string
@@ -60,6 +61,7 @@ type resumeRecord struct {
 	Type            string             `json:"type"`
 	SessionID       string             `json:"sessionId"`
 	Cwd             string             `json:"cwd"`
+	VCS             string             `json:"vcs"`
 	GitBranch       string             `json:"gitBranch"`
 	Model           string             `json:"model"`
 	ReviewMode      string             `json:"reviewMode"`
@@ -194,6 +196,7 @@ func (s *ResumeState) applySessionStart(rec resumeRecord) {
 		s.RepoDir = rec.Cwd
 	}
 	s.GitBranch = rec.GitBranch
+	s.VCS = rec.VCS
 	s.Model = rec.Model
 	s.ReviewMode = rec.ReviewMode
 	s.DiffFrom = rec.DiffFrom

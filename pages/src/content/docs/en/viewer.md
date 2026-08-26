@@ -52,15 +52,18 @@ total session count, and the most recent activity timestamp.
 
 ### `/r/{repo}` — Session list for one repo
 
-For each session: ID (a UUID), branch name (when OCR was able to
-detect it), review mode, model, file count, duration, and a started-at
+For each session: ID (a UUID), VCS, branch name when applicable, requested
+review input, review mode, model, file count, duration, and a started-at
 timestamp.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
 The detail page is the interesting one. It shows:
 
-1. **Header** — diff range, model, branch, total tokens, run duration.
+1. **Header** — VCS, requested input, model, branch when applicable, total
+   tokens, and run duration. Immutable SVN sessions also show their resolved
+   numeric endpoints and peg revisions from the credential-free manifest;
+   repository target URLs and credentials are never displayed.
 2. **File group** — one block per reviewed group. Files are grouped
    semantically before review, so a block may cover several related
    files; its title is the group's file paths. Inside each group, five

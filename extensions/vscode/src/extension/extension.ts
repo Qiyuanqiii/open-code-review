@@ -6,6 +6,7 @@ import { SIDEBAR_VIEW_ID } from '../shared/constants';
 import { CliService } from './services/CliService';
 import { ConfigService } from './services/ConfigService';
 import { GitService } from './services/GitService';
+import { RepositoryService } from './services/RepositoryService';
 import { CommentProvider } from './providers/CommentProvider';
 import { SidebarProvider } from './providers/SidebarProvider';
 import { ConfigPanelProvider } from './providers/ConfigPanelProvider';
@@ -19,9 +20,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const cli = new CliService('ocr');
   const config = new ConfigService(cli);
   const git = new GitService(output);
+  const repository = new RepositoryService(cli, git, output);
   const comments = new CommentProvider(extensionUri, git);
 
-  const sidebar = new SidebarProvider(extensionUri, cli, config, git, comments);
+  const sidebar = new SidebarProvider(extensionUri, cli, config, repository, comments);
   const configPanel = new ConfigPanelProvider(extensionUri, cli, config, (cfg) => sidebar.pushConfig(cfg));
   sidebar.bindConfigPanel((focus) => configPanel.open(focus));
 

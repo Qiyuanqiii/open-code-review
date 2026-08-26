@@ -8,6 +8,8 @@ interface ReviewInput {
   commit?: string
   from?: string
   to?: string
+  svnFromTarget?: string
+  svnToTarget?: string
   resume?: string
   background?: string
   exclude?: string
@@ -71,11 +73,18 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   if (input.commit && hasRange) {
     throw new Error("Use either 'commit' or a 'from'/'to' range, not both.")
   }
-  if (input.resume && (input.commit || hasRange)) {
-    throw new Error("'resume' cannot be combined with 'commit' or a 'from'/'to' range.")
+  const hasSVNTarget = input.svnFromTarget !== undefined || input.svnToTarget !== undefined
+  if (hasSVNTarget && (!input.svnFromTarget || !input.svnToTarget)) {
+    throw new Error("Both 'svnFromTarget' and 'svnToTarget' are required for a remote SVN comparison.")
+  }
+  if (hasSVNTarget && (input.commit || !hasRange)) {
+    throw new Error("Remote SVN targets require 'from'/'to' range mode and cannot be combined with 'commit'.")
   }
   if (input.preview && input.resume) {
     throw new Error("'preview' and 'resume' cannot be used together.")
+  }
+  if (input.resume && !input.commit && !hasRange) {
+    throw new Error("'resume' requires the original 'commit' or 'from'/'to' immutable input.")
   }
 
   const args = ["review", "--audience", "agent"]
@@ -87,6 +96,8 @@ function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   pushValue(args, "--commit", input.commit)
   pushValue(args, "--from", input.from)
   pushValue(args, "--to", input.to)
+  pushValue(args, "--svn-from-target", input.svnFromTarget)
+  pushValue(args, "--svn-to-target", input.svnToTarget)
   pushValue(args, "--resume", input.resume)
   pushValue(args, "--background", input.background)
   pushValue(args, "--exclude", input.exclude)
@@ -278,10 +289,12 @@ const optionalPositiveInt = (description: string) =>
   tool.schema.number().int().positive().optional().describe(description)
 
 const reviewArgs = {
-  commit: optionalString("Review one commit against its parent."),
-  from: optionalString("Base ref for a branch/range comparison. Must be paired with 'to'."),
-  to: optionalString("Target ref for a branch/range comparison. Must be paired with 'from'."),
-  resume: optionalString("Resume a previous OCR review session by ID."),
+  commit: optionalString("Review one Git commit or one exact SVN revision against its predecessor."),
+  from: optionalString("Base Git ref or SVN revision. Must be paired with 'to'."),
+  to: optionalString("Target Git ref or SVN revision. Must be paired with 'from'."),
+  svnFromTarget: optionalString("Source SVN directory URL (optionally pegged). Must be paired with 'svnToTarget' and 'from'/'to'."),
+  svnToTarget: optionalString("Destination SVN directory URL (optionally pegged). Must be paired with 'svnFromTarget' and 'from'/'to'."),
+  resume: optionalString("Resume a previous OCR review session by ID; include its original 'commit' or 'from'/'to' immutable input."),
   background: optionalString("Business or requirement context that the implementation should satisfy."),
   exclude: optionalString("Comma-separated gitignore-style exclusion patterns."),
   model: optionalString("Override the model configured in OpenCodeReview."),
@@ -330,7 +343,7 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
     tool: {
       ocr_review: tool({
         description:
-          "Run OpenCodeReview on workspace changes, one commit, or a ref range. " +
+          "Run OpenCodeReview on Git or SVN workspace changes, one commit/revision, or a ref/revision range. " +
           "Returns structured line-level findings as JSON. Use preview=true to inspect scope without LLM usage.",
         args: reviewArgs,
         async execute(args, context) {

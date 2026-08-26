@@ -95,8 +95,10 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
-SVN の Range または Commit モードでは、まず `svn info --show-item url` で選択 URL を取得し、
-preview が返す数値 `resolved_base` と `resolved_head` を使用します。
+SVN の Range または Commit モードでは、まず
+`svn info --xml --non-interactive --depth empty -- .` を実行して `<url>` 値を読み取ります。
+この XML 形式は、サポート対象の SVN 1.7+ 全体で利用できます。次に preview が返す数値
+`resolved_base` と `resolved_head` を使用します。
 
 ```bash
 svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>

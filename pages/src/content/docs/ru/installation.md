@@ -155,6 +155,44 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## Клиент Subversion (для ревью SVN)
+
+OCR не включает Subversion. Для ревью рабочей копии, ревизии или удалённых
+целей нужен клиент командной строки `svn` версии 1.7 или новее. Выберите пакет
+из [списка бинарных пакетов Apache Subversion](https://subversion.apache.org/packages.html)
+или используйте пакетный менеджер платформы:
+
+```powershell
+# Windows: установите SlikSVN, VisualSVN либо дополнительные инструменты
+# командной строки TortoiseSVN и добавьте каталог с svn.exe в PATH.
+Get-Command svn
+```
+
+```bash
+# macOS
+brew install subversion
+
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install subversion
+
+# Fedora / RHEL
+sudo dnf install subversion    # в старых выпусках используйте yum
+```
+
+После установки проверьте клиент:
+
+```bash
+svn --version --quiet
+```
+
+OCR выполняет все операции с репозиторием неинтерактивно. Для защищённого
+сервера один раз запустите `svn info <repository-url>` от той же учётной записи
+ОС, чтобы создать кэш аутентификации и подтвердить сертификат, затем убедитесь,
+что `svn info --non-interactive <repository-url>` завершается успешно. Не
+включайте учётные данные в URL или аргументы OCR. `svnadmin` нужен только для
+локальных тестовых репозиториев и тестов разработчика, но не для обычного ревью.
+
 ## Сборка из исходников
 
 Сборка из исходников понадобится, если вы разрабатываете OCR или для вашей

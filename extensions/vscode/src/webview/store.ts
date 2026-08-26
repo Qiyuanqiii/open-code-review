@@ -12,6 +12,7 @@ export interface AppState {
   config: OcrConfig | null;
   gitState: GitState;
   modeFiles: FileChange[];
+  modeFilesRequestId: number;
   filesLoading: boolean;
   logs: LogLine[];
   session: { state: ReviewState; result: CliResult | null; error?: string };
@@ -24,8 +25,9 @@ export interface AppState {
 export const initialState: AppState = {
   view: 'idle',
   config: null,
-  gitState: { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] },
+  gitState: { vcs: 'unknown', branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] },
   modeFiles: [],
+  modeFilesRequestId: 0,
   filesLoading: true,
   logs: [],
   session: { state: 'idle', result: null },
@@ -41,13 +43,13 @@ const STATE_TO_VIEW: Record<ReviewState, AppView> = {
 };
 
 export type LocalAction =
-  | { type: 'filesLoading' }
+  | { type: 'filesLoading'; requestId: number }
   | { type: 'startReview'; mode: ReviewMode };
 
 export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppState {
   switch (msg.type) {
     case 'filesLoading':
-      return { ...state, filesLoading: true };
+      return { ...state, filesLoading: true, modeFilesRequestId: msg.requestId };
     case 'startReview':
       return { ...state, reviewMode: msg.mode };
     case 'init':
@@ -62,6 +64,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
     case 'gitState':
       return { ...state, gitState: msg.gitState, filesLoading: false };
     case 'modeFiles':
+      if (msg.requestId !== state.modeFilesRequestId) return state;
       return { ...state, modeFiles: msg.files, filesLoading: false };
     case 'config':
       return { ...state, config: msg.config };

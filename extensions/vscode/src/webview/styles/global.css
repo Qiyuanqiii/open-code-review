@@ -131,6 +131,25 @@ body {
   font-size: 12px;
 }
 
+.vcs-context {
+  width: fit-content;
+  margin: 0 0 8px auto;
+  padding: 2px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink-quiet);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.vcs-context.svn,
+.vcs-context.git {
+  color: var(--mint-soft);
+  border-color: var(--mint-tint);
+  background: var(--mint-tint);
+}
+
 .link-btn {
   padding: 0;
   border: none;
@@ -220,6 +239,13 @@ body {
 
 .mode-param-input::placeholder {
   color: var(--ink-faint);
+}
+
+.mode-param-help {
+  margin-top: 6px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 /* === 自定义 Select === */

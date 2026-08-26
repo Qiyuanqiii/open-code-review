@@ -198,6 +198,7 @@ func executeScan(opts scanOptions) (retErr error) {
 
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:               cc.RepoDir,
+		RepositoryKind:        cc.RepositoryKind,
 		Paths:                 scanPaths,
 		Template:              *scanTpl,
 		SystemRule:            cc.Resolver,

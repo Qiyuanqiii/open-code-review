@@ -109,9 +109,10 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
-For SVN range or commit mode, first obtain the selected URL with
-`svn info --show-item url`, then use the numeric `resolved_base` and
-`resolved_head` returned by preview:
+For SVN range or commit mode, first run
+`svn info --xml --non-interactive --depth empty -- .` and read the `<url>`
+value. This XML form is available throughout the supported SVN 1.7+ range.
+Then use the numeric `resolved_base` and `resolved_head` returned by preview:
 
 ```bash
 svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>

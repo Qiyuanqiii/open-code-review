@@ -21,6 +21,7 @@ type Summary struct {
 	SessionID      string        `json:"session_id"`
 	FilePath       string        `json:"file_path"`
 	RepoDir        string        `json:"repo_dir"`
+	VCS            string        `json:"vcs,omitempty"`
 	GitBranch      string        `json:"git_branch,omitempty"`
 	Model          string        `json:"model,omitempty"`
 	ReviewMode     string        `json:"review_mode,omitempty"`
@@ -66,6 +67,7 @@ type summaryRecord struct {
 	SessionID       string          `json:"sessionId"`
 	Timestamp       string          `json:"timestamp"`
 	Cwd             string          `json:"cwd"`
+	VCS             string          `json:"vcs"`
 	GitBranch       string          `json:"gitBranch"`
 	Model           string          `json:"model"`
 	ReviewMode      string          `json:"reviewMode"`
@@ -229,6 +231,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 			s.RepoDir = rec.Cwd
 		}
 		s.GitBranch = rec.GitBranch
+		s.VCS = rec.VCS
 		s.Model = rec.Model
 		s.ReviewMode = rec.ReviewMode
 		s.DiffFrom = rec.DiffFrom

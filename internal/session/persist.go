@@ -27,6 +27,7 @@ type jsonlWriter struct {
 	mu          sync.Mutex
 	sessionID   string
 	repoDir     string
+	vcs         string
 	gitBranch   string
 	model       string
 	reviewMode  string
@@ -45,6 +46,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 	jw := &jsonlWriter{
 		sessionID:   sessionID,
 		repoDir:     repoDir,
+		vcs:         opts.VCS,
 		gitBranch:   gitBranch,
 		model:       model,
 		reviewMode:  opts.ReviewMode,
@@ -144,6 +146,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 		"cwd":        jw.repoDir,
 		"gitBranch":  jw.gitBranch,
 		"model":      jw.model,
+	}
+	if jw.vcs != "" {
+		rec["vcs"] = jw.vcs
 	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode

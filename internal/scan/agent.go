@@ -25,6 +25,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // changeFilesScanLiteral substitutes for the {{change_files}} placeholder.
@@ -42,6 +43,7 @@ const changeFilesScanLiteral = "(not applicable in full-scan mode)"
 // usually populated from ScanTemplate.MaxFileSizeBytes via scan_cmd.
 type Args struct {
 	RepoDir               string
+	RepositoryKind        vcs.Kind
 	Paths                 []string // empty = whole repo
 	Template              template.ScanTemplate
 	SystemRule            rules.Resolver
@@ -125,6 +127,7 @@ func NewAgent(args Args) *Agent {
 	}
 	if args.Session == nil {
 		args.Session = session.New(args.RepoDir, "", args.Model, session.SessionOptions{
+			VCS:         string(args.RepositoryKind),
 			ReviewMode:  session.ReviewModeFullScan,
 			ScanPaths:   args.Paths,
 			ResumedFrom: resumedFromSession(args.Resume),

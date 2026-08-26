@@ -10,8 +10,9 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 
 ## Features
 
-- **Three review modes**: workspace changes, branch comparison (`--from` / `--to`), and a single commit (`--commit`).
-- **Files-to-review preview**: lists changed files from the current Git state; click a file to view its changes in the native diff view.
+- **Git and SVN auto-detection**: the sidebar labels the active VCS and uses Git branches/commits or SVN revisions as appropriate.
+- **Three review modes**: workspace changes, Git branch comparison / exact SVN revision range (`--from` / `--to`), and one Git commit / SVN revision (`--commit`). SVN range mode also accepts paired remote source/destination targets.
+- **Files-to-review preview**: Git uses repository state; SVN uses `ocr delegate preview`, preserving the CLI's exact revision semantics and filters without depending on VS Code's Git extension.
 - **Custom review prompt**: optionally append a `--background` hint for the current review.
 - **Streaming logs**: tail the CLI output live during review, cancel anytime.
 - **Results + two-way sync**: on completion, comment cards appear in the sidebar while CommentThreads render in the editor; apply / dismiss / false-positive actions stay in sync on both sides.
@@ -40,6 +41,10 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 
    The config is written to `~/.opencodereview/config.json`.
 
+3. For SVN reviews, install an `svn` 1.7+ command-line client and make sure it is on `PATH`. Configure repository authentication and certificate trust in SVN before opening VS Code; target URLs must not contain credentials.
+
+SVN workspace comments can be mounted on local editor files. Comments from immutable SVN revision/remote reviews remain in the sidebar because VS Code's built-in snapshot URI provider is Git-specific; the reviewed content itself still comes from OCR's frozen SVN destination revision.
+
 ---
 
 ## Development
@@ -60,7 +65,7 @@ yarn watch        # watch-mode dev build (recommended: rebuilds out/ on change)
 
 Then open the `extensions/vscode` folder in VS Code and press **F5** to launch the
 Extension Development Host (debug config is provided in `.vscode/launch.json`). In the new
-window, open a project with Git changes — you'll see the Open Code Review icon in the
+window, open a project with Git or SVN changes — you'll see the Open Code Review icon in the
 activity bar and can start a review.
 
 > After editing code: WebView changes require **reopening the sidebar** in the dev host window
@@ -138,7 +143,7 @@ Or in VS Code: Extensions panel → top-right `⋯` → **Install from VSIX…**
 It uses a **Monolithic WebView + Thin Extension Host** design:
 
 - The **WebView** is a separately built Preact SPA that reproduces the full visual and interactive prototype.
-- The **Extension Host** layer is thin, handling only CLI invocation, the file system, Git operations, and editor comments.
+- The **Extension Host** layer is thin, handling CLI invocation, VCS detection/routing, the file system, Git-native diffs, and editor comments. SVN file selection is delegated to OCR rather than Git services.
 - The two communicate via `postMessage`, with shared TypeScript types in `src/shared/` for type safety.
 
 ```

@@ -170,6 +170,44 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## Subversion client (for SVN reviews)
+
+OCR does not bundle Subversion. Workspace, revision, and remote-target reviews
+require the `svn` command-line client version 1.7 or newer. Choose a package
+from the [Apache Subversion binary package list](https://subversion.apache.org/packages.html),
+or use the platform package manager:
+
+```powershell
+# Windows: install SlikSVN, VisualSVN, or the optional command-line tools
+# from TortoiseSVN, then make sure the directory containing svn.exe is on PATH.
+Get-Command svn
+```
+
+```bash
+# macOS
+brew install subversion
+
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install subversion
+
+# Fedora / RHEL
+sudo dnf install subversion    # use yum on older releases
+```
+
+Verify the client after installation:
+
+```bash
+svn --version --quiet
+```
+
+OCR invokes every repository operation non-interactively. For a protected
+server, run `svn info <repository-url>` once as the same OS account to establish
+authentication and certificate trust, then verify that
+`svn info --non-interactive <repository-url>` succeeds. Keep credentials out of
+the URL and OCR arguments. `svnadmin` is needed only for local repository
+fixtures or contributor tests, not for normal reviews.
+
 ## Build from source
 
 You only need this path if you're hacking on OCR or running on a platform

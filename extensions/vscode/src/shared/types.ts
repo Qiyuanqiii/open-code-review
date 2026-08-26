@@ -7,6 +7,8 @@ export enum ReviewMode {
   Commit = 'commit',
 }
 
+export type RepositoryKind = 'git' | 'svn' | 'unknown';
+
 export type ReviewState =
   | 'idle' | 'running' | 'done' | 'empty' | 'cancelled' | 'failed';
 
@@ -81,6 +83,7 @@ export interface FileChange {
 }
 
 export interface GitState {
+  vcs: RepositoryKind;
   branches: string[];
   currentBranch: string;
   recentCommits: CommitInfo[];
@@ -105,15 +108,32 @@ export interface EnvCheckResult {
 
 export interface CliRunOptions {
   mode: ReviewMode;
+  vcs?: RepositoryKind;
   from?: string;
   to?: string;
   commit?: string;
+  svnFromTarget?: string;
+  svnToTarget?: string;
   customPrompt?: string;
   concurrency?: number;
 }
 
 /** 审查完成后的评论挂载上下文（与 CliRunOptions 字段一致）。 */
-export type ReviewContext = Pick<CliRunOptions, 'mode' | 'from' | 'to' | 'commit'>;
+export type ReviewContext = Pick<
+  CliRunOptions,
+  'mode' | 'vcs' | 'from' | 'to' | 'commit' | 'svnFromTarget' | 'svnToTarget'
+>;
+
+export interface DelegatePreview {
+  vcs: RepositoryKind;
+  mode: string;
+  resolvedBase?: string;
+  resolvedHead?: string;
+  exactRange?: string;
+  resolvedBasePeg?: string;
+  resolvedHeadPeg?: string;
+  reviewableFiles: FileChange[];
+}
 
 export interface CommentSyncState {
   index: number;

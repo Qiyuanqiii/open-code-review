@@ -221,10 +221,11 @@ hunk 头 `@@ -x,y +m,n @@` 计算范围——通常 `m-50` 到 `m+n+50`。
 | `query_name` | 是 | — | 与每个文件的 **basename**（最后一个 `/` 之后的部分）做子串匹配，而非全路径。 |
 | `case_sensitive` | 否 | `false` | 设为 `true` 做精确大小写匹配。 |
 
-候选集在工作区模式下来自 `git ls-files --cached --others --exclude-standard`，
-在区间 / commit 模式下来自 `git ls-tree -r --name-only <ref>`。无扩展名的文件
-被跳过，但 `Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
-`Containerfile` 例外。
+对于 Git，候选集在工作区模式下来自
+`git ls-files --cached --others --exclude-standard`，在区间 / commit 模式下来自
+`git ls-tree -r --name-only <ref>`。对于 SVN，工作区模式会遍历工作副本并遵循排除规则；
+不可变模式则在冻结后的目标 URL/revision 上递归执行 `svn list --xml`。无扩展名的文件会被
+跳过，但 `Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、`Containerfile` 例外。
 
 ### 输出
 
@@ -246,8 +247,9 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ## `code_search`
 
-全仓全文搜索。由 `git grep` 驱动，因此理解 `pathspec` 语法并遵循
-`.gitignore`。
+对仓库进行全文搜索。Git 使用 `git grep`。SVN 会枚举 provider 选出的文件，并搜索工作副本
+内容，或通过 `svn cat` 搜索冻结目标 revision 的不可变内容，因此 revision 评审既不依赖 Git，
+也不会读取陈旧的工作副本。
 
 ### Schema
 
@@ -300,13 +302,13 @@ Match lines: 1
 
 ### 限制
 
-- 通过 `git grep --max-count 100` 把每文件命中数上限设为 **100**，因此跨多文件的
-  总输出可能超过 100。触及每文件上限时，输出前会加
+- Git 通过 `git grep --max-count 100` 把每文件命中数上限设为 **100**；SVN 的有界内容
+  遍历最多返回 **100 个总命中**。发生截断时，输出前会加
   `Note: The results have been truncated. Only showing first 100 results.`。
 - 空 / 仅空白的 `search_text` 返回 `Error: search_text is blank`，而不是展开成
   每一行。
-- 工作区模式搜索**当前工作树**，区间 / commit 模式搜索解析出的目标 ref
-  （`FileReader.Ref` 作为位置参数传给 `git grep`）。
+- 工作区模式搜索**当前工作树/工作副本**。不可变 Git 模式搜索解析出的目标 ref；不可变 SVN
+  模式则列出并读取冻结后的目标以及数字 operative/peg revision。
 
 ## 工具执行与错误
 

@@ -75,6 +75,7 @@ func TestLoadDetail_ReturnsItems(t *testing.T) {
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
+		VCS:        "svn",
 		ReviewMode: ReviewModeCommit,
 		DiffCommit: "abc123",
 	})
@@ -92,6 +93,9 @@ func TestLoadDetail_ReturnsItems(t *testing.T) {
 	}
 	if summary.TotalComments != 2 {
 		t.Errorf("TotalComments = %d, want 2", summary.TotalComments)
+	}
+	if summary.VCS != "svn" {
+		t.Errorf("VCS = %q, want svn", summary.VCS)
 	}
 	if summary.Aborted {
 		t.Errorf("summary should not be aborted after Finalize")

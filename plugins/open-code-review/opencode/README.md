@@ -76,6 +76,8 @@ an LLM request.
 - Cancelling the OpenCode tool terminates the OCR process.
 - OCR credentials remain in the existing OCR configuration or environment.
 - Workspace mode includes Git staged/unstaged/untracked files or SVN versioned/unversioned files.
+- `commit`, `from`, and `to` accept Git refs or exact SVN revisions. SVN inputs are frozen to numeric endpoints and never use Git merge-base semantics.
+- Exact remote SVN path ranges use paired `svnFromTarget` / `svnToTarget` values. Configure SVN authentication and certificate trust outside the URL.
 
 ## Development
 

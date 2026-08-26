@@ -53,6 +53,20 @@ OpenAI は異なる auth header と URL フォーマットを使います——`
 カレントディレクトリがどちらでもない場合は早期に終了します。サポート対象のワーキングコピーに
 `cd` するか、`--repo /path/to/repo` を渡してください。
 
+### `svn` がない、古すぎる、または認証に失敗する
+
+SVN レビューにはバージョン 1.7 以降のコマンドラインクライアントが必要です。
+`svn --version --quiet` を実行し、コマンドがない場合は
+[プラットフォーム別のインストール手順](../installation/)
+に従ってください。
+
+OCR は `--non-interactive` を使用するため、パスワードや証明書のプロンプトには応答できません。
+OCR と同じ OS アカウントで `svn info <repository-url>` を一度実行し、通常の SVN 認証
+キャッシュと証明書の信頼を設定してから、`svn info --non-interactive <repository-url>` が
+成功することを確認してください。URL に資格情報を埋め込まないでください。Revision には
+数値、`HEAD`、または `{date}` を使用できます。`BASE`、`COMMITTED`、`PREV` は可変の
+ワーキングコピー状態に依存するため、意図的に拒否されます。
+
 ### "No tool calls parsed"（ローカルモデル / Ollama）
 
 ```
@@ -326,9 +340,10 @@ collector にエクスポートされることは決してありません。予�
 
 サポートします。Subversion 1.7 以降では、管理対象および未管理のワーキングコピー変更、
 `--commit REV` による単一の不変 revision、`--from REV --to REV` による正確な revision
-範囲をレビューできます。`HEAD` と日付 revision は最初に数値端点へ固定されます。
-ブランチ間 URL 比較と merge server 自動化は今後の作業です。Mercurial などその他の VCS
-にはまだ provider がありません。
+範囲をレビューできます。`HEAD` と日付 revision は最初に数値端点へ固定されます。パス間の
+正確な比較には、対になった `--svn-from-target` と `--svn-to-target` を使用します。絶対 URL
+にはワーキングコピーは不要ですが、リポジトリ相対の `^/` 対象には必要です。Mercurial など
+その他の VCS にはまだ provider がありません。
 
 ### なぜバイナリは `opencodereview` なのに CLI は `ocr` なのか？
 

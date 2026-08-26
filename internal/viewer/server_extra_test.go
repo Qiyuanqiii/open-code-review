@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestParseTemplate_ReposHTML(t *testing.T) {
@@ -109,7 +111,16 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 	renderTemplate(rr, "sessions.html", sessionsData{
 		EncodedRepo: "test-repo",
 		RepoName:    "MyProject",
-		Sessions:    []SessionSummary{},
+		Sessions: []SessionSummary{
+			{
+				SessionID:  "svn-session",
+				VCS:        "svn",
+				ReviewMode: "range",
+				DiffFrom:   "120",
+				DiffTo:     "128",
+			},
+			{SessionID: "legacy-git", GitBranch: "main"},
+		},
 	})
 
 	if rr.Code != http.StatusOK {
@@ -118,15 +129,30 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "MyProject") {
 		t.Errorf("expected repo name in sessions template")
 	}
+	for _, want := range []string{"svn", "120..128", ">git<"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Errorf("expected SVN input metadata %q in sessions template", want)
+		}
+	}
 }
 
 func TestRenderTemplate_SessionPage(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
 		Summary: SessionSummary{
-			SessionID: "abc",
-			Model:     "gpt-4",
-			CWD:       "/test",
+			SessionID:  "abc",
+			Model:      "gpt-4",
+			CWD:        "/test",
+			VCS:        "svn",
+			ReviewMode: "commit",
+			DiffCommit: "128",
+			RunManifest: &session.RunManifest{Input: session.ManifestInput{
+				ResolvedBase:    "127",
+				ResolvedHead:    "128",
+				ExactRange:      "127:128",
+				ResolvedBasePeg: "127",
+				ResolvedHeadPeg: "128",
+			}},
 		},
 		Files: []*FileGroup{
 			{
@@ -153,6 +179,27 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	for _, want := range []string{"<strong>VCS:</strong> svn", "<strong>Revision:</strong> <code>128</code>", "<strong>Resolved base:</strong> <code>127</code>", "<strong>Head peg:</strong> <code>128</code>"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Errorf("expected SVN input metadata %q in session template", want)
+		}
+	}
+}
+
+func TestRenderTemplate_LegacyGitSessionInfersVCS(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{Summary: SessionSummary{
+			SessionID: "legacy",
+			GitBranch: "main",
+		}},
+	})
+
+	if !strings.Contains(rr.Body.String(), "<strong>VCS:</strong> git") {
+		t.Fatal("legacy Git session should infer VCS from its branch")
 	}
 }
 

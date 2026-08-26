@@ -8,7 +8,28 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
+
+func TestNewAgentRecordsOnlyDetectedVCS(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	for _, tc := range []struct {
+		name string
+		kind vcs.Kind
+		want string
+	}{
+		{name: "plain directory", kind: vcs.Unknown, want: ""},
+		{name: "Subversion", kind: vcs.Subversion, want: "svn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewAgent(Args{RepoDir: t.TempDir(), RepositoryKind: tc.kind})
+			defer func() { _ = a.Session().Finalize() }()
+			if got := a.Session().VCS; got != tc.want {
+				t.Fatalf("session VCS = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 // TestScanAgent_SessionID_Persistent covers the non-empty return of SessionID:
 // a session with a JSONL writer reports its persisted ID.

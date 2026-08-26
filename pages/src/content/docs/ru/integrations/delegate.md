@@ -107,9 +107,10 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
-Для режима диапазона или коммита SVN сначала получите выбранный URL командой
-`svn info --show-item url`, затем используйте числовые `resolved_base` и
-`resolved_head`, возвращённые preview:
+Для режима диапазона или коммита SVN сначала выполните
+`svn info --xml --non-interactive --depth empty -- .` и прочитайте значение
+`<url>`. Эта XML-форма доступна во всём поддерживаемом диапазоне SVN 1.7+.
+Затем используйте числовые `resolved_base` и `resolved_head`, возвращённые preview:
 
 ```bash
 svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>

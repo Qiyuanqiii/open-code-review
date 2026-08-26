@@ -12,7 +12,7 @@ const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
 
 export class GitService {
   private api: any | null = null;
-  private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
+  private cache: GitState = { vcs: 'git', branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
   private reviewFileStatus = new Map<string, FileChange['status']>();
 
   constructor(private log?: vscode.OutputChannel) {}
@@ -68,7 +68,7 @@ export class GitService {
   }
 
   async getState(mode: ReviewMode): Promise<GitState> {
-    const empty: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
+    const empty: GitState = { vcs: 'git', branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
 
     if (mode === ReviewMode.Workspace) {
       await this.refreshWorkspaceFiles();
@@ -435,7 +435,9 @@ export class GitService {
   }
 
   async readWorkspaceFile(relPath: string): Promise<string | null> {
-    const root = await this.repoRoot();
+    const root = await this.repoRoot()
+      ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath
+      ?? null;
     if (!root) return null;
     try {
       return await readFile(`${root}/${relPath}`, 'utf8');

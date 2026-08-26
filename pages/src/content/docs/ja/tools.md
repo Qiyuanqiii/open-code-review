@@ -222,10 +222,12 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 | `query_name` | はい | — | 各ファイルの **basename**（最後の `/` より後の部分）に対して部分文字列マッチを行い、フルパスには行いません。 |
 | `case_sensitive` | いいえ | `false` | `true` に設定すると大文字小文字を厳密に区別してマッチします。 |
 
-候補セットは、ワークスペースモードでは `git ls-files --cached --others --exclude-standard` から、
-区間 / commit モードでは `git ls-tree -r --name-only <ref>` から得られます。拡張子のないファイルは
-スキップされますが、`Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
-`Containerfile` は例外です。
+Git の候補セットは、ワークスペースモードでは
+`git ls-files --cached --others --exclude-standard`、区間 / commit モードでは
+`git ls-tree -r --name-only <ref>` から得られます。SVN のワークスペースモードは除外ルールを
+尊重してワーキングコピーを走査し、不変モードは固定された宛先 URL/revision に対して再帰的な
+`svn list --xml` を使用します。拡張子のないファイルはスキップされますが、`Makefile`、
+`Dockerfile`、`LICENSE`、`Vagrantfile`、`Containerfile` は例外です。
 
 ### 出力
 
@@ -247,8 +249,10 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ## `code_search`
 
-リポジトリ全体の全文検索。`git grep` によって駆動されるため、`pathspec` 構文を理解し、
-`.gitignore` に従います。
+リポジトリ全体の全文検索です。Git は `git grep` を使用します。SVN は provider が選択した
+ファイルを列挙し、ワーキングコピーの内容、または固定された宛先 revision の不変な
+`svn cat` 内容を検索するため、Git に依存せず、revision レビューで古いワーキングコピーを
+読みません。
 
 ### Schema
 
@@ -301,12 +305,13 @@ Match lines: 1
 
 ### 制限
 
-- `git grep --max-count 100` によってファイルごとのヒット数上限を **100** に設定するため、複数ファイルにまたがる
-  合計出力は 100 を超える可能性があります。ファイルごとの上限に達した場合、出力の前に
+- Git は `git grep --max-count 100` によりファイルごとのヒット数を **100** に制限し、SVN の
+  有界 content walker は**合計 100 件**で停止します。切り詰められた場合、出力の前に
   `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
 - 空 / 空白のみの `search_text` は、各行に展開されるのではなく `Error: search_text is blank` を返します。
-- ワークスペースモードは**現在のワークツリー**を検索し、区間 / commit モードは解決された対象の ref を検索します
-  （`FileReader.Ref` が位置引数として `git grep` に渡されます）。
+- ワークスペースモードは**現在のワークツリー/ワーキングコピー**を検索します。不変 Git モードは
+  解決済みの対象 ref を検索し、不変 SVN モードは固定された宛先と数値 operative/peg revision を
+  列挙して読み取ります。
 
 ## ツールの実行とエラー
 

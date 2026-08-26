@@ -95,8 +95,10 @@ git diff <merge_base>..<to> -- <path>
 git show <commit> -- <path>
 ```
 
-对于 SVN Range 或 Commit 模式，先通过 `svn info --show-item url` 获取所选 URL，
-再使用 preview 返回的数字 `resolved_base` 与 `resolved_head`：
+对于 SVN Range 或 Commit 模式，先运行
+`svn info --xml --non-interactive --depth empty -- .` 并读取 `<url>` 值。
+该 XML 形式兼容项目支持的整个 SVN 1.7+ 范围。然后使用 preview 返回的数字
+`resolved_base` 与 `resolved_head`：
 
 ```bash
 svn diff --git --internal-diff --show-copies-as-adds --old <working-copy-url>@<resolved_base> --new <working-copy-url>@<resolved_head>

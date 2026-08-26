@@ -51,19 +51,23 @@ func ValidateRevision(raw string) error {
 // so resolving there also handles history from before the selected target was
 // created.
 func ResolveRevision(ctx context.Context, dir, repositoryRoot, raw string) (string, error) {
+	return resolveRevision(ctx, dir, repositoryRoot, raw, false)
+}
+
+func resolveRevision(ctx context.Context, dir, repositoryRoot, raw string, nonInteractive bool) (string, error) {
 	if err := ValidateRevision(raw); err != nil {
 		return "", err
 	}
 	if repositoryRoot == "" {
 		return "", fmt.Errorf("Subversion repository root is empty")
 	}
-	revisionArg := raw
-	if numericRevisionRE.MatchString(revisionArg) && (revisionArg[0] == 'r' || revisionArg[0] == 'R') {
-		revisionArg = revisionArg[1:]
-	} else if strings.EqualFold(revisionArg, "HEAD") {
-		revisionArg = "HEAD"
+	revisionArg := revisionArgument(raw)
+	args := []string{"info", "--xml"}
+	if nonInteractive {
+		args = append(args, "--non-interactive")
 	}
-	out, err := Output(ctx, dir, "info", "--xml", "--revision", revisionArg, "--", PegTarget(repositoryRoot, "HEAD"))
+	args = append(args, "--revision", revisionArg, "--", PegTarget(repositoryRoot, "HEAD"))
+	out, err := Output(ctx, dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("resolve Subversion revision %q: %w", raw, err)
 	}
@@ -79,6 +83,16 @@ func ResolveRevision(ctx context.Context, dir, repositoryRoot, raw string) (stri
 		return "", fmt.Errorf("resolve Subversion revision %q: svn info returned invalid revision %q", raw, revision)
 	}
 	return revision, nil
+}
+
+func revisionArgument(raw string) string {
+	if numericRevisionRE.MatchString(raw) && (raw[0] == 'r' || raw[0] == 'R') {
+		return raw[1:]
+	}
+	if strings.EqualFold(raw, "HEAD") {
+		return "HEAD"
+	}
+	return raw
 }
 
 // PreviousRevision returns the revision immediately before revision. Revision

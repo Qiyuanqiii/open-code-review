@@ -64,6 +64,10 @@ type Args struct {
 	// From and To define the diff range (e.g., "main..feature-branch").
 	From string
 	To   string
+	// SVNFromTarget and SVNToTarget select explicit remote SVN directory URLs
+	// for range mode. They are runtime-only and must never enter session logs.
+	SVNFromTarget string
+	SVNToTarget   string
 
 	// Commit is a single commit hash to review (vs its parent).
 	Commit string
@@ -534,6 +538,11 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	if a.args.RepositoryKind == vcs.Subversion {
 		var svnProvider *diff.SVNProvider
 		switch {
+		case a.args.SVNFromTarget != "" || a.args.SVNToTarget != "":
+			if commit != "" || from == "" || to == "" || a.args.SVNFromTarget == "" || a.args.SVNToTarget == "" {
+				return fmt.Errorf("explicit Subversion targets require --from, --to, --svn-from-target, and --svn-to-target")
+			}
+			svnProvider = diff.NewSVNTargetRangeProvider(a.args.RepoDir, from, to, a.args.SVNFromTarget, a.args.SVNToTarget)
 		case commit != "":
 			svnProvider = diff.NewSVNCommitProvider(a.args.RepoDir, commit)
 		case from != "" && to != "":
@@ -995,6 +1004,8 @@ func (a *Agent) applyInputIdentity(b *session.ManifestBuilder) {
 	in.ResolvedBase = a.inputResolution.ResolvedBase
 	in.ResolvedHead = a.inputResolution.ResolvedHead
 	in.ExactRange = a.inputResolution.ExactRange
+	in.ResolvedBasePeg = a.inputResolution.SourcePegRevision
+	in.ResolvedHeadPeg = a.inputResolution.TargetPegRevision
 	in.SourceArtifactSHA256 = a.sourceArtifactSHA256()
 	b.SetInput(in)
 

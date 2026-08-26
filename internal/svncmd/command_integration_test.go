@@ -51,6 +51,17 @@ func TestCommandIntegration(t *testing.T) {
 		}
 	}
 
+	targets, err := ResolveTargetPair(ctx, root, "r1", "HEAD", repoURL+"/trunk@HEAD", repoURL+"/trunk@HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets.Source.URL != repoURL+"/trunk" || targets.Source.OperativeRevision != "1" || targets.Source.PegRevision != "2" {
+		t.Fatalf("resolved source target = %+v", targets.Source)
+	}
+	if targets.Destination.URL != repoURL+"/trunk" || targets.Destination.OperativeRevision != "2" || targets.Destination.PegRevision != "2" {
+		t.Fatalf("resolved destination target = %+v", targets.Destination)
+	}
+
 	listXML, err := Output(ctx, wc, "list", "--xml", "--recursive", "--revision", "2", "--", PegTarget(info.URL, "2"))
 	if err != nil {
 		t.Fatal(err)

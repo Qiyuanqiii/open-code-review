@@ -58,9 +58,18 @@ func TestParseInfoEntriesRejectsInvalidOrEmptyXML(t *testing.T) {
 }
 
 func TestSafeCommandTextRedactsURLUserinfo(t *testing.T) {
-	got := safeCommandText("svn cat https://alice:secret@svn.example.com/repo/file@7")
-	if got != "svn cat https://<redacted>@svn.example.com/repo/file@7" {
+	got := safeCommandText("svn cat https://alice:secret@svn.example.com/repo/file?token=value@7; Authentication failed for 'alice'; username: alice")
+	if got != "svn cat https://<redacted>@svn.example.com/repo/file?<redacted> Authentication failed for <redacted>; username: <redacted>" {
 		t.Fatalf("safeCommandText = %q", got)
+	}
+}
+
+func TestSafeCommandArgsRedactsCredentialOptions(t *testing.T) {
+	got := safeCommandArgs([]string{"cat", "--username", "alice", "--password=secret", "--config-option", "servers:global:http-proxy-password=secret"})
+	for _, secret := range []string{"alice", "secret", "http-proxy-password"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("safeCommandArgs disclosed %q in %q", secret, got)
+		}
 	}
 }
 
@@ -121,5 +130,17 @@ func TestCommandErrorWithDiagnostic(t *testing.T) {
 	cancel()
 	if got = commandErrorWithDiagnostic(ctx, nil, baseErr, "diagnosis"); !errors.Is(got, context.Canceled) {
 		t.Fatalf("canceled error = %v", got)
+	}
+}
+
+func TestCommandErrorProvidesNonInteractiveAuthAndCertificateGuidance(t *testing.T) {
+	baseErr := errors.New("exit status 1")
+	auth := commandErrorWithDiagnostic(context.Background(), []string{"info"}, baseErr, "svn: E170001: Authentication failed")
+	if !strings.Contains(auth.Error(), "preconfigure credentials") {
+		t.Fatalf("authentication guidance = %v", auth)
+	}
+	certificate := commandErrorWithDiagnostic(context.Background(), []string{"info"}, baseErr, "svn: E230001: Server SSL certificate verification failed")
+	if !strings.Contains(certificate.Error(), "pre-trust the server certificate") {
+		t.Fatalf("certificate guidance = %v", certificate)
 	}
 }

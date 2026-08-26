@@ -13,7 +13,7 @@ import (
 )
 
 func addRepoFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "repo", "", "root directory of the Git or Subversion working copy (default: current dir)")
+	cmd.Flags().StringVar(target, "repo", "", "Git/SVN working-copy root, or config directory for scan/remote SVN (default: current dir)")
 }
 
 func addRuleFlag(cmd *cobra.Command, target *string) {
@@ -24,6 +24,11 @@ func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 	cmd.Flags().StringVar(from, "from", "", "source Git ref or SVN revision to start the diff from")
 	cmd.Flags().StringVar(to, "to", "", "destination Git ref or SVN revision to end the diff at")
 	cmd.Flags().StringVarP(commit, "commit", "c", "", "single Git commit or SVN revision to review against its predecessor")
+}
+
+func addSVNTargetFlags(cmd *cobra.Command, fromTarget, toTarget *string) {
+	cmd.Flags().StringVar(fromTarget, "svn-from-target", "", "source SVN repository URL with optional @PEG (requires --from and --svn-to-target)")
+	cmd.Flags().StringVar(toTarget, "svn-to-target", "", "destination SVN repository URL with optional @PEG (requires --to and --svn-from-target)")
 }
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {
@@ -125,6 +130,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
+	if err := validateSVNTargetMode(opts.from, opts.to, opts.commit, opts.svnFromTarget, opts.svnToTarget); err != nil {
+		return err
+	}
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
@@ -192,8 +200,24 @@ func validateDelegateOptions(opts *delegateOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
+	if err := validateSVNTargetMode(opts.from, opts.to, opts.commit, opts.svnFromTarget, opts.svnToTarget); err != nil {
+		return err
+	}
 	if opts.format != "text" && opts.format != "json" {
 		return fmt.Errorf("invalid --format value %q: must be 'text' or 'json'", opts.format)
+	}
+	return nil
+}
+
+func validateSVNTargetMode(from, to, commit, fromTarget, toTarget string) error {
+	if fromTarget == "" && toTarget == "" {
+		return nil
+	}
+	if fromTarget == "" || toTarget == "" {
+		return fmt.Errorf("--svn-from-target and --svn-to-target must be provided together")
+	}
+	if commit != "" || from == "" || to == "" {
+		return fmt.Errorf("--svn-from-target and --svn-to-target require --from/--to range mode")
 	}
 	return nil
 }
@@ -204,6 +228,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
+	addSVNTargetFlags(cmd, &opts.svnFromTarget, &opts.svnToTarget)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
@@ -250,6 +275,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 func registerDelegateFlags(cmd *cobra.Command, opts *delegateOptions) {
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
+	addSVNTargetFlags(cmd, &opts.svnFromTarget, &opts.svnToTarget)
 	addExcludeFlag(cmd, &opts.excludes)
 	addRuleFlag(cmd, &opts.rulePath)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)

@@ -187,8 +187,72 @@ func TestExecuteDelegatePreview_SubversionCommitJSON(t *testing.T) {
 	if got.ResolvedBase != "1" || got.ResolvedHead != "2" || got.ExactRange != "1:2" {
 		t.Fatalf("resolved endpoints = %q/%q (%q)", got.ResolvedBase, got.ResolvedHead, got.ExactRange)
 	}
+	if got.ResolvedBasePeg != "1" || got.ResolvedHeadPeg != "2" {
+		t.Fatalf("resolved pegs = %q/%q", got.ResolvedBasePeg, got.ResolvedHeadPeg)
+	}
 	if len(got.ReviewableFiles) != 1 || got.ReviewableFiles[0].Path != "review.go" {
 		t.Fatalf("reviewable_files = %#v", got.ReviewableFiles)
+	}
+	assertNoSessionStore(t, home)
+}
+
+func TestExecuteDelegatePreview_SubversionRemoteTargetsWithoutWorkingCopy(t *testing.T) {
+	for _, name := range []string{"svn", "svnadmin"} {
+		if _, err := exec.LookPath(name); err != nil {
+			t.Skipf("%s is not installed", name)
+		}
+	}
+	home := freshOCRHome(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	trunkWC := filepath.Join(root, "trunk-wc")
+	branchWC := filepath.Join(root, "branch-wc")
+	configDir := filepath.Join(root, "config")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runDelegateSVN(t, root, "svnadmin", "create", repo)
+	repoURL := delegateSVNURL(repo)
+	runDelegateSVN(t, root, "svn", "mkdir", repoURL+"/trunk", repoURL+"/branches", "-m", "create layout")
+	runDelegateSVN(t, root, "svn", "checkout", repoURL+"/trunk", trunkWC)
+	if err := os.WriteFile(filepath.Join(trunkWC, "review.go"), []byte("package review\n\nconst Value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDelegateSVN(t, trunkWC, "svn", "add", "review.go")
+	runDelegateSVN(t, trunkWC, "svn", "commit", "-m", "add baseline")
+	runDelegateSVN(t, root, "svn", "copy", repoURL+"/trunk@2", repoURL+"/branches/feature", "-m", "create feature branch")
+	runDelegateSVN(t, root, "svn", "checkout", repoURL+"/branches/feature", branchWC)
+	if err := os.WriteFile(filepath.Join(branchWC, "review.go"), []byte("package review\n\nconst Value = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDelegateSVN(t, branchWC, "svn", "commit", "-m", "change feature branch")
+
+	out := captureDelegateStdout(t, func() {
+		err := executeDelegatePreview(delegateOptions{
+			repoDir: configDir, from: "2", to: "4",
+			svnFromTarget: repoURL + "/trunk@2",
+			svnToTarget:   repoURL + "/branches/feature@4",
+			format:        "json",
+		})
+		if err != nil {
+			t.Fatalf("executeDelegatePreview(remote SVN targets) error: %v", err)
+		}
+	})
+	var got delegatePreviewJSON
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode preview JSON: %v\n%s", err, out)
+	}
+	if got.VCS != "svn" || got.Mode != "range" || got.ExactRange != "2:4" {
+		t.Fatalf("unexpected envelope: %#v", got)
+	}
+	if got.ResolvedBasePeg != "2" || got.ResolvedHeadPeg != "4" {
+		t.Fatalf("resolved pegs = %q/%q", got.ResolvedBasePeg, got.ResolvedHeadPeg)
+	}
+	if len(got.ReviewableFiles) != 1 || got.ReviewableFiles[0].Path != "review.go" {
+		t.Fatalf("reviewable_files = %#v", got.ReviewableFiles)
+	}
+	if strings.Contains(string(out), repoURL) {
+		t.Fatalf("delegate output persisted a runtime-only SVN URL: %s", out)
 	}
 	assertNoSessionStore(t, home)
 }

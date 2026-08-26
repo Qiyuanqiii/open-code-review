@@ -23,6 +23,8 @@ type delegateOptions struct {
 	from           string
 	to             string
 	commit         string
+	svnFromTarget  string
+	svnToTarget    string
 	excludes       string
 	rulePath       string
 	background     string
@@ -46,6 +48,11 @@ Output review spec for host-agent delegation (no LLM required).`,
 
   # Preview an immutable SVN revision
   ocr delegate preview --commit 128
+
+  # Preview an exact remote SVN branch comparison
+  ocr delegate preview --from 120 --to 128 \
+    --svn-from-target https://svn.example.com/repos/app/trunk@120 \
+    --svn-to-target https://svn.example.com/repos/app/branches/feature@128
 
   # Preview workspace changes
   ocr delegate preview
@@ -99,14 +106,22 @@ type delegateContext struct {
 }
 
 func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, 0, opts.maxGitProcs, true)
+	reviewOpts := reviewOptions{
+		from: opts.from, to: opts.to, commit: opts.commit,
+		svnFromTarget: opts.svnFromTarget, svnToTarget: opts.svnToTarget,
+	}
+	explicitSVNTargets := hasExplicitSVNTargets(reviewOpts)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, 0, opts.maxGitProcs, !explicitSVNTargets)
 	if err != nil {
 		return nil, err
+	}
+	if explicitSVNTargets {
+		cc.RepositoryKind = vcs.Subversion
+		cc.IsGitRepo = false
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security: reject ref-option injection before any Git command uses it.
-	reviewOpts := reviewOptions{from: opts.from, to: opts.to, commit: opts.commit}
 	if err := validateRepositoryReviewMode(cc.RepositoryKind, reviewOpts); err != nil {
 		return nil, err
 	}
@@ -139,6 +154,8 @@ func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, err
 		From:           dc.opts.from,
 		To:             dc.opts.to,
 		Commit:         dc.opts.commit,
+		SVNFromTarget:  dc.opts.svnFromTarget,
+		SVNToTarget:    dc.opts.svnToTarget,
 		FileFilter:     dc.cc.FileFilter,
 		GitRunner:      dc.cc.GitRunner,
 		SealedInput:    dc.sealed,
@@ -183,11 +200,13 @@ func executeDelegatePreview(opts delegateOptions) error {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 	mergeBase := dc.mergeBase(ctx)
-	var resolvedBase, resolvedHead, exactRange string
+	var resolvedBase, resolvedHead, exactRange, resolvedBasePeg, resolvedHeadPeg string
 	if dc.sealed != nil {
 		resolvedBase = dc.sealed.ResolvedBase
 		resolvedHead = dc.sealed.ResolvedHead
 		exactRange = dc.sealed.ExactRange
+		resolvedBasePeg = dc.sealed.SourcePegRevision
+		resolvedHeadPeg = dc.sealed.TargetPegRevision
 	}
 	if opts.format == "json" {
 		return writeDelegateJSON(delegatePreviewJSON{
@@ -202,6 +221,8 @@ func executeDelegatePreview(opts delegateOptions) error {
 			ResolvedBase:    resolvedBase,
 			ResolvedHead:    resolvedHead,
 			ExactRange:      exactRange,
+			ResolvedBasePeg: resolvedBasePeg,
+			ResolvedHeadPeg: resolvedHeadPeg,
 			Background:      dc.opts.background,
 			TotalFiles:      preview.TotalFiles,
 			ReviewableCount: preview.ReviewableCount,
@@ -236,6 +257,12 @@ func executeDelegatePreview(opts delegateOptions) error {
 	}
 	if exactRange != "" {
 		fmt.Printf("- exact_range: %s\n", exactRange)
+	}
+	if resolvedBasePeg != "" {
+		fmt.Printf("- resolved_base_peg: %s\n", resolvedBasePeg)
+	}
+	if resolvedHeadPeg != "" {
+		fmt.Printf("- resolved_head_peg: %s\n", resolvedHeadPeg)
 	}
 	if dc.opts.background != "" {
 		fmt.Printf("- background: %s\n", dc.opts.background)
@@ -298,6 +325,8 @@ type delegatePreviewJSON struct {
 	ResolvedBase    string                    `json:"resolved_base,omitempty"`
 	ResolvedHead    string                    `json:"resolved_head,omitempty"`
 	ExactRange      string                    `json:"exact_range,omitempty"`
+	ResolvedBasePeg string                    `json:"resolved_base_peg,omitempty"`
+	ResolvedHeadPeg string                    `json:"resolved_head_peg,omitempty"`
 	Background      string                    `json:"background,omitempty"`
 	TotalFiles      int                       `json:"total_files"`
 	ReviewableCount int                       `json:"reviewable_count"`

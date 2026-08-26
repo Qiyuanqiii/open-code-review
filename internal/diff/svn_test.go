@@ -436,6 +436,84 @@ func TestSVNRangeProviderResolvesEquivalentHEADOnce(t *testing.T) {
 	}
 }
 
+func TestSVNTargetRangeProviderKeepsOperativeAndPegEndpointsSealed(t *testing.T) {
+	provider := NewSVNTargetRangeProvider(
+		t.TempDir(),
+		"HEAD", "20",
+		"https://svn.example.com/repos/app/trunk@HEAD",
+		"https://svn.example.com/repos/app/branches/feature@25",
+	)
+	resolveCalls := 0
+	provider.resolveTargets = func(_ context.Context, from, to, fromTarget, toTarget string) (svncmd.ResolvedTargetPair, error) {
+		resolveCalls++
+		if from != "HEAD" || to != "20" || !strings.Contains(fromTarget, "/trunk@HEAD") || !strings.Contains(toTarget, "/feature@25") {
+			t.Fatalf("unexpected target resolution input: %q %q %q %q", from, to, fromTarget, toTarget)
+		}
+		return svncmd.ResolvedTargetPair{
+			Source: svncmd.ResolvedTarget{
+				URL: "https://svn.example.com/repos/app/trunk", RepositoryRoot: "https://svn.example.com/repos/app",
+				RepositoryUUID: "AABB", OperativeRevision: "10", PegRevision: "12",
+			},
+			Destination: svncmd.ResolvedTarget{
+				URL: "https://svn.example.com/repos/app/branches/feature", RepositoryRoot: "https://svn.example.com/repos/app",
+				RepositoryUUID: "AABB", OperativeRevision: "20", PegRevision: "25",
+			},
+		}, nil
+	}
+	var calls [][]string
+	provider.run = func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, slices.Clone(args))
+		switch args[0] {
+		case "diff":
+			return `Index: src/value.go
+===================================================================
+diff --git a/trunk/src/value.go b/branches/feature/src/value.go
+--- a/trunk/src/value.go (revision 10)
++++ b/branches/feature/src/value.go (revision 20)
+@@ -1 +1 @@
+-old
++new
+`, nil
+		case "cat":
+			return "new\n", nil
+		default:
+			return "", errors.New("unexpected SVN command")
+		}
+	}
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 || diffs[0].NewPath != "src/value.go" || diffs[0].NewFileContent != "new\n" {
+		t.Fatalf("diffs = %+v", diffs)
+	}
+	if resolveCalls != 1 || len(calls) != 2 {
+		t.Fatalf("resolve calls = %d, SVN calls = %v", resolveCalls, calls)
+	}
+	diffArgs := strings.Join(calls[0], " ")
+	for _, want := range []string{"--non-interactive", "--notice-ancestry", "/trunk@10", "/branches/feature@20"} {
+		if !strings.Contains(diffArgs, want) {
+			t.Errorf("diff args %q do not contain %q", diffArgs, want)
+		}
+	}
+	if strings.Contains(diffArgs, "--revision") {
+		t.Fatalf("old/new targets already carry their operative revisions: %s", diffArgs)
+	}
+	catArgs := strings.Join(calls[1], " ")
+	if !strings.Contains(catArgs, "--revision 20") || !strings.Contains(catArgs, "/branches/feature/src/value.go@20") {
+		t.Fatalf("destination content was not read from the sealed target: %s", catArgs)
+	}
+	resolved := provider.ResolveInput(context.Background())
+	if resolved.RepositorySourceTarget == "" || resolved.SourcePegRevision != "12" || resolved.TargetPegRevision != "25" {
+		t.Fatalf("resolution = %+v", resolved)
+	}
+	identity := provider.RemoteIdentity(context.Background())
+	if identity != "svn:aabb" {
+		t.Fatalf("remote identity = %q", identity)
+	}
+}
+
 func TestSVNCommitProviderRevisionZeroIsEmpty(t *testing.T) {
 	provider := NewSVNCommitProvider(t.TempDir(), "0")
 	provider.info = func(context.Context) (svncmd.WorkingCopyInfo, error) {

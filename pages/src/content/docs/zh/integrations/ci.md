@@ -440,6 +440,28 @@ script:
   - cat /tmp/ocr-stderr.log
 ```
 
+## Subversion 仓库 hook 与合并自动化
+
+服务端 SVN 自动化使用精确的 old/new 目标，而不是 Git merge-base 语义。仓库提供了可复用
+脚本 `examples/svn/remote-branch-review.sh`：
+
+```bash
+examples/svn/remote-branch-review.sh \
+  /srv/ocr-config \
+  120 'https://svn.example.com/repos/app/trunk@120' \
+  128 'https://svn.example.com/repos/app/branches/feature@128' \
+  > /var/tmp/ocr-svn-review-128.json
+```
+
+五个参数依次是 OCR 配置目录、源 operative revision、源目标、目标 operative revision
+和目标路径。`post-commit` hook 或合并服务应从事件载荷取得这些值，并在仓库锁之外排队运行
+脚本。使用绝对 URL 时，`/srv/ocr-config` 可以是普通目录，不需要 checkout。
+
+脚本输出 JSON，且不接受凭据参数。任务开始前，应为服务账号准备 SVN 认证缓存并信任服务器
+证书。所有 SVN 命令均为非交互式；缺失认证或证书信任会立即失败并给出修复提示。目标 URL
+不得包含 userinfo、query string 或 fragment，也不会出现在 OCR manifest、session 日志、
+delegate 输出或 telemetry 中。
+
 ## 另见
 
 - [CLI 参考](../cli-reference/#json)——两条流水线消费的 JSON 结构，从头写

@@ -253,6 +253,8 @@ type ManifestInput struct {
 	ResolvedBase         string `json:"resolved_base,omitempty"`
 	ResolvedHead         string `json:"resolved_head,omitempty"`
 	ExactRange           string `json:"exact_range,omitempty"`
+	ResolvedBasePeg      string `json:"resolved_base_peg,omitempty"`
+	ResolvedHeadPeg      string `json:"resolved_head_peg,omitempty"`
 	SourceArtifactSHA256 string `json:"source_artifact_sha256,omitempty"`
 }
 

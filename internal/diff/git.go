@@ -98,15 +98,20 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 // resolvable" — a Git root commit and merge commit have no single comparison
 // base, an unborn workspace has no HEAD, and a workspace has no immutable head.
 // ExactRange is populated only when both a unique base and head resolve.
-// RepositoryTarget, RepositoryRoot, and RepositoryUUID are runtime-only SVN
-// metadata; they are never copied into the manifest or session log.
+// RepositorySourceTarget, RepositoryTarget, RepositoryRoot, and RepositoryUUID
+// are runtime-only SVN routing metadata. Numeric SourcePegRevision and
+// TargetPegRevision values are safe to copy into the manifest; target URLs are
+// never copied into a manifest or session log.
 type InputResolution struct {
-	ResolvedBase     string
-	ResolvedHead     string
-	ExactRange       string
-	RepositoryTarget string
-	RepositoryRoot   string
-	RepositoryUUID   string
+	ResolvedBase           string
+	ResolvedHead           string
+	ExactRange             string
+	RepositorySourceTarget string
+	RepositoryTarget       string
+	RepositoryRoot         string
+	RepositoryUUID         string
+	SourcePegRevision      string
+	TargetPegRevision      string
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the

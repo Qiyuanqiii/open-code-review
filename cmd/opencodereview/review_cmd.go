@@ -36,6 +36,8 @@ type reviewOptions struct {
 	from            string
 	to              string
 	commit          string
+	svnFromTarget   string
+	svnToTarget     string
 	resume          string
 	excludes        string
 	outputFormat    string
@@ -74,6 +76,11 @@ var reviewCmd = &cobra.Command{
   # Review one immutable SVN revision or a numeric revision range
   ocr review --commit 128
   ocr review --from 120 --to 128
+
+  # Compare exact remote SVN branch targets (a working copy is optional)
+  ocr review --repo ./ocr-config --from 120 --to 128 \
+    --svn-from-target https://svn.example.com/repos/app/trunk@120 \
+    --svn-to-target https://svn.example.com/repos/app/branches/feature@128
 
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
@@ -130,9 +137,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 	}()
 
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
+	explicitSVNTargets := hasExplicitSVNTargets(opts)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, !explicitSVNTargets)
 	if err != nil {
 		return err
+	}
+	if explicitSVNTargets {
+		cc.RepositoryKind = vcs.Subversion
+		cc.IsGitRepo = false
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
@@ -207,6 +219,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Mode:           mode,
 		Ref:            fileReadRef(mode, opts, sealedInput),
 		SVNTarget:      svnFileReadTarget(sealedInput),
+		SVNPegRevision: svnFileReadPeg(sealedInput),
 		Runner:         cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
@@ -230,6 +243,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		From:                  opts.from,
 		To:                    opts.to,
 		Commit:                opts.commit,
+		SVNFromTarget:         opts.svnFromTarget,
+		SVNToTarget:           opts.svnToTarget,
 		ReviewMode:            reviewModeFromOptions(opts),
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
@@ -410,6 +425,8 @@ func validateResumeIdentityWithSealed(ctx context.Context, cc *commonContext, op
 		From:           opts.from,
 		To:             opts.to,
 		Commit:         opts.commit,
+		SVNFromTarget:  opts.svnFromTarget,
+		SVNToTarget:    opts.svnToTarget,
 		ReviewMode:     reviewModeFromOptions(opts),
 		Template:       *cc.Template,
 		SystemRule:     cc.Resolver,
@@ -436,7 +453,7 @@ func resolveSVNReviewInput(ctx context.Context, cc *commonContext, opts reviewOp
 	if cc.RepositoryKind != vcs.Subversion || (opts.commit == "" && opts.from == "" && opts.to == "") {
 		return nil, nil
 	}
-	resolved, err := diff.ResolveSVNInput(ctx, cc.RepoDir, opts.from, opts.to, opts.commit)
+	resolved, err := diff.ResolveSVNInputWithTargets(ctx, cc.RepoDir, opts.from, opts.to, opts.commit, opts.svnFromTarget, opts.svnToTarget)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Subversion input: %w", err)
 	}
@@ -448,6 +465,16 @@ func svnFileReadTarget(sealed *diff.InputResolution) string {
 		return ""
 	}
 	return sealed.RepositoryTarget
+}
+
+func svnFileReadPeg(sealed *diff.InputResolution) string {
+	if sealed == nil {
+		return ""
+	}
+	// RepositoryTarget is already the historical URL resolved at ResolvedHead.
+	// Pin reads to that operative endpoint; the user-provided peg was consumed
+	// during target resolution and is recorded separately as safe metadata.
+	return sealed.ResolvedHead
 }
 
 // fileReadRef picks the ref file_read resolves paths against.
@@ -496,7 +523,25 @@ func validateRepositoryReviewMode(kind vcs.Kind, opts reviewOptions) error {
 			return fmt.Errorf("%s value: %w", item.flag, err)
 		}
 	}
+	for _, item := range []struct {
+		flag   string
+		target string
+	}{
+		{"--svn-from-target", opts.svnFromTarget},
+		{"--svn-to-target", opts.svnToTarget},
+	} {
+		if item.target == "" {
+			continue
+		}
+		if _, err := svncmd.ParseTargetSpec(item.target); err != nil {
+			return fmt.Errorf("%s value: %w", item.flag, err)
+		}
+	}
 	return nil
+}
+
+func hasExplicitSVNTargets(opts reviewOptions) bool {
+	return opts.svnFromTarget != "" || opts.svnToTarget != ""
 }
 
 // resolveRepoDir resolves the repo dir for `ocr rules check`. It anchors at the
@@ -559,6 +604,8 @@ func runPreviewContextWithSealed(ctx context.Context, cc *commonContext, opts re
 		From:           opts.from,
 		To:             opts.to,
 		Commit:         opts.commit,
+		SVNFromTarget:  opts.svnFromTarget,
+		SVNToTarget:    opts.svnToTarget,
 		FileFilter:     cc.FileFilter,
 		GitRunner:      cc.GitRunner,
 		SealedInput:    sealed,

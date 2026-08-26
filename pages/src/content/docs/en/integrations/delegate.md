@@ -72,7 +72,7 @@ Outputs:
 
 - **vcs** — git / svn
 - **mode** — workspace / range / commit
-- **ref metadata** — from, to, commit, merge\_base
+- **ref metadata** — from, to, commit, merge\_base, and safe resolved SVN operative/peg revisions
 - **Reviewable file list** — paths, status, insertions/deletions
 - **Excluded files** — with exclusion reason
 
@@ -82,6 +82,7 @@ Common invocations:
 |----------|---------|
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
+| Remote SVN paths | `ocr delegate preview --from 120 --to 128 --svn-from-target <old-url@peg> --svn-to-target <new-url@peg>` |
 | Single commit | `ocr delegate preview -c abc123` |
 
 ### Step 2: Get rules for files
@@ -120,6 +121,32 @@ svn cat --revision <resolved_head> -- <working-copy-url>/<url-escaped-path>@<res
 The explicit URL pegs keep both the diff and destination content independent
 of a dirty, stale, or mixed-revision working copy.
 
+For an explicit repository-path comparison, invoke preview with
+`--svn-from-target` and `--svn-to-target`. The JSON deliberately does not echo
+either URL; retain them in the host agent's runtime input, separate each URL
+from its optional peg suffix, and combine the URL parts with the safe numeric
+`resolved_base`, `resolved_head`, `resolved_base_peg`, and `resolved_head_peg`
+fields:
+
+```bash
+ocr delegate preview --format json \
+  --from 120 --to 128 \
+  --svn-from-target 'https://svn.example.com/repos/app/trunk@120' \
+  --svn-to-target 'https://svn.example.com/repos/app/branches/feature@128'
+
+svn info --xml --non-interactive --revision <resolved_base> -- <source-target-url>@<resolved_base_peg>
+svn info --xml --non-interactive --revision <resolved_head> -- <destination-target-url>@<resolved_head_peg>
+
+svn diff --non-interactive --git --internal-diff --show-copies-as-adds \
+  --notice-ancestry \
+  --old <source-url-from-info>@<resolved_base> \
+  --new <destination-url-from-info>@<resolved_head>
+```
+
+This compares the exact SVN endpoints; it does not apply Git merge-base
+semantics. Resolving the historical URLs first preserves path moves. Destination
+reads use the destination URL returned by `svn info` at `resolved_head`.
+
 **Workspace mode**:
 ```bash
 git diff HEAD -- <path>        # Git tracked files
@@ -156,6 +183,8 @@ Classify each finding by severity:
 |------|-------------|
 | `--from <ref>` | Source ref for range mode |
 | `--to <ref>` | Target ref for range mode |
+| `--svn-from-target <url[@peg]>` | Source SVN directory for an exact remote range |
+| `--svn-to-target <url[@peg]>` | Destination SVN directory for an exact remote range |
 | `-c, --commit <hash>` | Single commit mode |
 | `--repo <path>` | Repository root (default: cwd) |
 | `--rule <path>` | Custom rule.json path |

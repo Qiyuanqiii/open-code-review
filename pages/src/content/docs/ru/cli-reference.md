@@ -105,10 +105,12 @@ ocr r      [flags]   (alias)
 
 | Флаг | Краткая форма | По умолчанию | Описание |
 |---|---|---|---|
-| `--repo <path>` | — | текущий каталог | Корень Git-репозитория или рабочей копии Subversion. |
+| `--repo <path>` | — | текущий каталог | Корень Git-репозитория или рабочей копии Subversion. Для явного удалённого сравнения SVN это может быть обычный каталог с правилами и конфигурацией OCR. |
 | `--from <ref>` | — | — | Исходная ссылка Git или ревизия SVN. Git использует merge-base, SVN — точную разрешённую ревизию. |
 | `--to <ref>` | — | — | Целевая ссылка Git или ревизия SVN. Git вычисляет `merge-base(from, to)..to`, SVN сравнивает точные конечные точки. |
 | `--commit <ref>` | `-c` | — | Один коммит Git или ревизия SVN для сравнения с предыдущей точкой. |
+| `--svn-from-target <url[@peg]>` | — | — | Исходный каталог SVN для удалённого сравнения диапазона. Требует `--svn-to-target` и `--from`/`--to`. |
+| `--svn-to-target <url[@peg]>` | — | — | Целевой каталог SVN. Файловые инструменты читают его по зафиксированным operative- и peg-ревизиям. |
 | `--preview` | `-p` | `false` | Запускает конвейер фильтрации, но пропускает LLM. Выводит список файлов и причины исключения. Учитывает `--format json`; `--format sarif` не поддерживается (в предпросмотре нет завершённых находок для вывода). |
 | `--no-filter` | — | `false` | Сохраняет все комментарии ревью и пропускает вызов LLM постобработки `REVIEW_FILTER_TASK` для каждого файла. |
 | `--resume <session-id>` | — | — | Возобновляет предыдущую совместимую сессию ревью диапазона или коммита. |
@@ -204,6 +206,33 @@ ocr review --from 120 --to 128
 инструментов, фильтрации, создания manifest или проверки resume identity.
 `BASE`, `COMMITTED` и `PREV` отклоняются как неоднозначные в рабочих копиях со
 смешанными ревизиями.
+
+Чтобы сравнить два пути репозитория, например trunk и ветку после серверного
+слияния, явно передайте обе цели:
+
+```bash
+ocr review \
+  --repo ./ocr-config \
+  --from 120 \
+  --to 128 \
+  --svn-from-target 'https://svn.example.com/repos/app/trunk@120' \
+  --svn-to-target 'https://svn.example.com/repos/app/branches/feature@128'
+```
+
+Это точное сравнение SVN: operative-ревизии равны `120:128`, а два значения
+`@PEG` находят исторические исходный и целевой пути. OCR не создаёт семантику
+Git merge base. Обе цели должны быть каталогами одного SVN-репозитория. При
+абсолютных URL рабочая копия не нужна; для целей `^/` параметр `--repo` должен
+указывать на рабочую копию SVN.
+
+Все обозначения operative/peg, включая `HEAD` и `{DATE}`, однократно
+разрешаются в числа до `svn diff`, `svn cat`, фильтрации и вычисления resume
+identity. Пути diff нормализуются относительно двух выбранных каталогов, а
+целевое содержимое всегда читается из `--svn-to-target`, а не с диска. Команды
+запускаются с `--non-interactive`, чтобы hook не завис на запросе. Заранее
+настройте для учётной записи hook кэш аутентификации SVN и доверие сертификату
+сервера. URL с userinfo, query string или fragment отклоняются; целевые URL не
+записываются в manifest, журналы session, delegate JSON или telemetry.
 
 #### Режим коммита
 
@@ -481,7 +510,7 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git or Subversion working-copy root (default: current dir)
+  --repo <path>    Git/SVN working-copy root, or config directory for scan/remote SVN (default: current dir)
   --rule <path>    Path to a custom rule JSON file
 ```
 

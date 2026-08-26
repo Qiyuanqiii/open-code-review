@@ -169,8 +169,8 @@ test("fake OCR helper removes its temporary directory", async () => {
   await assert.rejects(access(temporaryDirectory), { code: "ENOENT" })
 })
 
-test("ocr_review passes multi-paragraph background through a private temporary file", async () => {
-  const background = `Review requirements\n\n${"x".repeat(6_000)}`
+test("ocr_review trims and passes multi-paragraph background through a private temporary file", async () => {
+  const background = ` \nReview requirements\n\n${"x".repeat(6_000)}\n\t `
   await withFakeOcr(
     [
       "const fs = require('node:fs')",
@@ -194,7 +194,7 @@ test("ocr_review passes multi-paragraph background through a private temporary f
         toolContext(worktree),
       )
       const parsed = JSON.parse(output)
-      assert.equal(parsed.background, background)
+      assert.equal(parsed.background, background.trim())
       assert.equal(parsed.argv.includes("--background"), false)
       assert.deepEqual(parsed.argv, [
         "review",

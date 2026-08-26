@@ -3,7 +3,12 @@
 
 package svncmd
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestParseInfo(t *testing.T) {
 	data := []byte(`<?xml version="1.0" encoding="UTF-8"?>
@@ -44,10 +49,10 @@ func TestParseInfoRejectsMissingRoot(t *testing.T) {
 	}
 }
 
-func TestParseInfoRejectsInvalidOrEmptyXML(t *testing.T) {
-	for _, data := range []string{"<info>", "<info></info>"} {
-		if _, err := ParseInfo([]byte(data)); err == nil {
-			t.Errorf("ParseInfo(%q) unexpectedly succeeded", data)
+func TestParseInfoEntriesRejectsInvalidOrEmptyXML(t *testing.T) {
+	for _, data := range [][]byte{[]byte(`<info>`), []byte(`<info/>`)} {
+		if _, err := ParseInfoEntries(data); err == nil {
+			t.Errorf("ParseInfoEntries(%q) succeeded", data)
 		}
 	}
 }
@@ -56,5 +61,65 @@ func TestSafeCommandTextRedactsURLUserinfo(t *testing.T) {
 	got := safeCommandText("svn cat https://alice:secret@svn.example.com/repo/file@7")
 	if got != "svn cat https://<redacted>@svn.example.com/repo/file@7" {
 		t.Fatalf("safeCommandText = %q", got)
+	}
+}
+
+func TestParseInfoEntriesIncludesCopyAndMoveMetadata(t *testing.T) {
+	data := []byte(`<?xml version="1.0"?>
+<info>
+  <entry kind="dir" path="." revision="9">
+    <url>https://svn.example.com/repos/project/trunk</url>
+    <relative-url>^/project/trunk</relative-url>
+    <repository><root>https://svn.example.com/repos</root></repository>
+    <wc-info><wcroot-abspath>C:/work/project</wcroot-abspath><depth>infinity</depth></wc-info>
+  </entry>
+  <entry kind="file" path="new path/file.txt" revision="8">
+    <url>https://svn.example.com/repos/project/trunk/new%20path/file.txt</url>
+    <relative-url>^/project/trunk/new%20path/file.txt</relative-url>
+    <repository><root>https://svn.example.com/repos</root></repository>
+    <wc-info>
+      <wcroot-abspath>C:/work/project</wcroot-abspath><schedule>add</schedule><depth>infinity</depth>
+      <copy-from-url>https://svn.example.com/repos/project/trunk/old%20path/file.txt</copy-from-url>
+      <copy-from-rev>8</copy-from-rev><moved-from>old path/file.txt</moved-from>
+    </wc-info>
+  </entry>
+</info>`)
+
+	entries, err := ParseInfoEntries(data)
+	if err != nil {
+		t.Fatalf("ParseInfoEntries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	got := entries[1]
+	if got.Path != "new path/file.txt" || got.Kind != "file" || got.Revision != "8" {
+		t.Errorf("entry identity = %+v", got)
+	}
+	if got.CopyFromURL != "https://svn.example.com/repos/project/trunk/old%20path/file.txt" || got.CopyFromRevision != "8" {
+		t.Errorf("copy metadata = %+v", got)
+	}
+	if got.MovedFrom != "old path/file.txt" || got.Schedule != "add" || got.Depth != "infinity" {
+		t.Errorf("working-copy metadata = %+v", got)
+	}
+}
+
+func TestCommandErrorWithDiagnostic(t *testing.T) {
+	baseErr := errors.New("exit status 1")
+	got := commandErrorWithDiagnostic(context.Background(), []string{"status", "--xml"}, baseErr, "  useful diagnosis  ")
+	if !errors.Is(got, baseErr) || !strings.Contains(got.Error(), "useful diagnosis") || !strings.Contains(got.Error(), "status --xml") {
+		t.Fatalf("error = %v", got)
+	}
+
+	longDiagnostic := strings.Repeat("x", diagnosticLimit) + "\u754cfailure"
+	got = commandErrorWithDiagnostic(context.Background(), []string{"diff"}, baseErr, longDiagnostic)
+	if !strings.Contains(got.Error(), "...") || !strings.HasSuffix(got.Error(), "failure") {
+		t.Fatalf("bounded diagnostic = %v", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got = commandErrorWithDiagnostic(ctx, nil, baseErr, "diagnosis"); !errors.Is(got, context.Canceled) {
+		t.Fatalf("canceled error = %v", got)
 	}
 }

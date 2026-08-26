@@ -10,15 +10,21 @@ import (
 
 func TestDiff_JSONRoundTrip(t *testing.T) {
 	d := Diff{
-		OldPath:    "a.go",
-		NewPath:    "b.go",
-		Diff:       "@@ -1 +1 @@\n-old\n+new",
-		IsBinary:   false,
-		IsDeleted:  false,
-		IsNew:      true,
-		IsRenamed:  true,
-		Insertions: 5,
-		Deletions:  3,
+		OldPath:          "a.go",
+		NewPath:          "b.go",
+		Diff:             "@@ -1 +1 @@\n-old\n+new",
+		IsBinary:         false,
+		IsDeleted:        false,
+		IsNew:            true,
+		IsRenamed:        true,
+		IsCopied:         true,
+		IsReplaced:       true,
+		CopyFromPath:     "^/trunk/a.go",
+		CopyFromRevision: "41",
+		MovedFromPath:    "old.go",
+		MovedToPath:      "new.go",
+		Insertions:       5,
+		Deletions:        3,
 	}
 
 	data, err := json.Marshal(d)

@@ -163,9 +163,26 @@ ocr review
 
 这通常是 commit 前你想要的。如需更小的范围，请选择性暂存。
 
-在 Subversion 1.7+ 工作副本中，OCR 会自动检测 SVN，并将 `svn diff --git` 的
-Git 兼容输出与 `svn status --xml` 报告的未纳管文件合并。纯属性变更没有可按行定位的
-源代码变更，因此会被忽略。
+在 Subversion 工作副本中，OCR 会先执行 `svn --version --quiet` 做能力检查；其使用的
+Git 兼容 diff 能力要求客户端版本不低于 1.7。在工作区模式下，OCR 将 `svn diff --git`
+与 `svn status --xml` 报告的未纳管文件合并。纯属性变更没有可按行定位的源代码变更，
+因此会被忽略。
+
+SVN 工作区边界情况采用以下明确语义：
+
+- copy 会显示为完整文件新增，并附带相对于仓库根的 copy-from 路径和版本元数据；move
+  显示为带复制来源的新增加一条独立删除；replacement 同样显示为删除加新增。
+- 二进制内容变更及由 MIME 标记的二进制文件会被识别为 binary。仅修改 executable、EOL、
+  MIME 或其他属性时会被忽略，因为没有可按行定位的源代码变更；若内容也有变化，则保留
+  内容或二进制变更，并移除属性文本。
+- mixed-BASE-revision 工作副本受支持，因为每个节点都与自己的 BASE 比较。switched、
+  sparse、obstructed、incomplete 或 conflicted 工作副本会在加载 diff 前被拒绝。
+- 检测到 `svn:externals` 定义或已检出的 external 节点时会拒绝评审。请在每个 external
+  自己的工作副本根目录中单独运行 OCR，以防文件工具越过所选仓库边界。
+- Windows 控制台输出丢失 Unicode 字符时，以 XML 路径为准。文件名中的空格和 `@` 会被
+  保留；SVN 命令只在 `--` 后以工作副本根为目标，因此文件名不会被解析成 peg 语法。
+- 检查过程使用固定数量的递归 SVN 命令，而不是每个文件启动一个进程；所有命令保持串行、
+  有界并可取消。
 
 #### 区间模式
 

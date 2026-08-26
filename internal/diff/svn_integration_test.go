@@ -5,6 +5,7 @@ package diff
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
@@ -197,4 +198,117 @@ func diffsByEffectivePath(diffs []model.Diff) map[string]model.Diff {
 		result[path] = d
 	}
 	return result
+}
+
+func TestSVNProviderIntegrationEdgeCases(t *testing.T) {
+	svnPath, err := exec.LookPath("svn")
+	if err != nil {
+		t.Skip("svn executable is not installed")
+	}
+	svnAdminPath, err := exec.LookPath("svnadmin")
+	if err != nil {
+		t.Skip("svnadmin executable is not installed")
+	}
+	t.Setenv("PATH", filepath.Dir(svnPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fixture := t.TempDir()
+	repository := filepath.Join(fixture, "repository")
+	workingCopy := filepath.Join(fixture, "working copy")
+	runSVNFixtureCommand(t, fixture, svnAdminPath, "create", repository)
+	repositoryURL := localSVNRepositoryURL(t, repository)
+	runSVNFixtureCommand(t, fixture, svnPath, "mkdir", repositoryURL+"/trunk", "-m", "initialize trunk")
+	runSVNFixtureCommand(t, fixture, svnPath, "checkout", repositoryURL+"/trunk", workingCopy)
+
+	unicodePath := "unicode-\u6d4b\u8bd5 space @.go"
+	writeSVNFixtureFile(t, workingCopy, "original.go", []byte("package original\n"))
+	writeSVNFixtureFile(t, workingCopy, "move.go", []byte("package moved\n"))
+	writeSVNFixtureFile(t, workingCopy, "replace.go", []byte("package old\n"))
+	writeSVNFixtureFile(t, workingCopy, "property.txt", []byte("property only\n"))
+	writeSVNFixtureFile(t, workingCopy, "binary.dat", []byte{0, 1, 2, 3})
+	writeSVNFixtureFile(t, workingCopy, unicodePath, []byte("package before\n"))
+	runSVNFixtureCommand(t, workingCopy, svnPath, "add", "--force", "--", ".")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "commit", "-m", "add baseline")
+
+	runSVNFixtureCommand(t, workingCopy, svnPath, "copy", "original.go", "copied.go")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "move", "move.go", "moved.go")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "delete", "replace.go")
+	writeSVNFixtureFile(t, workingCopy, "replace.go", []byte("package replacement\n"))
+	runSVNFixtureCommand(t, workingCopy, svnPath, "add", "replace.go")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "propset", "svn:executable", "yes", "--", "property.txt")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "propset", "svn:eol-style", "LF", "--", "property.txt")
+	runSVNFixtureCommand(t, workingCopy, svnPath, "propset", "svn:mime-type", "application/octet-stream", "--", "binary.dat")
+	writeSVNFixtureFile(t, workingCopy, "binary.dat", []byte{0, 9, 8, 7})
+	writeSVNFixtureFile(t, workingCopy, unicodePath, []byte("package after\n"))
+
+	provider := NewSVNWorkspaceProvider(workingCopy)
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff against real SVN working copy: %v", err)
+	}
+
+	copied := findSVNDiff(t, diffs, "copied.go", false)
+	if !copied.IsCopied || copied.CopyFromPath != "^/trunk/original.go" || copied.CopyFromRevision == "" {
+		t.Errorf("copy metadata = %+v", copied)
+	}
+	movedAdd := findSVNDiff(t, diffs, "moved.go", false)
+	movedDelete := findSVNDiff(t, diffs, "move.go", true)
+	if !movedAdd.IsCopied || movedAdd.MovedFromPath != "move.go" || movedDelete.MovedToPath != "moved.go" {
+		t.Errorf("move metadata = add %+v, delete %+v", movedAdd, movedDelete)
+	}
+	if !findSVNDiff(t, diffs, "replace.go", false).IsReplaced || !findSVNDiff(t, diffs, "replace.go", true).IsReplaced {
+		t.Error("replacement was not reported as delete plus add")
+	}
+	if !findSVNDiff(t, diffs, "binary.dat", false).IsBinary {
+		t.Error("MIME-marked binary content change was not detected")
+	}
+	if got := findSVNDiff(t, diffs, unicodePath, false); got.Insertions != 1 || got.Deletions != 1 {
+		t.Errorf("Unicode/space/@ diff = %+v", got)
+	}
+	for _, d := range diffs {
+		if d.NewPath == "property.txt" || d.OldPath == "property.txt" {
+			t.Errorf("property-only executable/EOL change was not omitted: %+v", d)
+		}
+	}
+
+	t.Run("sparse working copy", func(t *testing.T) {
+		sparse := filepath.Join(fixture, "sparse")
+		runSVNFixtureCommand(t, fixture, svnPath, "checkout", "--depth", "empty", repositoryURL+"/trunk", sparse)
+		_, sparseErr := NewSVNWorkspaceProvider(sparse).GetDiff(context.Background())
+		if sparseErr == nil || !strings.Contains(sparseErr.Error(), "sparse") {
+			t.Fatalf("sparse error = %v", sparseErr)
+		}
+	})
+
+	t.Run("external definition", func(t *testing.T) {
+		runSVNFixtureCommand(t, workingCopy, svnPath, "propset", "svn:externals", "^/trunk nested-external", "--", ".")
+		_, externalErr := NewSVNWorkspaceProvider(workingCopy).GetDiff(context.Background())
+		if externalErr == nil || !strings.Contains(externalErr.Error(), "svn:externals") {
+			t.Fatalf("external error = %v", externalErr)
+		}
+	})
+
+	t.Run("cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, cancelErr := NewSVNWorkspaceProvider(workingCopy).GetDiff(ctx)
+		if !errors.Is(cancelErr, context.Canceled) {
+			t.Fatalf("cancellation error = %v", cancelErr)
+		}
+	})
+}
+
+func localSVNRepositoryURL(t *testing.T, repository string) string {
+	t.Helper()
+	path := filepath.ToSlash(repository)
+	if runtime.GOOS == "windows" && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
+}
+
+func writeSVNFixtureFile(t *testing.T, root, relative string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), content, 0o644); err != nil {
+		t.Fatalf("write %q: %v", relative, err)
+	}
 }

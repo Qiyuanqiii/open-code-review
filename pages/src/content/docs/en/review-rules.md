@@ -163,7 +163,7 @@ matching order:
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |

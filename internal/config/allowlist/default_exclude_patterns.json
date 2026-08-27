@@ -1,7 +1,7 @@
 [
   "**/*_test.go",
   "**/src/test/java/**/*.java",
-  "**/src/test/**/*.kt",
+  "**/src/test/**/*.{kt,kts}",
   "**/*.test.{js,jsx,ts,tsx}",
   "**/*.spec.{js,jsx,ts,tsx}",
   "**/__tests__/**",

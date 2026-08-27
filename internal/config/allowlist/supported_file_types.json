@@ -97,5 +97,7 @@
   ".capnp",
   ".bzl",
   ".bazel",
-  ".star"
+  ".star",
+  ".sol",
+  ".vy"
 ]

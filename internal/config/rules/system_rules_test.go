@@ -85,6 +85,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
 		{"app.kt", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"driver.c", "malloc"},
 		{"pages/Index.ets", "State Decorator"},

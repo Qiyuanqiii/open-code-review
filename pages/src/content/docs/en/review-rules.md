@@ -164,6 +164,7 @@ matching order:
 | `**/*.astro` | `astro.md` — Astro components and islands. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
+| `**/*.scala` | `scala.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |

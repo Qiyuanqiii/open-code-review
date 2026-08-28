@@ -31,6 +31,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".kt", true},
+		{".KT", true},
+		{".kts", true},
+		{".KTS", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -130,6 +134,8 @@ func TestIsExcludedPath(t *testing.T) {
 		// Kotlin test directory
 		{"kotlin test dir", "src/test/kotlin/FooTest.kt", true},
 		{"kotlin main dir", "src/main/kotlin/Foo.kt", false},
+		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
+		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},

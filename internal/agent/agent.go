@@ -491,6 +491,9 @@ func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during review.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// ToolFailures returns failed registered-tool calls accumulated during review.
+func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.ToolFailures() }
+
 // BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before all files were reviewed. The run still returns the partial
 // comments collected up to that point (and a nil error), so those results are
@@ -1320,10 +1323,12 @@ func (a *Agent) groupHasComments(g FileGroup) bool {
 	return false
 }
 
-// groupChurn returns the group's aggregate churn and its largest single-file
-// churn. Both feed Template.PlanRequired.
-func groupChurn(g FileGroup) (total, maxFile int64) {
-	for _, d := range g.Diffs {
+// diffsChurn returns the set's aggregate churn and its largest single-file
+// churn. Both feed Template.PlanRequired; the aggregate alone feeds
+// Template.GroupingPlan, which runs before any FileGroup exists and so takes
+// the diffs directly.
+func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
+	for _, d := range diffs {
 		changed := d.Insertions + d.Deletions
 		total += changed
 		if changed > maxFile {
@@ -1343,7 +1348,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
 
-	totalChanged, maxFileChanged := groupChurn(g)
+	totalChanged, maxFileChanged := diffsChurn(g.Diffs)
 	telemetry.SetAttr(span, "group.label", groupKey)
 	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
 	telemetry.SetAttr(span, "lines.changed", totalChanged)

@@ -49,7 +49,8 @@ Default dev server settings (from `webpack.config.cjs`):
 
 ### Build for production
 
-On POSIX shells, use the project script:
+On systems where npm scripts run through a POSIX shell (for example Linux and
+macOS), use the project script:
 
 ```bash
 npm run build
@@ -73,7 +74,7 @@ written. The script is `NODE_ENV=production webpack --mode production`, and
 that inline assignment is POSIX syntax; `cmd.exe` reads
 `NODE_ENV=production` as a command name:
 
-```text
+```
 'NODE_ENV' is not recognized as an internal or external command,
 operable program or batch file.
 ```
@@ -113,7 +114,7 @@ matched by `dist/*.bundle.js` against the 150 kB budget declared in
 
 ## Project Structure
 
-```text
+```
 pages/
 ├── src/                 # React + TypeScript source code
 │   ├── components/      # Reusable UI components
@@ -195,7 +196,7 @@ Please include:
 - [ ] `npm run lint` passes
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes
-- [ ] Production build succeeds (`npm run build` on POSIX; use the Windows workaround above on Windows)
+- [ ] Production build succeeds (`npm run build` when npm scripts use a POSIX shell; use the Windows workaround above otherwise)
 - [ ] `npm run size` passes
 - [ ] Before/after screenshots added to PR when an affected view exists
 - [ ] Scope is limited to one logical change

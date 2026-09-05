@@ -6,8 +6,14 @@ This directory contains the OpenCodeReview landing page, built with TypeScript, 
 
 ### Prerequisites
 
-- Node.js `>=18` (recommended: latest LTS)
+- Node.js `^22.22.2 || ^24.15.0 || >=26` (recommended: latest LTS; every Pages CI job builds on Node 24)
 - `npm` (comes with Node.js) or `pnpm`
+
+The floor comes from the dev toolchain rather than the bundler: `jsdom@30`,
+the Vitest environment, declares `^22.22.2 || ^24.15.0 || >=26`, and
+`eslint@10` declares `^20.19.0 || ^22.13.0 || >=24`. On an older Node,
+`npm install` reports `EBADENGINE` and the lint and test toolchain is
+outside its supported range.
 
 ### Install dependencies
 
@@ -35,7 +41,7 @@ Equivalent npm script:
 npm run dev
 ```
 
-Default dev server settings (from `webpack.config.js`):
+Default dev server settings (from `webpack.config.cjs`):
 
 - URL: `http://localhost:3030`
 - Host: `0.0.0.0`
@@ -44,41 +50,97 @@ Default dev server settings (from `webpack.config.js`):
 ### Build for production
 
 ```bash
-npx webpack
-```
-
-Project script (recommended, sets production mode):
-
-```bash
 npm run build
 ```
 
 Build output is generated in `pages/dist/`.
 
-### Type checking
+Use the script rather than calling Webpack directly. `webpack.config.cjs`
+derives `isProduction` from `NODE_ENV` alone, and that one flag decides both
+`mode` and whether `@babel/preset-react` runs its development transform.
+Calling Webpack by hand gets at most half of that right:
+
+| Command | Result |
+| --- | --- |
+| `npx webpack` | `development` mode. Unminified, with the development build of React: the `react` chunk is 1.3 MB instead of 150 kB. |
+| `npx webpack --mode production` | Minified, and Webpack's `mode` selects production React by itself. But `NODE_ENV` is still unset, so Babel injects `__self`/`__source` debug props into every element -- 319 of them, and a `main` chunk 21 kB larger than a real production build. |
+| `npm run build` | Production. |
+
+On Windows, `npm run build` fails as written. The script is
+`NODE_ENV=production webpack --mode production`, and that inline assignment is
+POSIX syntax -- but npm runs scripts through `cmd.exe` on Windows (its default
+`script-shell`, used even when npm itself is invoked from Git Bash), and
+`cmd.exe` reads `NODE_ENV=production` as a command name:
+
+```text
+'NODE_ENV' is not recognized as an internal or external command,
+operable program or batch file.
+```
+
+The build exits 1 and writes nothing to `dist/`. Set the variable in your shell
+and call Webpack directly instead:
+
+```powershell
+$env:NODE_ENV = 'production'
+npx webpack --mode production
+```
+
+In Git Bash, `NODE_ENV=production npx webpack --mode production` does the same.
+Both run exactly what `npm run build` runs on Linux.
+
+### Checks
 
 ```bash
+npm run lint
+npm test
 npm run typecheck
+npm run build
+npm run size
 ```
+
+Pages CI runs these five scripts on every PR that touches `pages/**`, in this
+order, and then smoke-tests the built `dist/`. `npm run lint` runs ESLint over
+`src/`; `npm test` runs the Vitest suite once (`vitest run`) in a `jsdom`
+environment; `npm run size` fails if any `dist/*.bundle.js` exceeds the 150 kB
+budget declared in `package.json`.
 
 ## Project Structure
 
 ```text
 pages/
-├── src/                # React + TypeScript source code
-│   ├── components/     # Reusable UI components
-│   ├── pages/          # Route-level page components
-│   ├── i18n/           # Localization resources and i18n context
-│   ├── styles/         # Global styles (Tailwind entry, custom CSS)
-│   └── index.tsx       # Frontend entry point
-├── dist/               # Production build artifacts (generated)
-├── index.html          # HTML template used by HtmlWebpackPlugin
-├── webpack.config.js   # Bundling + dev server config
-├── tailwind.config.js  # Tailwind theme/content configuration
-├── postcss.config.js   # PostCSS pipeline (Tailwind + Autoprefixer)
-├── tsconfig.json       # TypeScript compiler options
-└── package.json        # Dependencies and scripts
+├── src/                 # React + TypeScript source code
+│   ├── components/      # Reusable UI components
+│   ├── pages/           # Route-level page components
+│   ├── content/         # Bundled Markdown: docs/ and blog/, per locale
+│   ├── hooks/           # Custom React hooks
+│   ├── i18n/            # Localization resources and i18n context
+│   ├── styles/          # Global styles (Tailwind entry, custom CSS)
+│   ├── utils/           # Shared helpers
+│   ├── assets/          # Imported icons and images
+│   └── index.tsx        # Frontend entry point
+├── public/              # Static files copied verbatim into dist/
+├── dist/                # Production build artifacts (generated, gitignored)
+├── index.html           # HTML template used by HtmlWebpackPlugin
+├── webpack.config.cjs   # Bundling + dev server config
+├── tailwind.config.cjs  # Tailwind theme/content configuration
+├── postcss.config.cjs   # PostCSS pipeline (Tailwind + Autoprefixer)
+├── eslint.config.js     # ESLint flat config
+├── vitest.config.ts     # Vitest config (jsdom environment)
+├── vitest.setup.ts      # Test setup (@testing-library/jest-dom)
+├── tsconfig.json        # TypeScript compiler options
+├── go.mod               # Module boundary only -- no Go code lives here
+└── package.json         # Dependencies and scripts
 ```
+
+Note the mixed extensions. `package.json` sets `"type": "module"`, so a bare
+`.js` file is parsed as ESM. `eslint.config.js` is ESM and stays `.js`; the
+Webpack, Tailwind and PostCSS configs use `module.exports` and therefore have
+to be `.cjs`. `postcss.config.cjs` likewise refers to `./tailwind.config.cjs`
+by name.
+
+The Markdown under `src/content/` is imported by `src/content/docs/index.ts`
+and `src/content/blog/index.ts` and ends up in the bundle, so it counts
+against the size budget. This file does not -- it is a developer guide only.
 
 ## Development Guidelines
 
@@ -97,17 +159,17 @@ Please include:
 
 - Follow existing TypeScript + React style in this directory.
 - Keep components focused and readable; prefer splitting large JSX blocks into smaller components.
-- Prefer utility-first Tailwind classes and reuse existing design tokens from `tailwind.config.js`.
+- Prefer utility-first Tailwind classes and reuse existing design tokens from `tailwind.config.cjs`.
 - Keep imports and file naming consistent with surrounding code.
-- Run `npm run typecheck` before opening a PR.
+- Run the checks listed above before opening a PR.
 
 ### Tailwind CSS configuration notes
 
-- Tailwind config is in `tailwind.config.js`.
+- Tailwind config is in `tailwind.config.cjs`.
 - Content scanning targets:
   - `./src/**/*.{ts,tsx}`
   - `./index.html`
-- PostCSS integration is configured in `postcss.config.js` with:
+- PostCSS integration is configured in `postcss.config.cjs` with:
   - `tailwindcss`
   - `autoprefixer`
 
@@ -123,7 +185,10 @@ Please include:
 ## Suggested PR Checklist
 
 - [ ] Dependencies installed and project runs locally
+- [ ] `npm run lint` passes
+- [ ] `npm test` passes
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` succeeds
+- [ ] `npm run size` passes
 - [ ] Before/after screenshots added to PR
 - [ ] Scope is limited to one logical change

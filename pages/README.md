@@ -49,6 +49,8 @@ Default dev server settings (from `webpack.config.cjs`):
 
 ### Build for production
 
+On POSIX shells, use the project script:
+
 ```bash
 npm run build
 ```
@@ -57,52 +59,57 @@ Build output is generated in `pages/dist/`.
 
 Use the script rather than calling Webpack directly. `webpack.config.cjs`
 derives `isProduction` from `NODE_ENV` alone, and that one flag decides both
-`mode` and whether `@babel/preset-react` runs its development transform.
-Calling Webpack by hand gets at most half of that right:
+Webpack `mode` and whether `@babel/preset-react` runs its development
+transform. Calling Webpack by hand gets at most half of that right:
 
 | Command | Result |
 | --- | --- |
-| `npx webpack` | `development` mode. Unminified, with the development build of React: the `react` chunk is 1.3 MB instead of 150 kB. |
-| `npx webpack --mode production` | Minified, and Webpack's `mode` selects production React by itself. But `NODE_ENV` is still unset, so Babel injects `__self`/`__source` debug props into every element -- 319 of them, and a `main` chunk 21 kB larger than a real production build. |
-| `npm run build` | Production. |
+| `npx webpack` | Development mode, including the development React build. Do not use this for a production artifact. |
+| `npx webpack --mode production` | Webpack optimizes the bundle and selects production React, but `NODE_ENV` remains unset for the config, so Babel still enables its React development transform. |
+| `npm run build` | Production mode with `NODE_ENV=production` and `--mode production`. |
 
-On Windows, `npm run build` fails as written. The script is
-`NODE_ENV=production webpack --mode production`, and that inline assignment is
-POSIX syntax -- but npm runs scripts through `cmd.exe` on Windows (its default
-`script-shell`, used even when npm itself is invoked from Git Bash), and
-`cmd.exe` reads `NODE_ENV=production` as a command name:
+On Windows with npm's default `cmd.exe` script shell, `npm run build` fails as
+written. The script is `NODE_ENV=production webpack --mode production`, and
+that inline assignment is POSIX syntax; `cmd.exe` reads
+`NODE_ENV=production` as a command name:
 
 ```text
 'NODE_ENV' is not recognized as an internal or external command,
 operable program or batch file.
 ```
 
-The build exits 1 and writes nothing to `dist/`. Set the variable in your shell
-and call Webpack directly instead:
+Set the variable in PowerShell and call Webpack directly instead:
 
 ```powershell
 $env:NODE_ENV = 'production'
 npx webpack --mode production
 ```
 
-In Git Bash, `NODE_ENV=production npx webpack --mode production` does the same.
-Both run exactly what `npm run build` runs on Linux.
+If you are running the command directly in Git Bash, the equivalent is:
+
+```bash
+NODE_ENV=production npx webpack --mode production
+```
 
 ### Checks
 
-```bash
-npm run lint
-npm test
-npm run typecheck
-npm run build
-npm run size
-```
+Pages CI runs the following sequence for every PR that touches `pages/**`:
 
-Pages CI runs these five scripts on every PR that touches `pages/**`, in this
-order, and then smoke-tests the built `dist/`. `npm run lint` runs ESLint over
-`src/`; `npm test` runs the Vitest suite once (`vitest run`) in a `jsdom`
-environment; `npm run size` fails if any `dist/*.bundle.js` exceeds the 150 kB
-budget declared in `package.json`.
+1. `npm run lint`
+2. `npm test`
+3. `npm run typecheck`
+4. `npm run build`
+5. Smoke-test the built `dist/`
+6. `npm run size`
+
+For local pre-PR validation, run the npm-script checks in the same order. On
+Windows, replace the `npm run build` step with the PowerShell or Git Bash
+production-build command above.
+
+`npm run lint` runs ESLint over `src/`; `npm test` runs the Vitest suite once
+(`vitest run`) in a `jsdom` environment; and `npm run size` checks the files
+matched by `dist/*.bundle.js` against the 150 kB budget declared in
+`package.json`.
 
 ## Project Structure
 
@@ -188,7 +195,7 @@ Please include:
 - [ ] `npm run lint` passes
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes
-- [ ] `npm run build` succeeds
+- [ ] Production build succeeds (`npm run build` on POSIX; use the Windows workaround above on Windows)
 - [ ] `npm run size` passes
-- [ ] Before/after screenshots added to PR
+- [ ] Before/after screenshots added to PR when an affected view exists
 - [ ] Scope is limited to one logical change

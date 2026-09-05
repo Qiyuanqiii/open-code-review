@@ -1,0 +1,24 @@
+name: Review safety validation
+on:
+  push:
+    branches: [codex/git-review-safety-validation]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: alibaba/open-code-review
+          ref: e967f3f4cf40e2f1e1154117763382b24bd608e4
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive pinned public source
+        run: tar --exclude=.git -czf "$RUNNER_TEMP/review-safety-source.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-safety-source
+          path: ${{ runner.temp }}/review-safety-source.tar.gz
+          retention-days: 1

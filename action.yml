@@ -1082,7 +1082,7 @@ runs:
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
             routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
             routeCategories: process.env.OCR_ROUTE_CATEGORIES,
-            checkpointEnabled: ${{ inputs.checkpoint_range == 'true' && inputs.gate != 'true' }},
+            checkpointEnabled: ${{ inputs.checkpoint_range == 'true' && steps.validate.outputs.gate_enabled != 'true' }},
             checkpointCarry: process.env.OCR_CHECKPOINT_CARRY || '',
             checkpointBaseRef: process.env.OCR_BASE_REF || '',
             checkpointMergeBase: process.env.OCR_MERGE_BASE || '',

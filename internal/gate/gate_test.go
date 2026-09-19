@@ -210,6 +210,16 @@ func TestInvalidEvidenceNeverPasses(t *testing.T) {
 		{"negative failure count", func(d map[string]any) { calls(d)["failure"] = -1 }},
 		{"missing failure details", func(d map[string]any) { delete(calls(d), "failure_details") }},
 		{"missing per-tool counts", func(d map[string]any) { delete(calls(d), "failure_by_tool") }},
+		{"zero per-tool count without failures", func(d map[string]any) {
+			calls(d)["failure_by_tool"] = map[string]any{"code_comment": 0}
+		}},
+		{"extra zero per-tool count", func(d map[string]any) {
+			failures(d, "file_read")
+			calls(d)["failure_by_tool"].(map[string]any)["code_search"] = 0
+		}},
+		{"negative per-tool count", func(d map[string]any) {
+			calls(d)["failure_by_tool"] = map[string]any{"code_comment": -1}
+		}},
 		{"hidden failure details", func(d map[string]any) { failures(d, "code_comment"); calls(d)["failure"] = 0 }},
 		{"missing tool name", func(d map[string]any) { failures(d, "") }},
 		{"wrong per-tool counts", func(d map[string]any) {

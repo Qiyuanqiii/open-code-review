@@ -91,7 +91,7 @@ func (r *Result) add(name string, status Status, code, message string) {
 	// An established policy violation takes precedence over insufficient
 	// evidence. Keep all checks so an incomplete run's blocking findings remain
 	// visible alongside its missing coverage or delivery evidence.
-	if status == Fail || status == Inconclusive && r.Status == Pass {
+	if status == Fail || (status == Inconclusive && r.Status == Pass) {
 		r.Status = status
 	}
 }
@@ -263,7 +263,7 @@ func evaluateDelivery(r *Result, calls *toolCalls) {
 		counts[failure.ToolName]++
 	}
 	for name, count := range calls.FailureByTool {
-		if count < 0 || count != counts[name] {
+		if count <= 0 || count != counts[name] {
 			invalid()
 			return
 		}

@@ -26,6 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --staged                      Review the staged snapshot
   ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
@@ -106,6 +107,7 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
+| `--staged` | — | `false` | 捕捉した `HEAD` に対するステージ済みの変更だけをレビューし、組み込みのコード参照には固定した index のスナップショットを使用します。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
@@ -127,7 +129,7 @@ ocr r      [flags]   (alias)
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
 | `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
-> モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
+> モード引数は排他です: `--from`/`--to`、`--commit`、`--staged` のいずれか、または指定なし（ワークスペースモード）を選びます。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
 
@@ -161,7 +163,64 @@ OCR は 2 つの git コマンドからワークツリーの変更を組み立�
 - `git diff HEAD` で追跡済みの変更を取得します（staged + unstaged をまとめて `HEAD` と比較。空の場合は `git diff --staged` にフォールバック）
 - `git ls-files --others --exclude-standard` で untracked ファイルを取得し、ディスクから読み込んでファイル全体の新規追加として扱います
 
-これは通常、commit 前に確認したい内容そのものです。より小さな範囲が必要なら、選択的に stage してください。
+このモードには未ステージの編集や未追跡ファイルも含まれます。次の commit に向けてステージした変更だけをレビューするには、`--staged` を使用してください。
+
+#### ステージ済みスナップショットモード
+
+```bash
+ocr review --staged
+ocr review --staged --preview
+ocr review --staged --preview --format json
+ocr review --staged --format json --output staged-review.json
+```
+
+commit したい変更をステージしてから使用します。一部の hunk だけをステージした場合も
+対象になります。OCR は index 全体を Git tree として捕捉し、`HEAD` を一度だけ解決して、
+両者の差分をレビューします。まだ commit がないリポジトリでは空の tree が基準です。
+その後の編集、ステージ操作、ブランチの移動は捕捉済みの入力を変更しません。
+ステージ済みの差分が空なら LLM は呼び出されません。
+
+リポジトリの `.gitattributes` も捕捉した tree から読み取ります。グローバル属性、
+`.git/info/attributes`、Git の設定は外部入力として引き続き適用されます。最小 Git
+バージョンは 2.41 のままです。
+
+Diff と組み込みのファイル読み取り、ファイル検索、内容検索はすべて同じ tree を使用し、
+文脈として参照する未変更ファイルも含みます。たとえば、バグのある版がステージされ、
+修正がワークツリーにしかない場合は、ステージされた版をレビューします。未ステージの
+編集や未追跡ファイルは含まれません。リポジトリの `.opencodereview/` にある既定の
+ルールもスナップショットから読み取ります。`rule.json` を含む各ルールファイルの上限は
+512 KiB です。参照するルール文書はスナップショット内の通常ファイルをリポジトリ相対
+パスで指定する必要があり、欠落、絶対パス、シンボリックリンクはディスクへフォールバック
+せずエラーになります。明示的な `--rule` ファイル、`--exclude`、
+グローバル設定などの外部入力はユーザー指定の入力として扱います。カスタム MCP サーバー
+などの外部ツールには、組み込みツールのスナップショット保証は適用されません。
+
+ステージ済みファイルは index で追跡されているため、ワークツリーの `.gitignore` で
+再び除外されることはありません。OCR の既定のディレクトリ・機密ファイル除外、対応
+ファイルの許可リスト、レビュールールの除外指定は引き続き適用されます。`--preview` で
+選択ファイル、除外理由、スナップショットの識別情報を確認してからトークンを消費できます。
+再実行するたびに新しいスナップショットを捕捉します。
+
+このモードは `ocr.run-manifest/v2` を使用します。`input.mode` は `staged`、
+`input.snapshot_tree` は index の tree、`input.resolved_base` は捕捉した `HEAD` の
+commit（最初の commit 前は省略）です。Tree ID は commit ID ではなく、`resolved_head`
+と `exact_range` は設定されません。他のレビューモードは v1 を維持します。初版のレビュー
+ゲートなど、v1 のみをサポートする処理では、ステージ済みの v2 結果を互換性のあるゲート
+証拠として扱えません。JSON のプレビュー出力にも同じ `input` の識別フィールドが含まれます。
+
+stash、reset、ファイルの checkout、ユーザーの index や ref の変更は行いません。
+参照されていない tree オブジェクトを書き込むことがあり、通常の Git のガベージ
+コレクションで後から削除できます。Linked worktree に対応しています。この版では未解決の
+マージ競合、intent-to-add エントリ（`git add -N`）、split index、sparse index はエラーに
+なります。`--staged` は `--from`、`--to`、`--commit`、`--resume` と併用できず、
+ステージ済みのセッションは再開できません。
+
+変更された submodule/gitlink エントリも、ファイル内容の読み取り前にエラーになります。
+追加、更新、削除、通常ファイルと gitlink の相互変換が対象です。変更のない submodule は
+通常ファイルのレビューを妨げませんが、その gitlink パスは `file_find` で省かれ、
+`file_read` では拒否されます。Git の再帰設定にかかわらず、`code_search` は submodule 内を検索しません。
+シンボリックリンクは保存されたリンクの blob 自体を
+読み取り、リンク先はたどりません。
 
 #### 範囲モード
 
@@ -199,7 +258,7 @@ ocr review --commit abc123 --resume <session-id>
 再開は意図的に厳密です。今回の実行が親と同じ対象をレビューする場合にのみ、
 チェックポイントが再利用されます:
 
-- ワークスペースレビューは再開できません
+- ワークスペースレビューとステージ済みのレビューは再開できません
 - レビューモードが一致する必要があります: 範囲セッションを単一 commit として
   再開することはできません
 - 解決後の入力が一致する必要があります。ref の*表記*は比較しません

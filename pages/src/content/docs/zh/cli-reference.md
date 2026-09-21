@@ -26,6 +26,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --staged                      Review the staged snapshot
   ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
@@ -107,6 +108,7 @@ unstaged + untracked 变更。
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
+| `--staged` | — | `false` | 仅评审暂存变更，以捕获的 `HEAD` 为基线，内置代码上下文来自冻结的索引快照。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
@@ -128,7 +130,7 @@ unstaged + untracked 变更。
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
 | `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
-> 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
+> 模式参数互斥：传 `--from`/`--to`、`--commit`、`--staged` 之一，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
 
@@ -163,7 +165,53 @@ OCR 从两条 git 命令组装工作树变更：
 - 通过 `git ls-files --others --exclude-standard` 获取 untracked 文件，从磁盘
   读取并作为整文件新增处理
 
-这通常是 commit 前你想要的。如需更小的范围，请选择性暂存。
+此模式也包含未暂存和未跟踪的内容。如需只评审为下次提交暂存的变更，请使用 `--staged`。
+
+#### 暂存区快照模式
+
+```bash
+ocr review --staged
+ocr review --staged --preview
+ocr review --staged --preview --format json
+ocr review --staged --format json --output staged-review.json
+```
+
+将准备提交的变更暂存后使用此模式，也支持只暂存部分代码块。OCR 将完整索引捕获为
+Git tree，并解析一次 `HEAD`，然后评审两者的差异。仓库尚无提交时，以空 tree 为基线。
+后续编辑、暂存或分支移动不会改变本次已捕获的评审输入。暂存差异为空时不调用 LLM。
+
+仓库 `.gitattributes` 从捕获的 tree 读取。全局属性、`.git/info/attributes` 和
+Git 配置仍作为外部输入生效。Git 最低版本仍为 2.41。
+
+Diff、内置文件读取、文件查找和内容搜索均使用捕获的 tree，包括作为上下文的未变更文件。
+例如，暂存的代码存在缺陷，而修复仅在工作区中时，评审读取的是暂存版本。未暂存编辑和
+未跟踪文件不包含在内。仓库 `.opencodereview/` 下的默认规则也从快照读取。
+每个快照规则文件（包括 `rule.json`）上限为 512 KiB。引用的规则文档必须是快照中
+以仓库相对路径指定的普通文件；缺失文件、绝对路径和符号链接会使运行报错，不会回退到磁盘。
+显式指定的 `--rule` 文件、`--exclude`、全局配置和其他外部输入仍作为用户输入处理。
+自定义 MCP 服务或其他外部工具不在内置快照一致性保证的范围内。
+
+暂存文件已由索引跟踪，因此不会再被工作区 `.gitignore` 排除。OCR 默认目录和敏感文件
+排除规则、支持文件的允许列表以及评审规则中的排除项仍然生效。可先用 `--preview`
+查看选中文件、排除原因和快照身份，再消耗模型 token；每次重新运行都会捕获新快照。
+
+暂存区运行使用 `ocr.run-manifest/v2`：`input.mode` 为 `staged`，
+`input.snapshot_tree` 标识索引 tree，`input.resolved_base` 是捕获的 `HEAD` commit
+（首次提交之前省略）。Tree ID 不是 commit ID，因此不填充 `resolved_head` 和
+`exact_range`。其他评审模式继续使用 v1。仅支持 v1 的消费方，包括首版评审门禁，
+不能将暂存区的 v2 结果当作兼容的门禁证据。JSON 预览输出包含相同的 `input` 身份字段。
+
+命令不会 stash、reset、检出文件，也不会修改用户的索引或 ref。它可能写入没有 ref
+引用的 tree 对象，之后由 Git 常规垃圾回收清理。支持 linked worktree。本版本会明确
+拒绝尚未解决的合并冲突、intent-to-add 条目（`git add -N`）、split index 和 sparse
+index。`--staged` 不能与 `--from`、`--to`、`--commit` 或 `--resume` 同用；暂存区会话
+不能恢复。
+
+发生变化的 submodule/gitlink 条目也会在读取文件内容前报不支持，包括新增、更新、
+删除，以及普通文件与 gitlink 之间的转换。未变化的子模块不妨碍普通文件的评审；
+`file_find` 不列出其 gitlink 路径，`file_read` 也拒绝读取这些路径。
+即使 Git 配置开启了子模块递归，`code_search` 也不会进入子模块搜索。
+符号链接读取的是 Git 中保存的链接 blob 本身，不会跟随链接读取目标。
 
 #### 区间模式
 
@@ -200,7 +248,7 @@ ocr review --commit abc123 --resume <session-id>
 
 恢复逻辑是严格的。只有当本次运行评审的对象与父运行完全一致时，checkpoint 才会被复用：
 
-- 工作区评审不能恢复
+- 工作区和暂存区评审不能恢复
 - 评审模式必须一致：区间会话不能以单 commit 模式恢复
 - 解析后的输入必须一致。ref 的*写法*不参与比较（`abc1234` 与 `abc1234def`
   指向同一个 commit），但如果相同的 ref 现在解析到不同的 diff，或规则、过滤器

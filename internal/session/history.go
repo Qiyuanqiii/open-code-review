@@ -30,6 +30,7 @@ const (
 
 const (
 	ReviewModeWorkspace = "workspace"
+	ReviewModeStaged    = "staged"
 	ReviewModeRange     = "range"
 	ReviewModeCommit    = "commit"
 	ReviewModeFullScan  = "full_scan"
@@ -330,7 +331,7 @@ func (sh *SessionHistory) Finalize() error {
 		manifest := sh.finalManifest
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
-		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
+		if manifest != nil && manifest.HasSupportedSchema() {
 			filesReviewed = make([]string, 0, len(manifest.Coverage.Selected))
 			for _, item := range manifest.Coverage.Selected {
 				filesReviewed = append(filesReviewed, item.Path)

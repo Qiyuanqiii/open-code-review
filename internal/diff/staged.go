@@ -25,20 +25,29 @@ type StagedSnapshot struct {
 	Tree       string
 }
 
-// stagedDiffHasGitlink checks Git's structural mode headers before the parser
-// reads file content. A gitlink identifies a commit in another repository, and
-// git show must not turn that commit's display output into reviewed source text.
-func stagedDiffHasGitlink(text string) bool {
-	for line := range strings.SplitSeq(text, "\n") {
-		switch line {
-		case "new file mode 160000", "deleted file mode 160000", "old mode 160000", "new mode 160000":
-			return true
+// stagedRawDiffHasGitlink checks modes from git diff --raw -z --no-renames.
+// Each record contains a header and one path, both NUL-terminated. Consuming
+// each pair keeps arbitrary path bytes separate from the structural modes.
+func stagedRawDiffHasGitlink(text string) (bool, error) {
+	for text != "" {
+		header, rest, ok := strings.Cut(text, "\x00")
+		if !ok {
+			return false, fmt.Errorf("cannot read staged raw diff header")
 		}
-		if strings.HasPrefix(line, "index ") && strings.HasSuffix(line, " 160000") {
-			return true
+		path, rest, ok := strings.Cut(rest, "\x00")
+		if !ok || path == "" {
+			return false, fmt.Errorf("cannot read staged raw diff path")
 		}
+		fields := strings.Fields(header)
+		if len(fields) != 5 || !strings.HasPrefix(fields[0], ":") {
+			return false, fmt.Errorf("cannot read staged raw diff modes")
+		}
+		if fields[0] == ":160000" || fields[1] == "160000" {
+			return true, nil
+		}
+		text = rest
 	}
-	return false
+	return false, nil
 }
 
 // CaptureStagedSnapshot copies the active index before asking Git to write its

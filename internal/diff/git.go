@@ -245,14 +245,23 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		if p.staged == nil || p.staged.BaseTree == "" || p.staged.Tree == "" {
 			return DiffSet{}, fmt.Errorf("staged review requires a captured index snapshot")
 		}
-		// Keep changed gitlinks visible in the structural patch headers even
-		// when local configuration normally hides them or renders a log.
+		// Raw modes expose gitlink changes even when a pure rename's patch
+		// omits mode headers. Disable rename detection only for this preflight
+		// so each record has one path and every changed mode is checked.
+		raw, stderr, err := p.runGitSplit(ctx, "diff", "--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--no-color", "--end-of-options", p.staged.BaseTree, p.staged.Tree, "--")
+		if err != nil {
+			return DiffSet{}, gitFailure("staged snapshot raw diff", stderr, err)
+		}
+		hasGitlink, err := stagedRawDiffHasGitlink(raw)
+		if err != nil {
+			return DiffSet{}, err
+		}
+		if hasGitlink {
+			return DiffSet{}, fmt.Errorf("staged review does not support submodule (gitlink) changes; review those changes separately")
+		}
 		out, stderr, err := p.runGitSplit(ctx, "--attr-source="+p.staged.Tree, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--submodule=short", "--ignore-submodules=none", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.staged.BaseTree, p.staged.Tree, "--")
 		if err != nil {
 			return DiffSet{}, gitFailure("staged snapshot diff", stderr, err)
-		}
-		if stagedDiffHasGitlink(out) {
-			return DiffSet{}, fmt.Errorf("staged review does not support submodule (gitlink) changes; review those changes separately")
 		}
 		combined.WriteString(out)
 	case ModeRange:

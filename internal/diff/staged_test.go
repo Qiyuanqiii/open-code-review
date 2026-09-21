@@ -608,12 +608,12 @@ func TestStagedSnapshotPreservesBinaryAndModeOnlyChanges(t *testing.T) {
 }
 
 func TestStagedSnapshotRejectsGitlinkChanges(t *testing.T) {
-	for _, change := range []string{"add", "update", "delete", "file to gitlink", "gitlink to file"} {
+	for _, change := range []string{"add", "update", "delete", "rename", "file to gitlink", "gitlink to file"} {
 		t.Run(change, func(t *testing.T) {
 			repo := initRepoWithChange(t)
 			runGitTest(t, repo, "checkout", "--", "sample.txt")
 			head := stagedGitOutput(t, repo, "rev-parse", "HEAD")
-			if change == "update" || change == "delete" || change == "gitlink to file" {
+			if change == "update" || change == "delete" || change == "rename" || change == "gitlink to file" {
 				runGitTest(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+head+",module")
 				runGitTest(t, repo, "commit", "-q", "-m", "add submodule entry")
 			}
@@ -625,6 +625,9 @@ func TestStagedSnapshotRejectsGitlinkChanges(t *testing.T) {
 				runGitTest(t, repo, "update-index", "--cacheinfo", "160000,"+newHead+",module")
 			case "delete":
 				runGitTest(t, repo, "update-index", "--force-remove", "module")
+			case "rename":
+				runGitTest(t, repo, "update-index", "--force-remove", "module")
+				runGitTest(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+head+",renamed-module")
 			case "file to gitlink":
 				runGitTest(t, repo, "update-index", "--cacheinfo", "160000,"+head+",sample.txt")
 			case "gitlink to file":
@@ -632,9 +635,20 @@ func TestStagedSnapshotRejectsGitlinkChanges(t *testing.T) {
 				runGitTest(t, repo, "update-index", "--cacheinfo", "100644,"+blob+",module")
 			}
 			snapshot := captureStagedTest(t, repo)
-			_, err := NewStagedProvider(repo, snapshot, nil).GetDiff(context.Background())
+			if change == "rename" {
+				patch := stagedGitOutput(t, repo, "diff", "--find-renames", "--submodule=short", "--ignore-submodules=none", snapshot.BaseTree, snapshot.Tree)
+				if !strings.Contains(patch, "similarity index 100%") || !strings.Contains(patch, "rename to renamed-module") || strings.Contains(patch, "160000") {
+					t.Fatalf("fixture did not produce a pure gitlink rename without mode headers: %s", patch)
+				}
+				// Keep the referenced commit in this repository so a missed guard
+				// reads the commit display text.
+				if kind := stagedGitOutput(t, repo, "cat-file", "-t", snapshot.Tree+":renamed-module"); kind != "commit" {
+					t.Fatalf("renamed gitlink target type = %q", kind)
+				}
+			}
+			diffs, err := NewStagedProvider(repo, snapshot, nil).GetDiff(context.Background())
 			if err == nil || !strings.Contains(err.Error(), "gitlink") {
-				t.Fatalf("expected explicit gitlink rejection, got %v", err)
+				t.Fatalf("expected explicit gitlink rejection, got %v; diffs=%+v", err, diffs)
 			}
 		})
 	}
@@ -650,6 +664,49 @@ func TestStagedSnapshotUnchangedGitlinkAllowsSourceChanges(t *testing.T) {
 	diffs, err := NewStagedProvider(repo, snapshot, nil).GetDiff(context.Background())
 	if err != nil || len(diffs) != 1 || diffs[0].NewPath != "sample.txt" {
 		t.Fatalf("unchanged gitlink blocked source review: %+v, %v", diffs, err)
+	}
+}
+
+func TestStagedRawDiffHasGitlink(t *testing.T) {
+	sha1 := strings.Repeat("a", 40)
+	sha256 := strings.Repeat("b", 64)
+	ordinary := ":100644 100644 " + sha1 + " " + sha1 + " M"
+	addedGitlink := ":000000 160000 " + strings.Repeat("0", 40) + " " + sha1 + " A"
+	deletedGitlink := ":160000 000000 " + sha1 + " " + strings.Repeat("0", 40) + " D"
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		want    bool
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "ordinary file", raw: ordinary + "\x00source.go\x00"},
+		{name: "path resembles gitlink header", raw: ordinary + "\x00:160000 160000 " + sha1 + " " + sha1 + " M\x00"},
+		{name: "path contains tabs and newlines", raw: ordinary + "\x00space and\ttab\nindex old..new 160000\x00"},
+		{name: "mode only", raw: ":100644 100755 " + sha1 + " " + sha1 + " M\x00script.sh\x00"},
+		{name: "new gitlink", raw: addedGitlink + "\x00new-module\x00", want: true},
+		{name: "old gitlink", raw: deletedGitlink + "\x00old-module\x00", want: true},
+		{name: "gitlink after ordinary record", raw: ordinary + "\x00source.go\x00" + addedGitlink + "\x00module\x00", want: true},
+		{name: "SHA256 gitlink", raw: ":160000 160000 " + sha256 + " " + sha256 + " M\x00module\x00", want: true},
+		{name: "unterminated header", raw: ordinary, wantErr: true},
+		{name: "unterminated path", raw: ordinary + "\x00source.go", wantErr: true},
+		{name: "missing path", raw: ordinary + "\x00", wantErr: true},
+		{name: "empty path", raw: ordinary + "\x00\x00", wantErr: true},
+		{name: "missing header prefix", raw: strings.TrimPrefix(ordinary, ":") + "\x00source.go\x00", wantErr: true},
+		{name: "incomplete header", raw: ":100644 100644 " + sha1 + " M\x00source.go\x00", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := stagedRawDiffHasGitlink(tc.raw)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "staged raw diff") {
+					t.Fatalf("malformed raw diff accepted or unexplained: %v", err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("gitlink = %v, error = %v; want %v", got, err, tc.want)
+			}
+		})
 	}
 }
 

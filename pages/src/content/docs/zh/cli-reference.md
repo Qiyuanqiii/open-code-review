@@ -176,42 +176,41 @@ ocr review --staged --preview --format json
 ocr review --staged --format json --output staged-review.json
 ```
 
-将准备提交的变更暂存后使用此模式，也支持只暂存部分代码块。OCR 将完整索引捕获为
-Git tree，并解析一次 `HEAD`，然后评审两者的差异。仓库尚无提交时，以空 tree 为基线。
-后续编辑、暂存或分支移动不会改变本次已捕获的评审输入。暂存差异为空时不调用 LLM。
+此模式评审为下次提交暂存的变更，支持只暂存部分代码块。OCR 将完整索引捕获为 Git tree，
+并与捕获的 `HEAD` 比较；首次提交前使用空 tree 作为基线。捕获的输入在整个评审期间保持
+固定。暂存差异为空时跳过 LLM。要求 Git 2.41 或更高版本，支持 linked worktree。
 
-仓库 `.gitattributes` 从捕获的 tree 读取。全局属性、`.git/info/attributes` 和
-Git 配置仍作为外部输入生效。Git 最低版本仍为 2.41。
+Diff、内置文件读取、文件查找和内容搜索使用同一个 tree，包括作为上下文的未变更文件。
+仓库 `.gitattributes` 和 `.opencodereview/` 下的默认规则也从该 tree 读取。
+每个快照规则文件（包括 `rule.json`）上限为 512 KiB。引用的规则文档必须是快照中以
+仓库相对路径指定的普通文件；缺失文件、绝对路径和符号链接会使运行报错。
 
-Diff、内置文件读取、文件查找和内容搜索均使用捕获的 tree，包括作为上下文的未变更文件。
-例如，暂存的代码存在缺陷，而修复仅在工作区中时，评审读取的是暂存版本。未暂存编辑和
-未跟踪文件不包含在内。仓库 `.opencodereview/` 下的默认规则也从快照读取。
-每个快照规则文件（包括 `rule.json`）上限为 512 KiB。引用的规则文档必须是快照中
-以仓库相对路径指定的普通文件；缺失文件、绝对路径和符号链接会使运行报错，不会回退到磁盘。
-显式指定的 `--rule` 文件、`--exclude`、全局配置和其他外部输入仍作为用户输入处理。
-自定义 MCP 服务或其他外部工具不在内置快照一致性保证的范围内。
+显式指定的 `--rule` 文件、`--exclude`、全局配置、全局 Git 属性、
+`.git/info/attributes` 和 Git 配置仍作为外部输入。自定义 MCP 服务及其他外部工具
+可能读取实时状态或外部数据。
 
-暂存文件已由索引跟踪，因此不会再被工作区 `.gitignore` 排除。OCR 默认目录和敏感文件
-排除规则、支持文件的允许列表以及评审规则中的排除项仍然生效。可先用 `--preview`
-查看选中文件、排除原因和快照身份，再消耗模型 token；每次重新运行都会捕获新快照。
+`.gitignore` 不排除暂存路径。OCR 默认目录和敏感文件排除规则、支持文件的允许列表及
+评审规则中的排除项继续生效。`--preview` 展示选中文件、排除原因和快照身份，无需调用
+模型。每次运行都会捕获各自的快照。
 
 暂存区运行使用 `ocr.run-manifest/v2`：`input.mode` 为 `staged`，
-`input.snapshot_tree` 标识索引 tree，`input.resolved_base` 是捕获的 `HEAD` commit
-（首次提交之前省略）。Tree ID 不是 commit ID，因此不填充 `resolved_head` 和
-`exact_range`。其他评审模式继续使用 v1。仅支持 v1 的消费方，包括首版评审门禁，
-不能将暂存区的 v2 结果当作兼容的门禁证据。JSON 预览输出包含相同的 `input` 身份字段。
+`input.snapshot_tree` 为 Git tree 对象 ID，`input.resolved_base` 为捕获的 `HEAD`
+commit（首次提交前省略）。`resolved_head` 和 `exact_range` 省略。JSON 预览包含相同的
+`input` 身份字段。消费方需要支持 v2 才能处理这些结果；仅支持 v1 的消费方须报告不支持。
+其他评审模式继续使用 v1。
 
-命令不会 stash、reset、检出文件，也不会修改用户的索引或 ref。它可能写入没有 ref
-引用的 tree 对象，之后由 Git 常规垃圾回收清理。支持 linked worktree。本版本会明确
-拒绝尚未解决的合并冲突、intent-to-add 条目（`git add -N`）、split index 和 sparse
-index。`--staged` 不能与 `--from`、`--to`、`--commit` 或 `--resume` 同用；暂存区会话
-不能恢复。
+用户的索引、工作区和 ref 保持原样。临时索引副本会被清理，未被引用的 tree 对象由
+Git 常规垃圾回收处理。
 
-发生变化的 submodule/gitlink 条目也会在读取文件内容前报不支持，包括新增、更新、
-删除，以及普通文件与 gitlink 之间的转换。未变化的子模块不妨碍普通文件的评审；
-`file_find` 不列出其 gitlink 路径，`file_read` 也拒绝读取这些路径。
-即使 Git 配置开启了子模块递归，`code_search` 也不会进入子模块搜索。
-符号链接读取的是 Git 中保存的链接 blob 本身，不会跟随链接读取目标。
+`--staged` 不能与 `--from`、`--to`、`--commit` 或 `--resume` 同用。
+暂存区会话不支持恢复。未解决的合并冲突、intent-to-add 条目（`git add -N`）、
+split index 和 sparse index 会使运行报错。
+发生变化的 submodule/gitlink 条目也会在读取文件内容前报错，包括新增、更新、删除及
+普通文件与 gitlink 之间的转换。
+
+包含未变化子模块的仓库支持普通文件评审。`file_find` 省略 gitlink 路径，`file_read`
+拒绝读取这些路径，`code_search` 跳过子模块内容，不受 Git 递归设置影响。符号链接读取
+保存的链接 blob 本身，不跟随目标。
 
 #### 区间模式
 

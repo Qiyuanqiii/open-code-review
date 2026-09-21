@@ -186,55 +186,50 @@ ocr review --staged --preview --format json
 ocr review --staged --format json --output staged-review.json
 ```
 
-Use this mode after staging the changes you intend to commit, including selected
-hunks. OCR captures the complete index as a Git tree and resolves `HEAD` once,
-then reviews their diff. In a repository with no commits, the base is an empty
-tree. Later edits, staging operations, or branch movements do not change the
-captured review input. An empty staged diff skips the LLM.
+Use this mode to review the changes staged for your next commit, including
+selected hunks. OCR captures the complete index as a Git tree and compares it
+with the captured `HEAD`, using an empty base tree before the first commit.
+The captured input stays fixed throughout the review. An empty staged diff
+skips the LLM. Requires Git 2.41 or later; linked worktrees are supported.
 
-Repository `.gitattributes` are read from the captured tree. Global attributes,
-`.git/info/attributes`, and Git configuration remain external inputs. The existing
-Git 2.41 minimum is unchanged.
+The diff, built-in file reading, file discovery, and content search use the same
+tree, including unchanged context files. Repository `.gitattributes` and default
+rules under `.opencodereview/` also come from this tree. Each snapshot rule file,
+including `rule.json`, is limited to 512 KiB. Referenced rule documents must be
+repository-relative regular files in the snapshot; missing files, absolute
+paths, and symbolic links cause an error.
 
-The diff and built-in file reading, file discovery, and content search all use
-the captured tree, including unchanged files used as context. For example, if a
-buggy version is staged but a fix exists only in the working tree, the review
-sees the staged version. Unstaged edits and untracked files are not included.
-Default repository rules under `.opencodereview/` are also read from the snapshot.
-Each snapshot rule file, including `rule.json`, is limited to 512 KiB. Referenced
-rule documents must be repository-relative regular files in the snapshot; missing
-files, absolute paths, and symbolic links stop the run rather than fall back to disk.
-Explicit `--rule` files, `--exclude`, global configuration, and other external
-inputs remain user-supplied inputs. Custom MCP servers or other external tools
-are outside the built-in snapshot guarantee.
+Explicit `--rule` files, `--exclude`, global configuration, global Git attributes,
+`.git/info/attributes`, and Git configuration remain external inputs. Custom MCP
+servers and other external tools may read live or external state.
 
-Staged files are already tracked in the index, so the working tree's `.gitignore`
-does not exclude them again. OCR's default directory and secret exclusions,
-supported-file allowlist, and review-rule exclusions still apply. Use `--preview`
-to inspect the selected files, exclusions, and snapshot identity before spending
-tokens; a later invocation captures a new snapshot.
+`.gitignore` does not exclude staged paths. OCR's default directory and secret
+exclusions, supported-file allowlist, and review-rule exclusions apply.
+`--preview` shows selected files, exclusions, and snapshot identity without a
+model call. Each invocation captures its own snapshot.
 
 Staged runs use `ocr.run-manifest/v2`: `input.mode` is `staged`,
-`input.snapshot_tree` identifies the index tree, and `input.resolved_base` is the
-captured `HEAD` commit (absent before the first commit). A tree ID is not a commit
-ID; `resolved_head` and `exact_range` are not populated. Other review modes retain
-v1. Consumers that only support v1, including the initial review gate, cannot
-treat staged v2 results as compatible gate evidence. JSON preview output includes
-the same `input` identity fields.
+`input.snapshot_tree` contains the Git tree object ID, and `input.resolved_base`
+is the captured `HEAD` commit (omitted before the first commit). `resolved_head`
+and `exact_range` are omitted. JSON preview includes the same `input` identity
+fields. Consumers need v2 support to process these results; v1-only consumers
+must report them as unsupported. Other review modes retain v1.
 
-The command does not stash, reset, check out files, or change the user's index or
-refs. It may write unreferenced tree objects, which Git can later remove through
-its normal garbage collection. Linked worktrees are supported. Unresolved merge
-conflicts, intent-to-add entries (`git add -N`), split indexes, and sparse indexes
-are rejected with an error in this version. `--staged` cannot be combined with
-`--from`, `--to`, `--commit`, or `--resume`; staged sessions cannot be resumed.
+The user's index, working tree, and refs remain unchanged. Temporary index copies
+are cleaned up, and unreferenced tree objects follow Git's normal garbage
+collection lifecycle.
 
-Changed submodule/gitlink entries are also rejected before file content is read,
-including additions, updates, deletions, and conversions between regular files
-and gitlinks. Unchanged submodules do not prevent reviewing ordinary files; their
-gitlink paths are omitted by `file_find` and rejected by `file_read`.
-`code_search` does not recurse into submodules, even if Git is configured to do so.
-Symbolic links are read as their stored link blobs; their targets are not followed.
+`--staged` is incompatible with `--from`, `--to`, `--commit`, and `--resume`.
+Staged sessions cannot be resumed.
+Unresolved merge conflicts, intent-to-add entries (`git add -N`), split indexes,
+and sparse indexes cause an error. Changed submodule/gitlink entries also cause
+an error before file content is read, including additions, updates, deletions,
+and conversions between regular files and gitlinks.
+
+Repositories with unchanged submodules support reviews of ordinary files.
+`file_find` omits gitlink paths, `file_read` rejects them, and `code_search` skips
+submodule contents regardless of Git's recursion setting. Symbolic links are read
+as their stored link blobs, without following their targets.
 
 #### Range mode
 

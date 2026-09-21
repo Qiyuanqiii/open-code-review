@@ -211,7 +211,7 @@ The task and request timeouts are independent:
 
 ### Opt into the shared CI gate
 
-Add these inputs to your existing action step:
+Add these inputs under `with:` in your existing action step:
 
 ```yaml
 gate: 'true'
@@ -221,19 +221,34 @@ fail_on_severity: high
 | Input | Default | Description |
 |-------|---------|-------------|
 | `gate` | `'false'` | Enable `ocr gate` after publication. Accepts `true` or `false`, case-insensitively. |
-| `fail_on_severity` | `''` | Optional threshold: `critical`, `high`, `medium`, or `low`. Requires `gate: 'true'`; matching ignores case and surrounding whitespace. Empty checks coverage and delivery without blocking on finding severity. |
+| `fail_on_severity` | `''` | Block findings at or above `critical`, `high`, `medium`, or `low`. Requires `gate: 'true'`; values ignore case and surrounding whitespace. Empty disables severity checks. |
 
-Use an `ocr_version` that includes the `ocr gate` command. An action update does not add that command to an older pinned CLI: when enabled, the action checks support before running the model and fails with an upgrade message if it is unavailable. Leaving the gate disabled preserves compatibility with the existing supported CLI versions.
+Select an `ocr_version` containing `ocr gate`. The action checks command
+availability before calling the model.
 
-The gate always checks complete coverage of the selected set, recorded `code_comment` failures, and the exact immutable base/head resolved before review. Budget stops, waived items, zero selected files, missing evidence, and unknown manifest versions do not pass. Thresholds apply to the original findings, including findings routed to the summary or skipped by incremental posting. Only the CLI's `pass` decision exits `0`.
+Gate mode reviews the full `merge-base..head` range on every run and disables
+checkpoint reads and writes, including when `checkpoint_range` is enabled. This
+can increase token use on long-running PRs. The merge base and head are resolved
+to immutable commit IDs before review and used for both review and gate.
 
-Enabling the gate forces a full review from the merge base, even if `checkpoint_range` is enabled. It does not consume or advance checkpoints: earlier blocking findings must not disappear just because a later push reviews a narrower range. Comment routing and incremental posting still work; they do not filter the gate's input.
+The gate checks selected-file coverage, recorded `code_comment` failures, and
+revision identity. It applies severity thresholds to the original findings,
+including entries routed to the summary or deduplicated during publication.
+Budget stops, waived items, zero selected files, missing evidence, and unsupported
+manifest versions prevent a pass.
 
-The action attempts publication even after a non-zero review exit, then evaluates the gate and uploads artifacts before final enforcement. The job fails if the review failed, the gate failed or could not run, publication threw an error, any inline submission remained failed, or the final summary was not confirmed published. A fallback summary does not clear an inline submission failure under this conservative policy. Missing outcomes never count as success, and a gate pass cannot erase a review or publication failure.
+The CLI emits `pass` (exit `0`) when all checks pass, `fail` (exit `1`) when a
+finding meets the severity threshold, or `inconclusive` (exit `1`) when evidence
+is insufficient. The job requires successful review execution, successful
+publication, and a `pass` decision. Publication and gate evaluation are attempted
+before the final job status is set. Inline submission failures still fail the job
+after a summary fallback; the final summary must also be confirmed published.
 
-The `gate_exit_code` action output is the gate command's exit code only; it is empty if the gate is disabled or was not reached. It is not an overall job-success flag. With artifact upload enabled, `ocr-gate.json` and `ocr-gate-stderr.log` accompany the review result and stderr. Each invocation uses a fresh temporary directory, including repeated invocations in the same job.
-
-The revisions are the event's reviewed snapshot. This integration does not query a PR's live head after review or attest excluded files. Use trusted workflow policy and CLI artifacts; merge-time freshness enforcement remains separate.
+The `gate_exit_code` output records the gate command's exit code; it is empty when
+disabled or not reached. With `upload_artifacts: 'true'` (default), the action
+uploads `ocr-result.json`, `ocr-stderr.log`, and, when the gate runs,
+`ocr-gate.json` and `ocr-gate-stderr.log`. Each invocation uses a fresh temporary
+directory.
 
 ### Control review effort and token budget
 
@@ -621,14 +636,14 @@ OCR supports both OpenAI and Anthropic API formats:
 
 ### Common Issues
 
-1. **Job fails / "Failed to parse OCR output"**: When `ocr review` exits non-zero the action fails the job with that exit code (the comment-posting step is skipped); a zero exit with malformed JSON surfaces as a parse error in the summary. In both cases, check that `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` are set correctly, then inspect the uploaded `ocr-stderr.log` artifact (also printed in the "Run OpenCodeReview" step log) for the underlying error.
+1. **Job fails / "Failed to parse OCR output"**: A non-zero `ocr review` exit fails the job. With the gate disabled, the comment-posting step is skipped; with the gate enabled, the action attempts publication and gate evaluation before enforcing failure. A zero exit with malformed JSON surfaces as a parse error in the summary. Check that `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` are set correctly, then inspect the uploaded `ocr-stderr.log` artifact (also printed in the "Run OpenCodeReview" step log) for the underlying error.
 2. **"Cannot find merge-base"**: The action fetches full history (`fetch-depth: 0`) and the PR head (`git fetch origin pull/<n>/head`); if this still fails, ensure `permissions: contents: read` is set and the base branch is accessible (e.g., not deleted).
 3. **Review comments not on the expected lines**: Comments are attached to the PR head commit. If a comment's line falls outside the current diff (the PR was force-pushed or updated mid-review), GitHub rejects the inline post and the comment is rendered in the summary instead. The workflow's concurrency group cancels stale runs on new pushes.
 4. **No summary or comments at all**: Confirm the job's `permissions` include `pull-requests: write`, and that `github_token` (defaults to `${{ github.token }}`) is not overridden with a token lacking those scopes.
 
 ### Debugging
 
-The action does not use an `OCR_DEBUG` flag. To diagnose a run:
+To diagnose a run:
 
 - **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. When the gate runs, `ocr-gate.json` and `ocr-gate-stderr.log` are included. Download them from the run's **Artifacts** section.
 - **Step log**: the "Run OpenCodeReview" step prints both the JSON result and stderr to the workflow log.

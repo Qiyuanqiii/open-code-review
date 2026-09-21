@@ -4,6 +4,7 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -13,7 +14,90 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestStagedToolsReadFilesRemovedFromWorkingTreeBeforeCapture(t *testing.T) {
+	dir := setupTestRepo(t)
+	files := []struct {
+		name   string
+		marker string
+		isNew  bool
+	}{
+		{name: "hello.go", marker: "STAGED_EXISTING_REMOVED"},
+		{name: "added.go", marker: "STAGED_ADDED_REMOVED", isNew: true},
+	}
+	for _, file := range files {
+		writeTestFile(t, dir, file.name, "package main\n// "+file.marker+"\n")
+	}
+	cmd := exec.Command("git", "add", "--", files[0].name, files[1].name)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stage test files: %v: %s", err, out)
+	}
+	for _, file := range files {
+		if err := os.Remove(filepath.Join(dir, file.name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	indexPath := filepath.Join(dir, ".git", "index")
+	indexBefore, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	snapshot, err := diff.CaptureStagedSnapshot(ctx, dir, gitcmd.New(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		runner *gitcmd.Runner
+	}{
+		{name: "direct"},
+		{name: "shared runner", runner: gitcmd.New(2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diffs, err := diff.NewStagedProvider(dir, snapshot, tc.runner).GetDiff(ctx)
+			if err != nil || len(diffs) != len(files) {
+				t.Fatalf("staged changes disappeared after working-tree removal: %+v, %v", diffs, err)
+			}
+			byPath := make(map[string]model.Diff)
+			for _, d := range diffs {
+				byPath[d.NewPath] = d
+			}
+			fr := &FileReader{RepoDir: dir, Mode: ModeStaged, Ref: snapshot.Tree, Runner: tc.runner}
+			for _, file := range files {
+				want := "package main\n// " + file.marker + "\n"
+				d, ok := byPath[file.name]
+				if !ok || d.IsDeleted || d.IsNew != file.isNew || d.NewFileContent != want || !strings.Contains(d.Diff, "+// "+file.marker) {
+					t.Errorf("unstaged removal changed staged diff for %q: %+v", file.name, d)
+				}
+				if content, err := fr.Read(ctx, file.name); err != nil || content != want {
+					t.Errorf("read removed file %q: %q, %v", file.name, content, err)
+				}
+				if lines, total, err := fr.ReadLines(ctx, file.name, 2, 1); err != nil || total != 3 || len(lines) != 1 || lines[0] != "// "+file.marker {
+					t.Errorf("read removed file lines %q: %v, total=%d, %v", file.name, lines, total, err)
+				}
+				if found, err := NewFileFind(fr).Execute(ctx, map[string]any{"query_name": file.name}); err != nil || found != file.name {
+					t.Errorf("find removed file %q: %q, %v", file.name, found, err)
+				}
+				if matches, err := NewCodeSearch(fr).Execute(ctx, map[string]any{"search_text": file.marker}); err != nil || !strings.Contains(matches, file.name) || !strings.Contains(matches, file.marker) {
+					t.Errorf("search removed file %q: %q, %v", file.name, matches, err)
+				}
+			}
+		})
+	}
+	for _, file := range files {
+		if _, err := os.Stat(filepath.Join(dir, file.name)); !os.IsNotExist(err) {
+			t.Errorf("review restored removed working-tree file %q: %v", file.name, err)
+		}
+	}
+	indexAfter, err := os.ReadFile(indexPath)
+	if err != nil || !bytes.Equal(indexBefore, indexAfter) {
+		t.Fatalf("review changed the original index: %v", err)
+	}
+}
 
 func TestStagedToolsKeepFrozenTreeAndAttributes(t *testing.T) {
 	dir := setupTestRepo(t)

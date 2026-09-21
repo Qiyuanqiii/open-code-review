@@ -48,7 +48,7 @@ func loadProjectRuleAtRef(repoDir, ref string, runner *gitcmd.Runner) (*ProjectR
 			return nil, err
 		}
 		if !exists {
-			return nil, fmt.Errorf("snapshot rule document %q is not staged", e.Rule)
+			return nil, fmt.Errorf("snapshot rule document %q does not exist in the snapshot tree", e.Rule)
 		}
 		e.Rule = strings.TrimRight(string(content), "\n")
 	}

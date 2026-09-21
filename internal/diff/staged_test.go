@@ -4,15 +4,19 @@
 package diff
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -47,6 +51,221 @@ func captureStagedTest(t *testing.T, repo string) *StagedSnapshot {
 		t.Fatal(err)
 	}
 	return snapshot
+}
+
+type stagedRepositoryState struct {
+	index    []byte
+	head     []byte
+	refs     string
+	worktree map[string]stagedWorktreeEntry
+}
+
+type stagedWorktreeEntry struct {
+	mode    os.FileMode
+	content string
+}
+
+func readStagedRepositoryState(t *testing.T, repo string) stagedRepositoryState {
+	t.Helper()
+	read := func(path string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	state := stagedRepositoryState{
+		index:    read(filepath.Join(repo, ".git", "index")),
+		head:     read(filepath.Join(repo, ".git", "HEAD")),
+		refs:     stagedGitOutput(t, repo, "for-each-ref", "--format=%(refname) %(objectname) %(symref)"),
+		worktree: make(map[string]stagedWorktreeEntry),
+	}
+	err := filepath.WalkDir(repo, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(repo, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		if rel == ".git" {
+			return filepath.SkipDir
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		value := stagedWorktreeEntry{mode: info.Mode()}
+		if info.Mode()&os.ModeSymlink != 0 {
+			value.content, err = os.Readlink(path)
+		} else if !entry.IsDir() {
+			var content []byte
+			content, err = os.ReadFile(path)
+			value.content = string(content)
+		}
+		if err != nil {
+			return err
+		}
+		state.worktree[rel] = value
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func assertStagedRepositoryUnchanged(t *testing.T, repo string, before stagedRepositoryState) {
+	t.Helper()
+	after := readStagedRepositoryState(t, repo)
+	if !bytes.Equal(before.index, after.index) {
+		t.Error("capture changed the user's index bytes")
+	}
+	if !bytes.Equal(before.head, after.head) || before.refs != after.refs {
+		t.Error("capture changed HEAD or repository refs")
+	}
+	if !reflect.DeepEqual(before.worktree, after.worktree) {
+		t.Errorf("capture changed worktree paths, modes or bytes:\nbefore: %#v\nafter: %#v", before.worktree, after.worktree)
+	}
+}
+
+func stagedPreservationFixture(t *testing.T) string {
+	t.Helper()
+	repo := initRepoWithChange(t)
+	writeStagedFile(t, repo, "delete.txt", "tracked deletion\n")
+	writeStagedFile(t, repo, "rename.txt", "tracked rename\n")
+	runGitTest(t, repo, "add", "delete.txt", "rename.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "prepare preserved state")
+	runGitTest(t, repo, "branch", "preserved-branch")
+	runGitTest(t, repo, "tag", "preserved-tag")
+	runGitTest(t, repo, "mv", "rename.txt", "renamed.txt")
+	runGitTest(t, repo, "rm", "delete.txt")
+	writeStagedFile(t, repo, "sample.txt", "staged sample\n")
+	writeStagedFile(t, repo, "added.txt", "staged addition\n")
+	runGitTest(t, repo, "add", "sample.txt", "added.txt")
+	writeStagedFile(t, repo, "sample.txt", "unstaged sample\n")
+	writeStagedFile(t, repo, "untracked/keep.txt", "untracked bytes\n")
+	writeStagedFile(t, repo, ".gitignore", "ignored.bin\n")
+	writeStagedFile(t, repo, "ignored.bin", "\x00ignored bytes\xff")
+	if err := os.Mkdir(filepath.Join(repo, "empty-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func TestStagedSnapshotFailurePreservesRepository(t *testing.T) {
+	for _, cause := range []string{"intent-to-add", "cancelled before capture"} {
+		t.Run(cause, func(t *testing.T) {
+			repo := stagedPreservationFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if cause == "intent-to-add" {
+				// The unsupported entry is detected after a private index copy
+				// exists and has been inspected by several Git commands.
+				writeStagedFile(t, repo, "intent.txt", "not staged yet\n")
+				runGitTest(t, repo, "add", "-N", "intent.txt")
+			} else {
+				cancel()
+			}
+			before := readStagedRepositoryState(t, repo)
+			snapshot, err := CaptureStagedSnapshot(ctx, repo, gitcmd.New(2))
+			if snapshot != nil || err == nil {
+				t.Fatalf("capture unexpectedly succeeded: %+v, %v", snapshot, err)
+			}
+			if cause == "intent-to-add" && !strings.Contains(err.Error(), "intent-to-add") {
+				t.Fatalf("unexpected failure: %v", err)
+			}
+			if cause != "intent-to-add" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("capture lost cancellation: %v", err)
+			}
+			assertStagedRepositoryUnchanged(t, repo, before)
+		})
+	}
+}
+
+func TestStagedSnapshotCancellationDuringCapturePreservesRepository(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("deterministic cancellation uses a POSIX shell shim and FIFOs")
+	}
+	repo := stagedPreservationFixture(t)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshakeDir := t.TempDir()
+	readyPath := filepath.Join(handshakeDir, "ready")
+	releasePath := filepath.Join(handshakeDir, "release")
+	if out, err := exec.Command("mkfifo", readyPath, releasePath).CombinedOutput(); err != nil {
+		t.Fatalf("create capture handshake: %v: %s", err, out)
+	}
+	// Opening the ready FIFO in both directions lets cleanup unblock the
+	// reader even if capture fails before the shim announces readiness.
+	ready, err := os.OpenFile(readyPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ready.Close()
+	t.Setenv("OCR_TEST_REAL_GIT", realGit)
+	t.Setenv("OCR_TEST_CAPTURE_READY", readyPath)
+	t.Setenv("OCR_TEST_CAPTURE_RELEASE", releasePath)
+	shimGit(t, "case \"$*\" in\n*write-tree*)\n  \"$OCR_TEST_REAL_GIT\" \"$@\" || exit $?\n  printf '%s\\n' \"$GIT_INDEX_FILE\" > \"$OCR_TEST_CAPTURE_READY\"\n  read -r release < \"$OCR_TEST_CAPTURE_RELEASE\"\n  exit 0;;\nesac\nexec \"$OCR_TEST_REAL_GIT\" \"$@\"\n")
+	before := readStagedRepositoryState(t, repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type captureResult struct {
+		snapshot *StagedSnapshot
+		err      error
+	}
+	done := make(chan captureResult, 1)
+	go func() {
+		snapshot, err := CaptureStagedSnapshot(ctx, repo, gitcmd.New(2))
+		done <- captureResult{snapshot, err}
+	}()
+	type readyResult struct {
+		path string
+		err  error
+	}
+	announced := make(chan readyResult, 1)
+	go func() {
+		path, err := bufio.NewReader(ready).ReadString('\n')
+		announced <- readyResult{strings.TrimSpace(path), err}
+	}()
+	// The timer only bounds a broken handshake. Cancellation is triggered by
+	// write-tree completion, not by elapsed time or scheduler assumptions.
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	var privateIndex string
+	select {
+	case report := <-announced:
+		if report.err != nil {
+			t.Fatal(report.err)
+		}
+		privateIndex = report.path
+		if privateIndex == "" || privateIndex == filepath.Join(repo, ".git", "index") {
+			t.Fatalf("write-tree did not use a private index: %q", privateIndex)
+		}
+		if _, err := os.Stat(privateIndex); err != nil {
+			t.Fatalf("private index missing before cancellation: %v", err)
+		}
+	case result := <-done:
+		t.Fatalf("capture returned before cancellation handshake: %+v, %v", result.snapshot, result.err)
+	case <-deadline.C:
+		t.Fatal("capture did not reach the write-tree handshake")
+	}
+	cancel()
+	select {
+	case result := <-done:
+		if result.snapshot != nil || !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("capture lost cancellation: %+v, %v", result.snapshot, result.err)
+		}
+	case <-deadline.C:
+		t.Fatal("capture did not return after cancellation")
+	}
+	assertStagedRepositoryUnchanged(t, repo, before)
+	if _, err := os.Stat(filepath.Dir(privateIndex)); !os.IsNotExist(err) {
+		t.Fatalf("private index directory survived cancellation: %v", err)
+	}
 }
 
 func TestStagedSnapshotFreezesIndexAndFullContext(t *testing.T) {

@@ -45,6 +45,22 @@ func TestCompare(t *testing.T) {
 		wantNotReviewed []string
 	}{
 		{
+			name:           "legacy other category matches an unclassified finding",
+			before:         []model.LlmComment{cmt("a.go", 40, "other", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("a.go", 52, "", "x := 1", "unused")},
+			wantNew:        []string{},
+			wantPersisting: []string{"a.go:52"},
+			wantResolved:   []string{},
+		},
+		{
+			name:           "unclassified finding matches a legacy other category",
+			before:         []model.LlmComment{cmt("a.go", 40, "", "x := 1", "unused")},
+			after:          []model.LlmComment{cmt("a.go", 52, " Other ", "x := 1", "unused")},
+			wantNew:        []string{},
+			wantPersisting: []string{"a.go:52"},
+			wantResolved:   []string{},
+		},
+		{
 			name:           "line drift keeps the finding persisting",
 			before:         []model.LlmComment{cmt("a.go", 40, "bug", "x := 1", "unused")},
 			after:          []model.LlmComment{cmt("a.go", 52, "bug", "x := 1", "unused")},

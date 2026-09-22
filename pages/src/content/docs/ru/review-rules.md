@@ -127,8 +127,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 
 Встроенный список исключений (см.
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-исключает тестовые файлы разных языков, а также фикстуры, снапшоты,
-сгенерированный код и vendored-зависимости:
+охватывает две группы. Первая — тестовые файлы разных языков, а также
+фикстуры, снапшоты и сгенерированный код:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -188,10 +188,27 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
 
-Фильтрация шумных каталогов (`vendor/`, `node_modules/`, `target/`, …)
-происходит раньше, на уровне diff в
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-до запуска попереходного файлового фильтра.
+…и каталоги зависимостей и сборки:
+
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` и `**/bin/**` намеренно отсутствуют: во многих проектах в них
+лежат написанные вручную исходники.
+
+Те же шумные каталоги фильтруются и раньше, на уровне diff в
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go).
+Этот список сопоставляется по префиксу пути, поэтому ловит каталог только в
+**корне репозитория**: `vendor/pkg/x.go` не доходит до файлового фильтра и
+отмечается как `provider_directory`, а `api/vendor/pkg/x.go` доходит и
+исключается как `default_path`. Вернуть правилом `include` можно только
+второй.
 
 Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов,
 добавьте его в пользовательский список `include` — это переопределяет

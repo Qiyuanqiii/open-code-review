@@ -111,7 +111,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 内置排除列表（见
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)）
-会排除各语言的测试文件，以及测试夹具、快照、生成代码与 vendored 依赖：
+涵盖两组。第一组是各语言的测试文件，以及测试夹具、快照与生成代码：
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -171,11 +171,27 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
 
-噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
-的 diff 层，先于 per-file 过滤运行。
+……以及依赖目录和构建产物目录：
 
-要**评审**一个匹配这些模式的文件，把它加入用户 `include` 列表——那会
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` 和 `**/bin/**` 有意不在其中：很多项目会把手写源码放在这两个目录下。
+
+同样这些噪声目录在更早的 diff 层也会被过滤，位于
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)。
+该列表按路径前缀匹配，因此只能命中**仓库根目录**下的目录：`vendor/pkg/x.go`
+根本不会进入 per-file 过滤，会被报告为 `provider_directory`；而
+`api/vendor/pkg/x.go` 会进入，并由 `default_path` 排除。只有后者可以用
+`include` 规则重新纳入评审。
+
+要**评审**一个匹配上述任一模式的文件，把它加入用户 `include` 列表——那会
 覆盖 default-path 门。
 
 ## 每文件的规则解析

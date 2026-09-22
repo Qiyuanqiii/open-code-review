@@ -616,7 +616,7 @@ func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
 		t.Fatal("file token breakdown should be rendered and collapsed by default")
 	}
-	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+	if !strings.Contains(body, `<details class="comment-file-group" open hidden>`) {
 		t.Fatal("review comment groups should remain expanded")
 	}
 }
@@ -924,6 +924,9 @@ func TestReposJS_PagerContract(t *testing.T) {
 	if !strings.Contains(string(js), "ocrPager") || !strings.Contains(string(js), "filter:") {
 		t.Error("repos.js should hand the table and its search filter to the shared ocrPager")
 	}
+	if !strings.Contains(string(js), "pagerApi.reset()") {
+		t.Error("repos.js should reset to page 1 when the search query changes")
+	}
 }
 
 func TestPagerJS_Contract(t *testing.T) {
@@ -945,8 +948,14 @@ func TestPagerJS_Contract(t *testing.T) {
 		"pager.hidden = total < 2",
 		// Focus returns to the current page number / an enabled step.
 		"preventScroll",
-		// The repositories search re-applies its filter from page 1.
-		"refresh",
+		// refresh keeps the current page (clamped); reset starts at page 1.
+		"refresh: () => render()",
+		"reset: () => render(1)",
+		// Detail pages can hand arbitrary result elements to the same pager.
+		"data-pagination-source",
+		"data-pagination-item",
+		"paginationPageSize",
+		"nextElementSibling",
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("pager.js is missing %q", want)
@@ -954,9 +963,82 @@ func TestPagerJS_Contract(t *testing.T) {
 	}
 }
 
+func TestSessionTemplatePaginatesLongResultSections(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "s",
+			CWD:           "/p",
+			FilesReviewed: []string{"a.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "a.go"}},
+		},
+		SessionTasks: []*FileGroup{{FilePath: "__grouping__", Tasks: map[TaskType][]*TaskCard{}}},
+		Files:        []*FileGroup{{FilePath: "a.go", Tasks: map[TaskType][]*TaskCard{}}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<table class="token-table" data-pagination-source data-pagination-page-size="20">`,
+		`id="token-breakdown-pagination"`,
+		`<ul class="file-list" data-pagination-source data-pagination-page-size="20">`,
+		`id="files-reviewed-pagination"`,
+		`<div class="conversations" data-pagination-source data-pagination-page-size="20">`,
+		`id="session-tasks-pagination"`,
+		`id="conversations-pagination"`,
+		`data-pagination-item`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("session page missing long-list pagination hook %q", want)
+		}
+	}
+}
+
+func TestSessionJS_UsesDefaultCommentPaging(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	for _, want := range []string{
+		"let activeSeverity = 'all'",
+		"let activeCategory = 'all'",
+		"pageSize: 20",
+		"rows: cards",
+		"commentsPager.reset()",
+		"commentsPager.refresh()",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("session.js is missing %q", want)
+		}
+	}
+	if strings.Contains(string(script), "Select a severity or category to view findings.") {
+		t.Error("session.js retains an unreachable empty-state branch")
+	}
+	if idx := strings.Index(string(script), "commentsPager = window.ocrPager"); idx >= 0 {
+		if strings.Contains(string(script)[idx:], "updateFilterState()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.refresh()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.reset()") {
+			t.Error("session.js should not re-render comments immediately after constructing the pager")
+		}
+	}
+}
+
+func TestSessionTemplateLoadsPagerScript(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+		Comments: []*ReviewComment{{FilePath: "a.go", Content: "c1", Category: "bug", Severity: "high"}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	if !strings.Contains(rr.Body.String(), `<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>`) {
+		t.Error("session page should load a11y.js, pager.js, and session.js in dependency order")
+	}
+}
+
 // TestHandleSession_ServedPageKeepsStaticRefs guards the other half of the
 // export gates in session.html. sessionPageData.Static is false for every HTTP
-// render, so the served page must still link the two /static/ assets and keep
+// render, so the served page must still link the three /static/ assets and keep
 // its breadcrumb anchors — inlining them over HTTP would defeat the browser
 // cache, and the {{else}} branches are otherwise untested.
 func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
@@ -979,6 +1061,7 @@ func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/static/style.css"`,
+		`src="/static/pager.js"`,
 		`src="/static/session.js"`,
 		`<a href="/" class="nav-brand"`,
 		`<a href="/r/repo">`,
@@ -1034,13 +1117,18 @@ func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
 	}
 	text := string(css)
 	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
-	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n    }")
-	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n    }")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;")
 	if base == -1 || normal == -1 || truncate == -1 {
 		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
 	}
 	if normal < base || truncate < base {
 		t.Error("the 768px session meta overrides must come after the base " +
 			".session-page .meta rules: equal specificity means source order decides")
+	}
+
+	narrow := regexp.MustCompile(`(?s)@media \(max-width: 768px\) \{.*?\.session-page \.meta span \{.*?white-space: normal;.*?flex-wrap: wrap;.*?overflow-wrap: anywhere;.*?\}.*?\.session-page \.meta \.meta-truncate \{.*?max-width: 100%;.*?overflow: visible;.*?text-overflow: clip;.*?\}`)
+	if !narrow.MatchString(text) {
+		t.Fatal("narrow-screen session metadata must wrap long values without clipping")
 	}
 }

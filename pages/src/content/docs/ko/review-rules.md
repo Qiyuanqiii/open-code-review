@@ -119,7 +119,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 
 내장 제외 목록은
 ([`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)
-참고) 여러 언어의 테스트 파일과 테스트 fixture, 스냅샷, 생성 코드, vendored 의존성을 제외합니다.
+참고) 두 그룹을 다룹니다. 첫 번째는 여러 언어의 테스트 파일과 테스트 fixture, 스냅샷, 생성 코드입니다.
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -179,12 +179,28 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/test/**/*.vy`
 - `**/tests/**/*.vy`
 
-잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
-앞에서, 파일별 필터가 돌기 전
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)의
-diff 단계에서 일어납니다.
+…그리고 의존성 디렉터리와 빌드 산출물 디렉터리:
 
-이런 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
+- `**/node_modules/**`
+- `**/bower_components/**`
+- `**/vendor/**`
+- `**/target/**`
+- `**/dist/**`
+- `**/__pycache__/**`, `**/.venv/**`, `**/site-packages/**`
+- `**/Pods/**`, `**/Carthage/**`
+- `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
+
+`**/build/**` 와 `**/bin/**` 은 의도적으로 빠져 있습니다. 많은 프로젝트가 손으로
+작성한 소스를 그 안에 두기 때문입니다.
+
+같은 디렉터리들은 더 앞선 diff 단계
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) 에서도 걸러집니다.
+이 목록은 경로 접두사로 비교하므로 **저장소 루트**의 디렉터리만 잡습니다.
+`vendor/pkg/x.go` 는 파일별 필터까지 오지 않고 `provider_directory` 로
+보고되고, `api/vendor/pkg/x.go` 는 도달해서 `default_path` 로 제외됩니다.
+`include` 규칙으로 되돌릴 수 있는 것은 후자뿐입니다.
+
+위 패턴 중 하나에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
 넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}

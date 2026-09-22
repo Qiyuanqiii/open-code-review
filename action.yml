@@ -183,12 +183,14 @@ inputs:
       Empty reports all severities. Findings with unknown severity or category
       are always kept. Requires a CLI version supporting --min-severity.
     default: ''
+    required: false
   exclude_categories:
     description: >-
       Comma-separated finding categories to omit from review output: bug,
       security, performance, maintainability, test, style, documentation, other.
       Findings with unknown severity or category are always kept. Requires a
       CLI version supporting --exclude-categories.
+    required: false
     default: ''
   route_severity_below:
     description: >-

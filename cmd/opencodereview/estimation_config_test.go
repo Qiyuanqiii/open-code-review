@@ -72,6 +72,10 @@ func TestLoadAppConfigEstimationValidation(t *testing.T) {
 }
 
 func TestResetEstimationConfig(t *testing.T) {
+	defaults := map[string]int64{
+		"estimation_overhead_tokens":         2000,
+		"estimation_output_tokens_per_round": 700,
+	}
 	for _, key := range []string{"estimation_overhead_tokens", "estimation_output_tokens_per_round"} {
 		for _, method := range []string{"zero", "unset"} {
 			t.Run(key+"/"+method, func(t *testing.T) {
@@ -85,7 +89,11 @@ func TestResetEstimationConfig(t *testing.T) {
 					t.Fatal(err)
 				}
 				if method == "zero" {
-					err = runConfigSet(key, "0")
+					out := captureStdout(t, func() { err = runConfigSet(key, "0") })
+					wantMessage := fmt.Sprintf("Set %s = 0 (using default %d)", key, defaults[key])
+					if !strings.Contains(out, wantMessage) {
+						t.Errorf("config set output = %q, want %q", out, wantMessage)
+					}
 				} else {
 					err = runConfigUnset(key)
 				}

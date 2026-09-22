@@ -47,6 +47,7 @@ Examples:
 var configSetCmd = &cobra.Command{
 	Use:     "set <key> <value>",
 	Short:   "Set a configuration value",
+	Long:    "Set a configuration value. For estimation_overhead_tokens and estimation_output_tokens_per_round, zero restores the built-in default.",
 	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
 	Args:    exactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -129,8 +130,13 @@ func runConfigSet(key, value string) error {
 	}
 
 	displayValue := value
-	if shouldMaskConfigValue(key) {
+	switch {
+	case shouldMaskConfigValue(key):
 		displayValue = maskKey(value)
+	case key == "estimation_overhead_tokens" && cfg.EstimationOverheadTokens == 0:
+		displayValue = fmt.Sprintf("0 (using default %d)", resolveEstimation(nil).PromptOverheadTokens)
+	case key == "estimation_output_tokens_per_round" && cfg.EstimationOutputTokensPerRound == 0:
+		displayValue = fmt.Sprintf("0 (using default %d)", resolveEstimation(nil).OutputTokensPerRound)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
 	if warning := legacyLLMShadowWarning(cfg.Provider, key); warning != "" {

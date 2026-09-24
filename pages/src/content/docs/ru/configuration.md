@@ -48,7 +48,10 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -89,12 +92,59 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 предустановленному значению по умолчанию — поэтому его нужно задавать только
 когда ваша конечная точка отличается.
 
+### AWS Bedrock
+
+`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
+передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
+и он не принимается как замена подписи:
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| Поле | Значение |
+|---|---|
+| `providers.bedrock.aws_region` | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
+| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка. |
+
+Оба поля необязательны: если они не заданы, выбор делает стандартная цепочка,
+как и для любого другого инструмента AWS. Явная фиксация делает запуск
+воспроизводимым без предварительного экспорта `AWS_PROFILE` — это особенно
+важно на CI-раннерах с другим значением по умолчанию.
+
+Идентификаторы моделей привязаны к аккаунту **и** к региону, поэтому список,
+который поставляется с OCR, — отправная точка, а не закрытый набор: подходящий
+для вашего аккаунта ID inference-профиля или ARN прикладного inference-профиля
+принимается, даже если его нет в списке. Выполните
+`aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
+доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
+
+`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
+настроенного URL — хост определяется регионом:
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+Через `llm.protocol` и `OCR_LLM_PROTOCOL` bedrock **недоступен**. Этот блок
+описывает один URL и один токен, в нём негде указать регион или профиль, а сами
+эти значения bedrock не использует, поэтому такая комбинация отклоняется, а не
+принимается и молча игнорируется.
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается
 пользовательским. Для него необходимо задать как минимум `url` и `protocol`
-(`protocol` может принимать значения `anthropic`, `openai` или
-`openai-responses`):
+(`protocol` может принимать значения `anthropic`, `openai`,
+`openai-responses` или `anthropic-bedrock`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -113,6 +163,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+Пользовательскому провайдеру на протоколе `anthropic-bedrock` не нужен `url` —
+хост определяется регионом, — и он принимает те же поля AWS, что и встроенный.
+Так второй регион или профиль получает собственную запись:
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 В качестве `url` можно указать как базовый URL API, так и полный эндпоинт
@@ -148,8 +210,7 @@ Ollama игнорирует API-ключ, однако для пользоват
 - Переменная окружения `OCR_LLM_TIMEOUT` — целое число секунд; переопределяет
   значение из файла конфигурации для всех вариантов разрешения настроек.
 
-Ключи `timeout_sec` не поддерживаются командой `ocr config set` — измените
-`~/.opencodereview/config.json` напрямую:
+Оба ключа `timeout_sec` можно задать командой `ocr config set`:
 
 ```json
 {
@@ -236,14 +297,15 @@ OCR игнорирует эти избыточные коды. Если зада
 выполняет повторные попытки по умолчанию, поэтому такие коды нельзя добавлять
 в `retry_codes`.
 
-### Лимит запроса на файл
+### Лимит запроса
 
-По умолчанию OCR ограничивает промпт для каждого ревью файла 58 888 токенами.
-Чтобы увеличить лимит для модели с большим контекстным окном, сохраните
-`max_tokens`:
+`max_tokens` — это предел **промпта** (входных токенов) для одной подзадачи
+(один файл или набор связанных файлов). Встроенные шаблоны по умолчанию дают
+200 000 токенов для `ocr review` и 58 888 для `ocr scan`. Если контекстное окно вашей
+модели отличается, сохраните `max_tokens`:
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 Эта настройка применяется как к `ocr review`, так и к `ocr scan`. Используйте
@@ -251,16 +313,34 @@ ocr config set max_tokens 200000
 конфигурации:
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 Флаг для конкретного запуска имеет приоритет над `max_tokens`; если не задано
 ни то, ни другое, OCR использует встроенное значение по умолчанию из шаблона
-задачи. Этот лимит действует на файл и не зависит ни от предела выходных
-токенов модели, ни от `--max-tokens-budget`, который ограничивает общее
-использование токенов за запуск. Чтобы восстановить встроенное значение по
-умолчанию, используйте `ocr config unset max_tokens`.
+задачи. Этот лимит действует только на **промпт**: предел вывода модели задаётся
+отдельным параметром `MAX_COMPLETION_TOKENS` (по умолчанию `16384`), поэтому
+увеличение `max_tokens` не расширяет бюджет вывода. Он также не зависит от
+`--max-tokens-budget`, который ограничивает общее использование токенов за
+запуск. Чтобы восстановить встроенное значение по умолчанию, используйте
+`ocr config unset max_tokens`.
+
+### Предустановка усилий ревью (effort)
+
+Параметр `effort` определяет, сколько раундов основного цикла выполняется для
+каждой подзадачи: `low` — 1 раунд, `medium` — 2 раунда (по умолчанию),
+`high` — 3 раунда. Больше раундов — выше полнота находок, но больше времени и
+токенов.
+
+```bash
+ocr config set effort high     # сохранить в конфигурации
+ocr review --effort low        # только для этого запуска
+ocr config unset effort        # вернуться к значению medium
+```
+
+Приоритет: флаг `--effort` > сохранённое значение `effort` > значение по
+умолчанию `medium`.
 
 ### Проверка подключения
 

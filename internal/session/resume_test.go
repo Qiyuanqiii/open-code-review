@@ -24,7 +24,7 @@ func TestSessionFilePath_EmptyID(t *testing.T) {
 
 func TestSessionFilePath_ValidID(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	path, err := SessionFilePath("/some/repo", "abc-123")
 	if err != nil {
@@ -473,7 +473,7 @@ func TestCopyLlmComments_DeepCopy(t *testing.T) {
 
 func TestLoadResumeState_NonexistentFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	_, err := LoadResumeState("/some/repo", "nonexistent-session")
 	if err == nil {
@@ -483,7 +483,7 @@ func TestLoadResumeState_NonexistentFile(t *testing.T) {
 
 func TestLoadResumeState_EmptyFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/repo"
 	sessionID := "empty-session"
@@ -509,7 +509,7 @@ func TestLoadResumeState_EmptyFile(t *testing.T) {
 
 func TestLoadResumeState_MultipleRecords(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/multi"
 	sessionID := "multi-session"
@@ -586,7 +586,7 @@ func TestLoadResumeState_MultipleRecords(t *testing.T) {
 // truncated write cost every other file its checkpoint — the opposite of what a
 // checkpoint is for.
 func TestLoadReviewResumeState_CorruptLineDoesNotAbortLoad(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/corrupt"
 	sessionID := "corrupt-session"
@@ -635,7 +635,7 @@ func TestLoadReviewResumeState_CorruptLineDoesNotAbortLoad(t *testing.T) {
 // damage is the only honest answer, and silently reusing — or silently discarding
 // — every other checkpoint is not.
 func TestLoadResumeState_CorruptLineIsFatal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/corrupt-strict"
 	sessionID := "strict-session"
@@ -661,7 +661,7 @@ func TestLoadResumeState_CorruptLineIsFatal(t *testing.T) {
 // regression this split exists to prevent: an undamaged session must keep every
 // checkpoint it recorded, with no manifest involved.
 func TestLoadResumeState_IntactSessionStillReusable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	repoDir := "/test/intact-scan"
 	sessionID := "intact-session"
@@ -688,7 +688,7 @@ func TestLoadResumeState_IntactSessionStillReusable(t *testing.T) {
 
 func TestLoadResumeState_FailThenRedone(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/redo"
 	sessionID := "redo-session"
@@ -728,6 +728,113 @@ func TestLoadResumeState_FailThenRedone(t *testing.T) {
 	}
 	if len(item.Comments) != 1 || item.Comments[0].Content != "second" {
 		t.Errorf("expected latest comments, got: %+v", item.Comments)
+	}
+}
+
+func TestLoadResumeState_TruncatedFinalRecord_Ignored(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := "/test/torn-write"
+	sessionID := "torn-session"
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two complete records followed by a truncated llm_response with no trailing newline.
+	buf := append(mustJSON(t, resumeRecord{
+		Type:       "session_start",
+		SessionID:  sessionID,
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	}), '\n')
+	buf = append(buf, append(mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "main.go",
+		Fingerprint: "fp-main",
+	}), '\n')...)
+	buf = append(buf, []byte(`{"type":"llm_response","sessionId":"torn-session","filePath":"main.go"`)...)
+
+	if err := os.WriteFile(path, buf, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("torn final record must not fail the load: %v", err)
+	}
+	if _, ok := state.Item("fp-main"); !ok {
+		t.Error("completed checkpoint before the torn record must be recovered")
+	}
+	if state.CompletedCount() != 1 {
+		t.Errorf("CompletedCount = %d, want 1", state.CompletedCount())
+	}
+}
+
+func TestLoadResumeState_TruncatedOnlyRecord_Ignored(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := t.TempDir()
+	sessionID := "truncated-only"
+
+	sessionPath, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	if err := os.WriteFile(
+		sessionPath,
+		[]byte(`{"type":"review_item_done","fingerprint":"truncated"`),
+		0o600,
+	); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	state, err := LoadResumeState(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.SessionID != sessionID {
+		t.Fatalf("SessionID = %q, want %q", state.SessionID, sessionID)
+	}
+	if len(state.Items) != 0 {
+		t.Fatalf("Items = %d, want empty state", len(state.Items))
+	}
+}
+
+func TestLoadResumeState_MalformedTerminatedFinalRecord_Fails(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	repoDir := "/test/malformed-terminated"
+	sessionID := "malformed-session"
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// A malformed newline-terminated record must still fail strict resume loading.
+	buf := append(mustJSON(t, resumeRecord{
+		Type:        "review_item_done",
+		FilePath:    "main.go",
+		Fingerprint: "fp-main",
+	}), '\n')
+	buf = append(buf, []byte("{bad json}\n")...)
+
+	if err := os.WriteFile(path, buf, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadResumeState(repoDir, sessionID); err == nil {
+		t.Fatal("a malformed newline-terminated record must still be fatal")
 	}
 }
 

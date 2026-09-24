@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -292,6 +293,11 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		RetryCodes:   []int{403},
 		ExtraBody:    map[string]any{"temperature": 0.7},
 		ExtraHeaders: map[string]string{"X-Trace": "on"},
+		AWSRegion:    "us-west-2",
+		AWSProfile:   "example-profile",
+		unknownJSONFields: map[string]json.RawMessage{
+			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
+		},
 	}
 
 	rv := reflect.ValueOf(orig)

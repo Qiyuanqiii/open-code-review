@@ -6,7 +6,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +28,7 @@ func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {
 	cmd.Flags().StringVarP(background, "background", "b", "", "optional requirement/business context for the review")
-	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a Markdown file used as review background")
+	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a Markdown file used as review background (takes precedence over --background)")
 }
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {
@@ -36,17 +38,24 @@ func addOutputFlags(cmd *cobra.Command, format, audience *string) {
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
 }
 
+// addOutputPathFlag registers --output/-o: write results to a UTF-8 file
+// instead of stdout. "" or "-" keeps stdout; a real path is created lazily on
+// the first write so a failed run never truncates an existing file.
+func addOutputPathFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "output", "o", "", "write results to a UTF-8 file (default: stdout; '-' also means stdout)")
+}
+
 func addExcludeFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 }
 
 func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
-	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file reviews")
-	cmd.Flags().IntVar(timeout, "timeout", 10, "concurrent task timeout in minutes")
-	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
+	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent subtasks")
+	cmd.Flags().IntVar(timeout, "timeout", 15, "concurrent task timeout in minutes")
+	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
-	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
+	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
+	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round, so a group already over budget gets one final round to submit findings and is reported as failed(budget), and no further groups are dispatched. Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
 }
 
 func addModelFlag(cmd *cobra.Command, target *string) {
@@ -102,6 +111,16 @@ func validateAudience(audience string) error {
 	}
 }
 
+func validateOutputFormat(format string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	switch normalized {
+	case "text", "json", "sarif":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid --format value %q: must be 'text', 'json', or 'sarif'", format)
+	}
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
@@ -112,7 +131,12 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
-	const minMaxTools = 10
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
+	const minMaxTools = 50
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}
@@ -129,6 +153,11 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	if opts.effort != "" {
+		if _, err := template.ParseEffort(opts.effort); err != nil {
+			return fmt.Errorf("--effort: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -136,6 +165,11 @@ func validateScanOptions(opts *scanOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}
@@ -174,10 +208,13 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
-	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
+	addOutputPathFlag(cmd, &opts.outputPath)
+	addConcurrencyFlags(cmd, &opts.concurrency, &opts.concurrentTaskTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
+	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
+	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
 }
@@ -190,12 +227,13 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
-	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
-	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
-	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
+	addOutputPathFlag(cmd, &opts.outputPath)
+	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent subtasks")
+	cmd.Flags().IntVar(&opts.concurrentTaskTimeout, "timeout", 15, "concurrent task timeout in minutes")
+	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per subtask; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
-	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; dispatch stops once exceeded (0 = unlimited)")
+	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; checked before every LLM round and at dispatch (0 = unlimited)")
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
 	cmd.Flags().BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass")

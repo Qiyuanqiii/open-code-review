@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
-import { ReviewMode } from '../../../shared/types';
+import { ReviewMode } from '@shared/types';
 import { GitService } from '../GitService';
 
 const execFileAsync = promisify(execFile);
@@ -38,5 +38,31 @@ describe('GitService workspace files', () => {
       { path: 'staged.ts', status: 'added' },
       { path: 'untracked.ts', status: 'added' },
     ]);
+  });
+
+  it('lists merge commit files relative to the first parent', async () => {
+    await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot });
+
+    await writeFile(path.join(repoRoot, 'base.ts'), 'export const base = true;\n');
+    await execFileAsync('git', ['add', 'base.ts'], { cwd: repoRoot });
+    await execFileAsync('git', ['commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    await execFileAsync('git', ['branch', '-M', 'main'], { cwd: repoRoot });
+
+    await execFileAsync('git', ['checkout', '-q', '-b', 'feature'], { cwd: repoRoot });
+    await writeFile(path.join(repoRoot, 'feature.ts'), 'export const feature = true;\n');
+    await execFileAsync('git', ['add', 'feature.ts'], { cwd: repoRoot });
+    await execFileAsync('git', ['commit', '-q', '-m', 'feature'], { cwd: repoRoot });
+
+    await execFileAsync('git', ['checkout', '-q', 'main'], { cwd: repoRoot });
+    await writeFile(path.join(repoRoot, 'main.ts'), 'export const main = true;\n');
+    await execFileAsync('git', ['add', 'main.ts'], { cwd: repoRoot });
+    await execFileAsync('git', ['commit', '-q', '-m', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['merge', '--no-ff', '-q', 'feature', '-m', 'merge'], { cwd: repoRoot });
+
+    const mergeSha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const files = await new GitService().getCommitFiles(mergeSha);
+
+    expect(files).toEqual([{ path: 'feature.ts', status: 'added' }]);
   });
 });

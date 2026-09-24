@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/spf13/cobra"
 )
@@ -96,16 +98,6 @@ func defaultConfigPath() (string, error) {
 	return filepath.Join(home, ".opencodereview", "config.json"), nil
 }
 
-// resolveConfigPath returns OCR_CONFIG_PATH when set, otherwise the default user config path.
-// Intentionally used only by read-only commands (e.g. ocr llm test). Write paths such as
-// config set and review keep defaultConfigPath() so a leaked OCR_CONFIG_PATH cannot redirect writes.
-func resolveConfigPath() (string, error) {
-	if p := strings.TrimSpace(os.Getenv("OCR_CONFIG_PATH")); p != "" {
-		return p, nil
-	}
-	return defaultConfigPath()
-}
-
 func runConfigSet(key, value string) error {
 	configPath, err := defaultConfigPath()
 	if err != nil {
@@ -157,10 +149,13 @@ func runConfigUnset(key string) error {
 	if key == "max_tokens" {
 		return unsetMaxTokens(configPath)
 	}
+	if key == "effort" {
+		return unsetEffort(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -169,7 +164,7 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 }
 
@@ -185,6 +180,21 @@ func unsetMaxTokens(configPath string) error {
 	}
 
 	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
+}
+
+func unsetEffort(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.Effort = ""
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared effort; using the default medium preset.")
 	return nil
 }
 
@@ -303,6 +313,21 @@ type ProviderEntry struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	// AWSProfile and AWSRegion pin the credentials and region for providers that
+	// authenticate from the AWS chain (bedrock). Both are optional — without
+	// them the standard chain decides, as with any other AWS tool. They must
+	// exist here as well as in the resolver's own view of the file: config is
+	// unmarshalled into this struct and marshalled back on every write, so a
+	// field missing from it is silently dropped from a hand-written config the
+	// first time any config command runs.
+	AWSProfile string `json:"aws_profile,omitempty"`
+	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// unknownJSONFields keeps JSON keys with no matching struct field alive across
+	// a load/save cycle. Unexported: any struct-literal rebuild must copy it
+	// (see cloneProviderEntry) or the fields are dropped again
+	unknownJSONFields map[string]json.RawMessage
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -316,6 +341,8 @@ type MCPServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	Tools   []string          `json:"tools,omitempty"`
 	Setup   string            `json:"setup,omitempty"`
+
+	unknownJSONFields map[string]json.RawMessage
 }
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
@@ -323,12 +350,15 @@ type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	Effort          string                     `json:"effort,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
 	Llm             LlmConfig                  `json:"llm,omitempty"`
 	Language        string                     `json:"language,omitempty"`
 	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
 	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
+
+	unknownJSONFields map[string]json.RawMessage
 }
 
 type LlmConfig struct {
@@ -343,6 +373,8 @@ type LlmConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	unknownJSONFields map[string]json.RawMessage
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -351,6 +383,188 @@ type TelemetryConfig struct {
 	Exporter     string `json:"exporter,omitempty"`        // "console" or "otlp"
 	OTLPEndpoint string `json:"otlp_endpoint,omitempty"`   // OTLP collector address
 	ContentLog   bool   `json:"content_logging,omitempty"` // Include prompt/response content
+
+	unknownJSONFields map[string]json.RawMessage
+}
+
+func jsonFieldNames(value any) []string {
+	typeOf := reflect.TypeOf(value)
+	for typeOf.Kind() == reflect.Pointer {
+		typeOf = typeOf.Elem()
+	}
+
+	fields := make([]string, 0, typeOf.NumField())
+	for i := 0; i < typeOf.NumField(); i++ {
+		field := typeOf.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		tag := field.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}
+
+func collectUnknownJSONFields(data []byte, knownFields []string) (map[string]json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+
+	known := make(map[string]struct{}, len(knownFields))
+	for _, field := range knownFields {
+		known[field] = struct{}{}
+	}
+	for field := range fields {
+		if _, ok := known[strings.ToLower(field)]; ok {
+			delete(fields, field)
+		}
+	}
+	return fields, nil
+}
+
+func mergeUnknownJSONFields(data []byte, unknown map[string]json.RawMessage) ([]byte, error) {
+	if len(unknown) == 0 {
+		return data, nil
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	known := make(map[string]struct{}, len(fields))
+	for field := range fields {
+		known[strings.ToLower(field)] = struct{}{}
+	}
+	for field, value := range unknown {
+		if _, exists := known[strings.ToLower(field)]; !exists {
+			fields[field] = value
+		}
+	}
+	return json.Marshal(fields)
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type configAlias Config
+	var decoded configAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(Config{}))
+	if err != nil {
+		return err
+	}
+	*c = Config(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c Config) MarshalJSON() ([]byte, error) {
+	type configAlias Config
+	data, err := json.Marshal(configAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+}
+
+func (e *ProviderEntry) UnmarshalJSON(data []byte) error {
+	type providerEntryAlias ProviderEntry
+	var decoded providerEntryAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(ProviderEntry{}))
+	if err != nil {
+		return err
+	}
+	*e = ProviderEntry(decoded)
+	e.unknownJSONFields = unknown
+	return nil
+}
+
+func (e ProviderEntry) MarshalJSON() ([]byte, error) {
+	type providerEntryAlias ProviderEntry
+	data, err := json.Marshal(providerEntryAlias(e))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUnknownJSONFields(data, e.unknownJSONFields)
+}
+
+func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
+	type mcpServerConfigAlias MCPServerConfig
+	var decoded mcpServerConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(MCPServerConfig{}))
+	if err != nil {
+		return err
+	}
+	*c = MCPServerConfig(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c MCPServerConfig) MarshalJSON() ([]byte, error) {
+	type mcpServerConfigAlias MCPServerConfig
+	data, err := json.Marshal(mcpServerConfigAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+}
+
+func (c *LlmConfig) UnmarshalJSON(data []byte) error {
+	type llmConfigAlias LlmConfig
+	var decoded llmConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(LlmConfig{}))
+	if err != nil {
+		return err
+	}
+	*c = LlmConfig(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c LlmConfig) MarshalJSON() ([]byte, error) {
+	type llmConfigAlias LlmConfig
+	data, err := json.Marshal(llmConfigAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUnknownJSONFields(data, c.unknownJSONFields)
+}
+
+func (c *TelemetryConfig) UnmarshalJSON(data []byte) error {
+	type telemetryConfigAlias TelemetryConfig
+	var decoded telemetryConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	unknown, err := collectUnknownJSONFields(data, jsonFieldNames(TelemetryConfig{}))
+	if err != nil {
+		return err
+	}
+	*c = TelemetryConfig(decoded)
+	c.unknownJSONFields = unknown
+	return nil
+}
+
+func (c TelemetryConfig) MarshalJSON() ([]byte, error) {
+	type telemetryConfigAlias TelemetryConfig
+	data, err := json.Marshal(telemetryConfigAlias(c))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUnknownJSONFields(data, c.unknownJSONFields)
 }
 
 func loadOrCreateConfig(path string) (*Config, error) {
@@ -391,6 +605,7 @@ var supportedConfigKeys = []string{
 	"provider",
 	"model",
 	"max_tokens",
+	"effort",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -399,6 +614,7 @@ var supportedConfigKeys = []string{
 	"llm.auth_token_cmd",
 	"llm.auth_header",
 	"llm.model",
+	"llm.timeout_sec",
 	"llm.protocol",
 	"llm.use_anthropic",
 	"llm.extra_body",
@@ -470,6 +686,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
 		}
 		cfg.MaxTokens = maxTokens
+	case "effort":
+		e, err := template.ParseEffort(value)
+		if err != nil {
+			return err
+		}
+		cfg.Effort = string(e)
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
@@ -490,10 +712,22 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.ExtraHeaders = parsed
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
+	case "llm.timeout_sec", "llm.TimeoutSec":
+		timeout, err := parseTimeoutSeconds(value)
+		if err != nil {
+			return fmt.Errorf("invalid timeout_sec: %w", err)
+		}
+		cfg.Llm.TimeoutSec = timeout
 	case "llm.protocol", "llm.Protocol":
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {
 			return err
+		}
+		// The llm block is a single url + token endpoint. Bedrock needs neither
+		// and has nowhere here to put a region or a profile, so it is refused at
+		// the point of setting rather than accepted and ignored at resolve time.
+		if normalized == llm.ProtocolAnthropicBedrock {
+			return fmt.Errorf("llm.protocol cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for llm.url or llm.auth_token; run `ocr config set provider bedrock` instead", normalized)
 		}
 		cfg.Llm.Protocol = normalized
 		// Mirror use_anthropic so older binaries that predate llm.protocol
@@ -559,12 +793,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
 
-func applyProviderField(entry *ProviderEntry, field, key, value string) error {
+func applyProviderField(providerName string, entry *ProviderEntry, field, key, value string) error {
 	switch field {
 	case "api_key":
 		entry.APIKey = value
@@ -584,6 +818,15 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			return err
 		}
 		entry.Protocol = normalized
+		// Switching away from bedrock leaves aws_region/aws_profile as dead
+		// config that reads as applied but nothing reads it — clear both, the
+		// same way the TUI drops url/api_key/auth_header when switching onto
+		// bedrock (see cpAmbientProtocol in provider_tui.go).
+		if normalized != llm.ProtocolAnthropicBedrock && (entry.AWSRegion != "" || entry.AWSProfile != "") {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing aws_region/aws_profile on %q: protocol %q does not use the AWS credential chain\n", providerName, normalized)
+			entry.AWSRegion = ""
+			entry.AWSProfile = ""
+		}
 	case "model":
 		entry.Model = value
 	case "models":
@@ -619,10 +862,71 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "timeout_sec":
+		timeout, err := parseTimeoutSeconds(value)
+		if err != nil {
+			return fmt.Errorf("invalid timeout_sec for %s: %w", key, err)
+		}
+		entry.TimeoutSec = timeout
+	case "aws_region", "aws_profile":
+		normalized, err := normalizeAWSSetting(field, key, value)
+		if err != nil {
+			return err
+		}
+		if !providerAcceptsAWSSettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: aws_region and aws_profile are only used by providers that authenticate from the AWS credential chain (protocol %s)", field, providerName, llm.ProtocolAnthropicBedrock)
+		}
+		if field == "aws_region" {
+			entry.AWSRegion = normalized
+		} else {
+			entry.AWSProfile = normalized
+		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
+}
+
+func parseTimeoutSeconds(value string) (int, error) {
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("must be an integer, got %q", value)
+	}
+	if _, err := llm.ValidateTimeoutSec(seconds); err != nil {
+		return 0, err
+	}
+	return seconds, nil
+}
+
+// providerAcceptsAWSSettings reports whether aws_region / aws_profile mean
+// anything for this provider. Storing them anywhere else would be dead config
+// that reads as applied, so it is rejected instead.
+//
+// The entry's own protocol decides whenever it sets one: a preset's protocol can
+// be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
+// bedrock preset would otherwise still accept AWS settings that nothing reads.
+// Only when the entry is silent does the preset's own AmbientAuth flag answer.
+func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
+	if entry.Protocol != "" {
+		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+	}
+	preset, isPreset := llm.LookupProvider(providerName)
+	return isPreset && preset.AmbientAuth
+}
+
+// normalizeAWSSetting trims the value and rejects the shapes AWS itself will
+// not accept. Region names are deliberately not checked against a fixed list:
+// AWS adds regions faster than any embedded list stays correct, and a wrong one
+// already surfaces at request time.
+func normalizeAWSSetting(field, key, value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil // clearing the field hands the decision back to the AWS chain
+	}
+	if strings.ContainsAny(trimmed, " \t\n") {
+		return "", fmt.Errorf("invalid %s for %s: %q contains whitespace", field, key, value)
+	}
+	return trimmed, nil
 }
 
 func parseModelListValue(value string) ([]string, error) {
@@ -702,7 +1006,7 @@ func setProviderValue(cfg *Config, key, value string) error {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
 	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+	if err := applyProviderField(parts[1], &entry, parts[2], key, value); err != nil {
 		return err
 	}
 	cfg.Providers[parts[1]] = entry
@@ -714,15 +1018,31 @@ func setCustomProviderValue(cfg *Config, key, value string) error {
 	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
 		return fmt.Errorf("invalid custom provider key %q: expected custom_providers.<name>.<field>", key)
 	}
+	if preset, isPreset := llm.LookupProvider(parts[1]); isPreset {
+		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", parts[1], preset.Name, parts[2])
+	}
 	return setCustomProviderField(cfg, parts[1], parts[2], key, value)
 }
 
+func isAuxiliaryProviderField(field string) bool {
+	switch field {
+	case "extra_body", "extra_headers", "retry_codes", "timeout_sec":
+		return true
+	default:
+		return false
+	}
+}
+
 func setCustomProviderField(cfg *Config, name, field, key, value string) error {
+	if _, exists := cfg.CustomProviders[name]; isAuxiliaryProviderField(field) && !exists {
+		providerKey := strings.TrimSuffix(key, "."+field)
+		return fmt.Errorf("provider %q is not configured; set a core field first (protocol is required for every custom provider):\n  ocr config set %s.protocol <protocol>", name, providerKey)
+	}
 	if cfg.CustomProviders == nil {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	entry := cfg.CustomProviders[name]
-	if err := applyProviderField(&entry, field, key, value); err != nil {
+	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
 	}
 	cfg.CustomProviders[name] = entry

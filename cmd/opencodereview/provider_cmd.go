@@ -145,7 +145,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	fmt.Printf("Model: %s\n", result.model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -219,7 +219,7 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -227,6 +227,34 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 
 	fmt.Println("\nTip: run 'ocr config model' to switch model later.")
 	return nil
+}
+
+// checkAPIKeyRequirement decides whether a provider selection may be saved with
+// no api_key. It mirrors the resolver's precedence (static api_key ->
+// api_key_cmd -> env var), so an already-configured command satisfies the
+// requirement and picking a model for such a provider does not fail and abandon
+// the save. apiKeyCmd is trimmed because the resolver treats a whitespace-only
+// command as unset, so without this a command of "   " would satisfy the check
+// here and then fail resolution with "no api_key or api_key_cmd configured".
+//
+// An ambient-auth provider has no credential to save at all: demanding one would
+// make it impossible to configure, since the credentials live in the AWS chain
+// rather than the config file.
+func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
+		return nil
+	}
+	switch {
+	case isPreset && preset.AmbientAuth:
+		return nil
+	case isPreset && preset.EnvVar != "":
+		if os.Getenv(preset.EnvVar) == "" {
+			return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", providerName, providerName, preset.EnvVar)
+		}
+		return nil
+	default:
+		return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", providerName, providerName)
+	}
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
@@ -240,20 +268,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	// Mirror the resolver's precedence (static api_key -> api_key_cmd -> env var):
-	// an already-configured api_key_cmd satisfies the requirement, so picking a
-	// model for such a provider must not fail and abandon the save. Trimmed
-	// because the resolver treats a whitespace-only command as unset, so without
-	// this a command of "   " would satisfy the check here and then fail
-	// resolution with "no api_key or api_key_cmd configured".
-	if result.apiKey == "" && strings.TrimSpace(cfg.Providers[result.provider].APIKeyCmd) == "" {
-		if isPreset && preset.EnvVar != "" {
-			if os.Getenv(preset.EnvVar) == "" {
-				return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", result.provider, result.provider, preset.EnvVar)
-			}
-		} else {
-			return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", result.provider, result.provider)
-		}
+	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+		return err
 	}
 
 	if cfg.Providers == nil {
@@ -288,7 +304,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -409,11 +425,14 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
+	// WriteFile applies 0o600 only when creating the file; existing files keep
+	// their prior permissions. Tighten an existing config before writing any
+	// credential material; a missing file will be created as 0600 below.
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod config: %w", err)
+	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
 	}
 	return nil
 }

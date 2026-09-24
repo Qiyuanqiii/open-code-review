@@ -4,16 +4,21 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/viewer"
 	"github.com/spf13/cobra"
 )
 
@@ -71,9 +76,101 @@ var sessionCommentsCmd = &cobra.Command{
 	},
 }
 
+var sessionCompareRepoDir string
+var sessionCompareJSON bool
+
+var sessionCompareCmd = &cobra.Command{
+	Use:     "compare [flags] <before-session-id> <after-session-id>",
+	Aliases: []string{"diff"},
+	Short:   "Compare the findings of two sessions",
+	Long:    "Group the findings of two review sessions into new, persisting, resolved and not-reviewed.\nFindings are matched on path, category and the offending snippet, so a finding that only moved down the file still counts as persisting.\nUse --json for machine-readable output.",
+	Args:    exactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 1 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeSessionIDs(cmd, nil, toComplete)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionCompare(args[0], args[1])
+	},
+}
+
+var sessionExportRepoDir string
+var sessionExportOutput string
+
+var sessionExportCmd = &cobra.Command{
+	Use:   "export [flags] [session-id]",
+	Short: "Export one session as a self-contained HTML file",
+	Long: "Render a persisted review session as a single HTML file that opens offline:\n" +
+		"the viewer's stylesheet and script are inlined, so the artifact needs no network\n" +
+		"access and can be archived by CI. With no session id the newest session for the\n" +
+		"repo is exported.\n\n" +
+		"The artifact embeds the reviewed source excerpts the session recorded; treat it\n" +
+		"with the same care as the repository itself.",
+	Example: "  ocr session export -o review.html\n" +
+		"  ocr session export 20250601-100000-abc123 -o review.html",
+	Args:              maximumArgs(1),
+	ValidArgsFunction: completeSessionIDs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var id string
+		if len(args) == 1 {
+			id = args[0]
+		}
+		return runSessionExport(id)
+	},
+}
+
+var sessionRmRepoDir string
+var sessionRmYes bool
+
+var sessionRmCmd = &cobra.Command{
+	Use:     "rm [flags] <session-id>",
+	Aliases: []string{"delete", "remove"},
+	Short:   "Delete one saved review session",
+	Long: "Delete a persisted review session from ~/.opencodereview/sessions/.\n\n" +
+		"The id is enough on its own, so this works from anywhere; --repo only narrows\n" +
+		"the search. An id saved for more than one repository is listed, not guessed at.\n\n" +
+		"The file cannot be recovered, so this confirms first unless --yes is given.",
+	Example: "  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b\n" +
+		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes\n" +
+		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project",
+	Args:              exactArgs(1),
+	ValidArgsFunction: completeSessionIDsAnywhere,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionRm(cmd, args[0])
+	},
+}
+
 // completeSessionIDs offers the persisted session ids for the current repo
 // (or --repo, when already typed) as shell completions, newest first, with a
-// short summary as the completion description.
+// short summary as the completion description. It completes one positional;
+// a command with two session ids (compare) resets args per positional.
+func completeSessionIDsAnywhere(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if repo, _ := cmd.Flags().GetString("repo"); strings.TrimSpace(repo) != "" {
+		return completeSessionIDs(cmd, args, toComplete)
+	}
+	locations, err := session.ListAllSessionIDs()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	completions := make([]string, 0, len(locations))
+	for _, loc := range locations {
+		if !strings.HasPrefix(loc.SessionID, toComplete) {
+			continue
+		}
+		repo := loc.RepoDir
+		if repo == "" {
+			repo = "(repository not recorded)"
+		}
+		completions = append(completions, loc.SessionID+"\t"+repo)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
 func completeSessionIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) != 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -113,9 +210,61 @@ func init() {
 	sessionCommentsCmd.RegisterFlagCompletionFunc("severity", completeEnum("critical", "high", "medium", "low"))
 	sessionCommentsCmd.RegisterFlagCompletionFunc("category", completeEnum("bug", "security", "performance", "maintainability", "test", "style", "documentation", "other"))
 
+	sessionCompareCmd.Flags().StringVar(&sessionCompareRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionCompareCmd.Flags().BoolVar(&sessionCompareJSON, "json", false, "emit the comparison as JSON")
+
+	sessionExportCmd.Flags().StringVar(&sessionExportRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	addOutputPathFlag(sessionExportCmd, &sessionExportOutput)
+
+	sessionRmCmd.Flags().StringVar(&sessionRmRepoDir, "repo", "", "only look for the session under this repository (default: every repository)")
+	sessionRmCmd.Flags().BoolVarP(&sessionRmYes, "yes", "y", false, "delete without asking for confirmation")
+
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionCommentsCmd)
+	sessionCmd.AddCommand(sessionCompareCmd)
+	sessionCmd.AddCommand(sessionExportCmd)
+	sessionCmd.AddCommand(sessionRmCmd)
+}
+
+// runSessionExport writes one session's standalone HTML page to --output, or to
+// stdout when it is unset. The session id is optional because a *successful*
+// `ocr review` never prints one — review_cmd.go only reports it on failure — so
+// requiring it would force every CI archive step through `--format json | jq`.
+func runSessionExport(sessionID string) (retErr error) {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionExportRepoDir)
+	if err != nil {
+		return err
+	}
+
+	if sessionID == "" {
+		summaries, err := session.ListSessions(resolvedRepo)
+		if err != nil {
+			return err
+		}
+		if len(summaries) == 0 {
+			return fmt.Errorf("no sessions found for %s; run a review first, or pass a session id", resolvedRepo)
+		}
+		sessionID = summaries[0].SessionID
+	}
+
+	dir, err := session.SessionsDir(resolvedRepo)
+	if err != nil {
+		return err
+	}
+	root, encodedRepo := filepath.Split(dir)
+
+	out, closeOut, err := resolveOutputWriter(sessionExportOutput, "html")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	return viewer.ExportSession(out, filepath.Clean(root), encodedRepo, sessionID)
 }
 
 func runSessionList() error {
@@ -198,9 +347,106 @@ func runSessionComments(sessionID string) error {
 		return nil
 	}
 	for _, c := range filtered {
-		renderComment(c)
+		renderComment(c, os.Stdout)
 	}
 	return nil
+}
+
+func runSessionCompare(beforeID, afterID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionCompareRepoDir)
+	if err != nil {
+		return err
+	}
+	beforeSummary, err := session.LoadSummary(resolvedRepo, beforeID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", beforeID, err)
+	}
+	afterSummary, err := session.LoadSummary(resolvedRepo, afterID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", afterID, err)
+	}
+	if beforeSummary.RepoDir != afterSummary.RepoDir {
+		return fmt.Errorf("sessions belong to different repositories: %s was recorded in %s, %s in %s",
+			beforeID, beforeSummary.RepoDir, afterID, afterSummary.RepoDir)
+	}
+	if beforeSummary.ReviewMode != afterSummary.ReviewMode {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING review modes differ (%s vs %s); the two runs may not have looked at the same files\n",
+			displayMode(beforeSummary.ReviewMode), displayMode(afterSummary.ReviewMode))
+	}
+
+	beforeComments, err := session.LoadComments(resolvedRepo, beforeID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", beforeID, err)
+	}
+	afterComments, err := session.LoadComments(resolvedRepo, afterID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", afterID, err)
+	}
+	result := session.Compare(beforeComments, afterComments, afterSummary.RunManifest)
+
+	if sessionCompareJSON {
+		payload := struct {
+			Before sessionCompareSide `json:"before"`
+			After  sessionCompareSide `json:"after"`
+			session.CompareResult
+		}{
+			Before:        describeCompareSide(beforeID, beforeSummary),
+			After:         describeCompareSide(afterID, afterSummary),
+			CompareResult: result,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(payload)
+	}
+
+	printSessionCompare(beforeID, afterID, beforeSummary, afterSummary, result)
+	return nil
+}
+
+// sessionCompareSide identifies one side of the comparison in JSON output, so a
+// consumer can tell which run produced which bucket.
+type sessionCompareSide struct {
+	SessionID  string `json:"session_id"`
+	ReviewMode string `json:"review_mode,omitempty"`
+	Range      string `json:"range,omitempty"`
+}
+
+func describeCompareSide(sessionID string, s *session.Summary) sessionCompareSide {
+	side := sessionCompareSide{SessionID: sessionID, ReviewMode: s.ReviewMode}
+	if r := describeRange(*s); r != "-" {
+		side.Range = r
+	}
+	return side
+}
+
+// printSessionCompare writes to stdout, matching the other `ocr session`
+// subcommands.
+func printSessionCompare(beforeID, afterID string, before, after *session.Summary, result session.CompareResult) {
+	fmt.Printf("Comparing %s -> %s\n", beforeID, afterID)
+	fmt.Printf("  before: %s %s\n", displayMode(before.ReviewMode), describeRange(*before))
+	fmt.Printf("  after:  %s %s\n", displayMode(after.ReviewMode), describeRange(*after))
+	fmt.Printf("%d new, %d persisting, %d resolved\n", len(result.New), len(result.Persisting), len(result.Resolved))
+	if n := len(result.NotReviewed); n > 0 {
+		fmt.Printf("%d finding(s) in files the after session did not review (not counted as resolved)\n", n)
+	}
+
+	for _, section := range []struct {
+		title    string
+		findings []model.LlmComment
+	}{
+		{"New", result.New},
+		{"Persisting", result.Persisting},
+		{"Resolved", result.Resolved},
+		{"Not reviewed", result.NotReviewed},
+	} {
+		if len(section.findings) == 0 {
+			continue
+		}
+		fmt.Printf("\n=== %s (%d) ===\n", section.title, len(section.findings))
+		for _, c := range section.findings {
+			renderComment(c, os.Stdout)
+		}
+	}
 }
 
 // filterComments keeps comments whose severity and category are in the given
@@ -236,6 +482,137 @@ func parseFilterSet(s string) map[string]bool {
 		return nil
 	}
 	return set
+}
+
+// runSessionRm deletes one persisted session, confirming first unless --yes.
+func runSessionRmAnywhere(cmd *cobra.Command, sessionID string) error {
+	found, err := session.FindSessionsByID(sessionID)
+	if err != nil {
+		return err
+	}
+	switch len(found) {
+	case 0:
+		return fmt.Errorf("no session %q is saved for any repository; run 'ocr session list' to see what is saved", sessionID)
+	case 1:
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "session %q is saved for more than one repository:\n", sessionID)
+		for _, loc := range found {
+			repo := loc.RepoDir
+			if repo == "" {
+				repo = "(repository not recorded)"
+			}
+			fmt.Fprintf(&b, "  %s\n", repo)
+		}
+		b.WriteString("\nRe-run with --repo to say which one to delete from.")
+		return errors.New(b.String())
+	}
+
+	loc := found[0]
+	summary, summaryErr := session.LoadSummaryAt(loc.Path, sessionID, loc.RepoDir)
+	if summaryErr != nil {
+		return fmt.Errorf("cannot read session %q: %w", sessionID, summaryErr)
+	}
+	readable := summary != nil && !summary.StartTime.IsZero()
+
+	if !sessionRmYes {
+		if readable {
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s?\n  repo:     %s\n  branch:   %s\n  started:  %s\n  files:    %s\n  comments: %d\n",
+				sessionID, summary.RepoDir, summary.GitBranch, describeStart(*summary), describeFiles(*summary), summary.TotalComments)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
+		}
+		ok, err := confirmDeletion(cmd)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+			return nil
+		}
+	}
+
+	if err := session.DeleteSessionAt(loc); err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return fmt.Errorf("no session %q is saved for any repository; run 'ocr session list' to see what is saved", sessionID)
+		}
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
+	return nil
+}
+
+func runSessionRm(cmd *cobra.Command, sessionID string) error {
+	if err := session.ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(sessionRmRepoDir) == "" {
+		return runSessionRmAnywhere(cmd, sessionID)
+	}
+
+	repoDir, err := resolveWorkingDirForSession(sessionRmRepoDir)
+	if err != nil {
+		return err
+	}
+
+	summary, summaryErr := session.LoadSummary(repoDir, sessionID)
+	switch {
+	case summaryErr != nil && errors.Is(summaryErr, fs.ErrNotExist):
+		return fmt.Errorf("no session %q for this repository; run 'ocr session list' to see what is saved", sessionID)
+	case summaryErr != nil:
+		return fmt.Errorf("cannot read session %q: %w", sessionID, summaryErr)
+	}
+
+	if err := session.CheckSessionRepo(repoDir, sessionID); err != nil {
+		if errors.Is(err, session.ErrSessionUnverifiable) {
+			return fmt.Errorf("%w\n\nRun 'ocr session rm %s' without --repo: the id locates the file on\nits own, so nothing has to be verified against a repository.", err, sessionID)
+		}
+		if errors.Is(err, session.ErrSessionOtherRepo) {
+			return fmt.Errorf("%w\n\nTwo repository paths can share one session directory, so this session is\nvisible here but belongs elsewhere. Delete it from the repository that\nrecorded it.", err)
+		}
+		return err
+	}
+
+	readable := summary != nil && !summary.StartTime.IsZero()
+
+	if !sessionRmYes {
+		if readable {
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s?\n  repo:     %s\n  branch:   %s\n  started:  %s\n  files:    %s\n  comments: %d\n",
+				sessionID, summary.RepoDir, summary.GitBranch, describeStart(*summary), describeFiles(*summary), summary.TotalComments)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
+		}
+		ok, err := confirmDeletion(cmd)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+			return nil
+		}
+	}
+
+	if err := session.DeleteSession(repoDir, sessionID); err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return fmt.Errorf("no session %q for this repository; run 'ocr session list' to see what is saved", sessionID)
+		}
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
+	return nil
+}
+
+// confirmDeletion reads a yes/no answer; a non-interactive stdin answers no.
+func confirmDeletion(cmd *cobra.Command) (bool, error) {
+	fmt.Fprint(cmd.OutOrStdout(), "Type 'y' to confirm: ")
+	reader := bufio.NewReader(cmd.InOrStdin())
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 // resolveWorkingDirForSession accepts an explicit --repo flag value and falls

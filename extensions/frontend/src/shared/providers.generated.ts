@@ -336,6 +336,20 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     ]
   },
   {
+    "name": "openrouter",
+    "displayName": "OpenRouter",
+    "protocol": "openai",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "envVar": "OPENROUTER_API_KEY",
+    "models": [
+      "anthropic/claude-fable-5.1",
+      "openai/gpt-5.6-sol",
+      "anthropic/claude-opus-5",
+      "openai/gpt-6-astra",
+      "moonshotai/kimi-k3"
+    ]
+  },
+  {
     "name": "siliconflow",
     "displayName": "SiliconFlow API",
     "protocol": "openai",

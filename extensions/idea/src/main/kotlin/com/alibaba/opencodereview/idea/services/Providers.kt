@@ -35,6 +35,7 @@ private val PRESET_PROVIDER_NAMES: Set<String> = setOf(
     "ollama-cloud",
     "openai",
     "openai-responses",
+    "openrouter",
     "siliconflow",
     "siliconflow-cn",
     "tencent-tokenhub",

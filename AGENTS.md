@@ -44,26 +44,13 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 
 ## Provider Presets
 
-The built-in registry in `internal/llm/providers.go` is the source of truth for the shared frontend provider presets and IDEA host names. After changing a provider or its models, run this command from the repository root:
-
-```sh
-go generate ./internal/llm
-```
-
-Commit both generated artifacts with the registry change; do not edit them by hand:
+When changing built-in provider metadata or model lists in
+`internal/llm/providers.go`, run `go generate ./internal/llm` from the
+repository root. Commit both generated files with the registry change;
+do not edit them by hand:
 
 - `extensions/frontend/src/shared/providers.generated.ts`
 - `extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt`
-
-Model names must be unique within each provider. Generation rejects duplicates and reports the provider and model; it preserves the order of valid models.
-
-To verify the committed presets without rewriting them, run:
-
-```sh
-go run ./internal/llm/gen -check -output extensions/frontend/src/shared/providers.generated.ts -kotlin-output extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
-```
-
-CI and the Go artifact test compare both committed catalogs directly with `llm.ListProviders()`, independently of the renderer. Missing or inconsistent files fail without being rewritten.
 
 ## Testing
 

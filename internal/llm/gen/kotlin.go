@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf16"
 
@@ -14,6 +15,13 @@ import (
 )
 
 const kotlinDeclaration = "internal fun generatedPresetProviderNames(): Set<String> = setOf("
+
+var kotlinPreamble = preambleSyntax{
+	declaration:         regexp.MustCompile(`^package[ \t\f]+com\.alibaba\.opencodereview\.idea\.services`),
+	whitespace:          regexp.MustCompile(`^[ \t\r\n\f]+`),
+	lineTerminators:     "\r\n",
+	nestedBlockComments: true,
+}
 
 const kotlinHeader = `// SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
@@ -57,9 +65,12 @@ func quoteKotlinString(value string) string {
 }
 
 func checkKotlinNames(data []byte, providers []llm.Provider) error {
-	_, payload, found := bytes.Cut(data, []byte(kotlinDeclaration))
+	preamble, payload, found := bytes.Cut(data, []byte(kotlinDeclaration))
 	if !found {
 		return fmt.Errorf("missing generatedPresetProviderNames declaration")
+	}
+	if !kotlinPreamble.matches(preamble) {
+		return fmt.Errorf("expected Kotlin package com.alibaba.opencodereview.idea.services before generatedPresetProviderNames")
 	}
 	payload = bytes.TrimSpace(payload)
 	if !bytes.HasSuffix(payload, []byte(")")) {

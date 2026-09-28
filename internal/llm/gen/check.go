@@ -9,12 +9,23 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 
 	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 const presetDeclaration = "export const PROVIDER_PRESETS: OcrProviderPreset[] ="
+
+const typeScriptWhitespace = `[\s\v\x{2028}\x{2029}\x{feff}\p{Zs}]`
+
+var presetPreamble = preambleSyntax{
+	declaration: regexp.MustCompile(`^import` + typeScriptWhitespace + `+type` + typeScriptWhitespace + `*\{` +
+		typeScriptWhitespace + `*OcrProviderPreset` + typeScriptWhitespace + `*\}` +
+		typeScriptWhitespace + `+from` + typeScriptWhitespace + `*(?:'\./providers'|"\./providers")`),
+	whitespace:      regexp.MustCompile(`^` + typeScriptWhitespace + `+`),
+	lineTerminators: "\r\n\u2028\u2029",
+}
 
 func check(output, kotlinOutput string) error {
 	if output == "" || kotlinOutput == "" {
@@ -76,9 +87,12 @@ func checkPresets(data []byte, providers []llm.Provider) error {
 }
 
 func decodePresets(data []byte) ([]preset, error) {
-	_, payload, found := bytes.Cut(data, []byte(presetDeclaration))
+	preamble, payload, found := bytes.Cut(data, []byte(presetDeclaration))
 	if !found {
 		return nil, fmt.Errorf("missing PROVIDER_PRESETS declaration")
+	}
+	if !presetPreamble.matches(preamble) {
+		return nil, fmt.Errorf("expected an OcrProviderPreset import from './providers' before PROVIDER_PRESETS")
 	}
 	payload = bytes.TrimSuffix(bytes.TrimSpace(payload), []byte(";"))
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -137,4 +151,60 @@ func decodePresets(data []byte) ([]preset, error) {
 		}
 	}
 	return presets, nil
+}
+
+type preambleSyntax struct {
+	declaration         *regexp.Regexp
+	whitespace          *regexp.Regexp
+	lineTerminators     string
+	nestedBlockComments bool
+}
+
+// Matching the whole preamble prevents comments from satisfying a missing declaration.
+func (s preambleSyntax) matches(data []byte) bool {
+	data = s.trimTrivia(data)
+	match := s.declaration.FindIndex(data)
+	if match == nil || match[0] != 0 {
+		return false
+	}
+	trailing := data[match[1]:]
+	rest := s.trimTrivia(trailing)
+	if bytes.HasPrefix(rest, []byte(";")) {
+		return len(s.trimTrivia(rest[1:])) == 0
+	}
+	return len(rest) == 0 && bytes.ContainsAny(trailing, s.lineTerminators)
+}
+
+func (s preambleSyntax) trimTrivia(data []byte) []byte {
+	for {
+		data = data[len(s.whitespace.Find(data)):]
+		switch {
+		case bytes.HasPrefix(data, []byte("//")):
+			end := bytes.IndexAny(data, s.lineTerminators)
+			if end < 0 {
+				return data
+			}
+			data = data[end:]
+		case bytes.HasPrefix(data, []byte("/*")):
+			depth, end := 1, 2
+			for depth > 0 && end+1 < len(data) {
+				switch {
+				case data[end] == '*' && data[end+1] == '/':
+					depth--
+					end += 2
+				case s.nestedBlockComments && data[end] == '/' && data[end+1] == '*':
+					depth++
+					end += 2
+				default:
+					end++
+				}
+			}
+			if depth != 0 {
+				return data
+			}
+			data = data[end:]
+		default:
+			return data
+		}
+	}
 }

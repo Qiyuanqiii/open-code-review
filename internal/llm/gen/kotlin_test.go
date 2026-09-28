@@ -64,7 +64,7 @@ func TestCheckKotlinNames(t *testing.T) {
 		{"trailing code", `"alpha", "beta",); other()`, "decode Kotlin provider names"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			data := []byte(kotlinDeclaration + "\n" + tc.payload + "\n")
+			data := []byte("package com.alibaba.opencodereview.idea.services\n" + kotlinDeclaration + "\n" + tc.payload + "\n")
 			err := checkKotlinNames(data, providers)
 			if tc.wantErr == "" {
 				if err != nil {
@@ -77,5 +77,54 @@ func TestCheckKotlinNames(t *testing.T) {
 	}
 	if err := checkKotlinNames([]byte("setOf()"), nil); err == nil || !strings.Contains(err.Error(), "missing generatedPresetProviderNames") {
 		t.Fatalf("missing declaration error = %v", err)
+	}
+}
+
+func TestCheckKotlinPackage(t *testing.T) {
+	const validPackage = "package com.alibaba.opencodereview.idea.services"
+	for _, tc := range []struct {
+		name, preamble string
+		valid          bool
+	}{
+		{"matching", validPackage, true},
+		{"whitespace and semicolon", "\npackage\tcom.alibaba.opencodereview.idea.services;\n", true},
+		{"form feed whitespace", "\fpackage\fcom.alibaba.opencodereview.idea.services\f;\n", true},
+		{"trailing comment", validPackage + " // Host package", true},
+		{"trailing block comment", validPackage + " /* Host package */", true},
+		{"nested trailing block comment", validPackage + " /* Outer /* Inner */ End */", true},
+		{"block comment before semicolon", validPackage + " /* Host package */;", true},
+		{"header comments", "// License\n/* Generated file */\n" + validPackage + "\n// Provider names\n", true},
+		{"nested header comments", "/* Outer /* Inner */ End */\n" + validPackage, true},
+		{"CR header comment", "// Header\r" + validPackage, true},
+		{"CR trailing comment", validPackage + " // Host package\r", true},
+		{"missing package", "", false},
+		{"wrong package", "package incorrect.services", false},
+		{"package suffix", validPackage + ".incorrect", false},
+		{"commented package", "// " + validPackage + "\n", false},
+		{"block-commented package", "/* " + validPackage + " */", false},
+		{"package inside nested comment", "/* Outer /* Inner */\n" + validPackage + "\n// */", false},
+		{"commented correct package before wrong package", "// " + validPackage + "\npackage incorrect.services", false},
+		{"wrong package after CR comment", validPackage + "\n// Header\rpackage incorrect.services", false},
+		{"wrong package after CR trailing comment", validPackage + " // Host package\rpackage incorrect.services", false},
+		{"wrong package between comments", "/* Header */\npackage incorrect.services\n/* Header */\n" + validPackage, false},
+		{"duplicate package", validPackage + "\n" + validPackage, false},
+		{"unterminated comment", "/* Header\n" + validPackage, false},
+		{"unterminated trailing comment", validPackage + " /* Host package", false},
+		{"overlapping comment delimiters", "/*/\n" + validPackage, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(tc.preamble + "\n" + kotlinDeclaration + ")\n")
+			err := checkKotlinNames(data, nil)
+			if tc.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "Kotlin package") || !strings.Contains(err.Error(), "com.alibaba.opencodereview.idea.services") {
+				t.Fatalf("expected a package diagnostic, got %v", err)
+			}
+		})
+	}
+	if err := checkKotlinNames([]byte(validPackage+"\n// "+kotlinDeclaration+")\n"), nil); err == nil || !strings.Contains(err.Error(), "Kotlin package") {
+		t.Fatalf("a commented provider declaration must be rejected, got %v", err)
 	}
 }

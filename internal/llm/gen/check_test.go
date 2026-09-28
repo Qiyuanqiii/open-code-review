@@ -69,7 +69,7 @@ func TestCheckPresets(t *testing.T) {
 		{"trailing invalid content", valid + " invalid", "exactly one JSON array"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			data := []byte("// Different header formatting is allowed.\n" + presetDeclaration + "\n" + tc.payload + ";\n")
+			data := []byte("// Different header formatting is allowed.\nimport type { OcrProviderPreset } from './providers';\n" + presetDeclaration + "\n" + tc.payload + ";\n")
 			err := checkPresets(data, providers)
 			if tc.wantErr == "" {
 				if err != nil {
@@ -80,11 +80,111 @@ func TestCheckPresets(t *testing.T) {
 			}
 		})
 	}
-	if err := checkPresets([]byte(presetDeclaration+" [];\n"), nil); err != nil {
+	if err := checkPresets([]byte("import type { OcrProviderPreset } from './providers';\n"+presetDeclaration+" [];\n"), nil); err != nil {
 		t.Fatalf("an empty array must match an empty registry: %v", err)
 	}
 	if err := checkPresets([]byte("export const OTHER = [];\n"), nil); err == nil || !strings.Contains(err.Error(), "missing PROVIDER_PRESETS declaration") {
 		t.Fatalf("missing declaration error = %v", err)
+	}
+}
+
+func TestCheckPresetsImport(t *testing.T) {
+	const validImport = "import type { OcrProviderPreset } from './providers';"
+	for _, tc := range []struct {
+		name, preamble string
+		valid          bool
+	}{
+		{"matching", validImport, true},
+		{"double quotes and whitespace", "\nimport type {\n OcrProviderPreset\n} from \"./providers\";\n", true},
+		{"no semicolon", "import type { OcrProviderPreset } from './providers'", true},
+		{"no semicolon with comment", "import type { OcrProviderPreset } from './providers' // Type import", true},
+		{"trailing block comment", "import type { OcrProviderPreset } from './providers' /* Type import */", true},
+		{"block comment before semicolon", "import type { OcrProviderPreset } from './providers' /* Type import */;", true},
+		{"header comments", "// License\n/* Generated file */\n" + validImport + " // Type import\n", true},
+		{"missing import", "", false},
+		{"wrong module", "import type { OcrProviderPreset } from './missing-providers';", false},
+		{"wrong binding", "import type { OtherPreset } from './providers';", false},
+		{"commented import", "// " + validImport + "\n", false},
+		{"block-commented import", "/* " + validImport + " */", false},
+		{"commented correct import before wrong module", "// " + validImport + "\nimport type { OcrProviderPreset } from './missing-providers';", false},
+		{"wrong import between comments", "/* Header */\nimport type { OcrProviderPreset } from './missing-providers';\n/* Header */\n" + validImport, false},
+		{"block comments do not nest", "/* Outer /* Inner */\nimport type { OcrProviderPreset } from './missing-providers';\n// */\n" + validImport, false},
+		{"duplicate import", validImport + "\n" + validImport, false},
+		{"unterminated comment", "/* Header\n" + validImport, false},
+		{"unterminated trailing comment", strings.TrimSuffix(validImport, ";") + " /* Type import", false},
+		{"overlapping comment delimiters", "/*/\n" + validImport, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(tc.preamble + "\n" + presetDeclaration + " [];\n")
+			err := checkPresets(data, nil)
+			if tc.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "OcrProviderPreset import") || !strings.Contains(err.Error(), "./providers") {
+				t.Fatalf("expected an import diagnostic, got %v", err)
+			}
+		})
+	}
+	if err := checkPresets([]byte(validImport+"\n// "+presetDeclaration+" [];\n"), nil); err == nil || !strings.Contains(err.Error(), "OcrProviderPreset import") {
+		t.Fatalf("a commented catalog declaration must be rejected, got %v", err)
+	}
+}
+
+func TestCheckPresetsImportWhitespace(t *testing.T) {
+	const validImport = "import type { OcrProviderPreset } from './providers';"
+	for _, tc := range []struct {
+		name, space string
+		valid       bool
+	}{
+		{"tab", "\t", true},
+		{"line feed", "\n", true},
+		{"vertical tab", "\v", true},
+		{"form feed", "\f", true},
+		{"carriage return", "\r", true},
+		{"nonbreaking space", "\u00a0", true},
+		{"thin space", "\u2009", true},
+		{"ideographic space", "\u3000", true},
+		{"byte order mark", "\ufeff", true},
+		{"line separator", "\u2028", true},
+		{"paragraph separator", "\u2029", true},
+		{"next line is not whitespace", "\u0085", false},
+		{"zero width space is not whitespace", "\u200b", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(tc.space + strings.ReplaceAll(validImport, " ", tc.space) + tc.space + "\n" + presetDeclaration + " [];\n")
+			if err := checkPresets(data, nil); (err == nil) != tc.valid {
+				t.Fatalf("valid = %t, error = %v", tc.valid, err)
+			}
+		})
+	}
+}
+
+func TestCheckPresetsImportLineTerminators(t *testing.T) {
+	const validImport = "import type { OcrProviderPreset } from './providers';"
+	const wrongImport = "import type { OcrProviderPreset } from './missing-providers';"
+	for _, line := range []struct{ name, separator string }{
+		{"LF", "\n"}, {"CRLF", "\r\n"}, {"CR", "\r"}, {"LS", "\u2028"}, {"PS", "\u2029"},
+	} {
+		t.Run(line.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, preamble string
+				valid          bool
+			}{
+				{"header comment", "// Header" + line.separator + validImport, true},
+				{"no semicolon with comment", strings.TrimSuffix(validImport, ";") + " // Type import" + line.separator, true},
+				{"wrong import after comment", validImport + "\n// Header" + line.separator + wrongImport, false},
+				{"wrong import after trailing comment", strings.TrimSuffix(validImport, ";") + " // Type import" + line.separator + wrongImport, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					data := []byte(tc.preamble + "\n" + presetDeclaration + " [];\n")
+					err := checkPresets(data, nil)
+					if (err == nil) != tc.valid {
+						t.Fatalf("valid = %t, error = %v", tc.valid, err)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -137,8 +237,12 @@ func TestCheckDoesNotRewriteArtifact(t *testing.T) {
 		inconsistent bool
 	}{
 		{"matching", valid, validKotlin, false},
-		{"inconsistent frontend", []byte(presetDeclaration + " [];\n"), validKotlin, true},
-		{"inconsistent Kotlin", valid, []byte(kotlinDeclaration + ")\n"), true},
+		{"inconsistent frontend", []byte("import type { OcrProviderPreset } from './providers';\n" + presetDeclaration + " [];\n"), validKotlin, true},
+		{"inconsistent Kotlin", valid, []byte("package com.alibaba.opencodereview.idea.services\n" + kotlinDeclaration + ")\n"), true},
+		{"wrong import path", bytes.Replace(valid, []byte("from './providers'"), []byte("from './missing-providers'"), 1), validKotlin, true},
+		{"missing import", bytes.Replace(valid, []byte("import type { OcrProviderPreset } from './providers';"), nil, 1), validKotlin, true},
+		{"wrong Kotlin package", valid, bytes.Replace(validKotlin, []byte("package com.alibaba.opencodereview.idea.services"), []byte("package incorrect.services"), 1), true},
+		{"missing Kotlin package", valid, bytes.Replace(validKotlin, []byte("package com.alibaba.opencodereview.idea.services"), nil, 1), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

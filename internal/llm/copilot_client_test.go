@@ -114,6 +114,125 @@ func TestCopilotResponseAccumulatesModelUsage(t *testing.T) {
 	}
 }
 
+func TestCopilotClientRejectsUnsupportedRequests(t *testing.T) {
+	temperature := 0.5
+	tool := ToolDef{Type: "function", Function: FunctionDef{Name: "file_read"}}
+	cases := []struct {
+		name  string
+		model string
+		req   ChatRequest
+		want  string
+	}{
+		{name: "missing model", want: "model is required"},
+		{name: "missing messages", model: "auto", want: "no conversation messages"},
+		{name: "temperature", model: "auto", req: ChatRequest{Temperature: &temperature}, want: "temperature"},
+		{name: "forced tool", model: "auto", req: ChatRequest{ToolChoice: "required"}, want: "tool_choice"},
+		{name: "invalid tool name", model: "auto", req: ChatRequest{
+			Messages: []Message{NewTextMessage("user", "Inspect file.go")},
+			Tools:    []ToolDef{{Type: "function", Function: FunctionDef{Name: "../shell"}}},
+		}, want: "invalid or duplicate"},
+		{name: "duplicate tool", model: "auto", req: ChatRequest{
+			Messages: []Message{NewTextMessage("user", "Inspect file.go")}, Tools: []ToolDef{tool, tool},
+		}, want: "invalid or duplicate"},
+		{name: "invalid schema", model: "auto", req: ChatRequest{
+			Messages: []Message{NewTextMessage("user", "Inspect file.go")},
+			Tools: []ToolDef{{Type: "function", Function: FunctionDef{Name: "file_read", Parameters: map[string]any{
+				"invalid": make(chan struct{}),
+			}}}},
+		}, want: "encode Copilot tools"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewCopilotClient(ClientConfig{Model: tc.model})
+			client.cliPath = filepath.Join(t.TempDir(), "missing-copilot")
+			response, err := client.CompletionsWithCtx(context.Background(), tc.req)
+			if response != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("response = (%#v, %v), want %q", response, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCopilotClientStartupFailureReleasesSession(t *testing.T) {
+	client := NewCopilotClient(ClientConfig{Model: "auto", Timeout: time.Second})
+	client.cliPath = filepath.Join(t.TempDir(), "missing-copilot")
+	conversation := &copilotConversation{}
+	client.sessions.Store("startup-failure", conversation)
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{NewTextMessage("user", "Inspect file.go")}, SessionID: "startup-failure",
+	})
+	if err == nil || !strings.Contains(err.Error(), "start Copilot CLI") {
+		t.Fatalf("startup error = %v", err)
+	}
+	if _, kept := client.sessions.Load("startup-failure"); kept {
+		t.Fatal("failed startup retained the OCR session")
+	}
+	if conversation.client != nil || conversation.session != nil || conversation.stateDir != "" {
+		t.Fatal("failed startup retained CLI resources")
+	}
+}
+
+func TestCopilotRuntimePathMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("COPILOT_CLI_PATH", "")
+	if _, err := copilotRuntimePath(""); err == nil || !strings.Contains(err.Error(), "Copilot CLI not found") {
+		t.Fatalf("missing CLI error = %v", err)
+	}
+}
+
+func TestCopilotResponseRejectsInvalidToolCalls(t *testing.T) {
+	cases := []struct {
+		name     string
+		requests []copilot.AssistantMessageToolRequest
+		want     string
+	}{
+		{name: "missing ID", requests: []copilot.AssistantMessageToolRequest{{Name: "file_read"}}, want: "empty or duplicate"},
+		{name: "duplicate ID", requests: []copilot.AssistantMessageToolRequest{
+			{ToolCallID: "read-1", Name: "file_read"}, {ToolCallID: "read-1", Name: "file_read"},
+		}, want: "empty or duplicate"},
+		{name: "invalid arguments", requests: []copilot.AssistantMessageToolRequest{
+			{ToolCallID: "read-1", Name: "file_read", Arguments: make(chan struct{})},
+		}, want: "encode Copilot tool arguments"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			message := &copilot.AssistantMessageData{ToolRequests: tc.requests}
+			response, err := copilotResponse(message, nil, "system", "prompt", nil, []string{"custom:file_read"}, "gpt-4.1")
+			if response != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("response = (%#v, %v), want %q", response, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCopilotResponseUsesFallbackUsage(t *testing.T) {
+	message := &copilot.AssistantMessageData{Content: "Review complete."}
+	estimated, err := copilotResponse(message, nil, "Review the patch.", "Inspect file.go", nil, nil, "gpt-4.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if estimated.Usage.PromptTokens <= 0 || estimated.Usage.CompletionTokens <= 0 || estimated.Choices[0].FinishReason != "stop" {
+		t.Fatalf("estimated response = %#v", estimated)
+	}
+	output, cacheWrite := int64(17), int64(4)
+	message.OutputTokens = &output
+	message.ToolRequests = []copilot.AssistantMessageToolRequest{{
+		ToolCallID: "read-1", Name: "file_read", Arguments: map[string]any{"path": "file.go"},
+	}}
+	response, err := copilotResponse(message, []*copilot.AssistantUsageData{{CacheWriteTokens: &cacheWrite}},
+		"Review the patch.", "Inspect file.go", nil, []string{"custom:file_read"}, "gpt-4.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.PromptTokens != estimated.Usage.PromptTokens || response.Usage.CompletionTokens != output ||
+		response.Usage.TotalTokens != response.Usage.PromptTokens+output || response.Usage.CacheWriteTokens != cacheWrite {
+		t.Fatalf("fallback usage = %#v", response.Usage)
+	}
+	if calls := response.ToolCalls(); len(calls) != 1 || calls[0].Function.Arguments != `{"path":"file.go"}` || response.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("tool response = %#v", response)
+	}
+}
+
 func TestCopilotClientLocalToolBoundary(t *testing.T) {
 	cliPath := os.Getenv("OCR_COPILOT_CLI_TEST_PATH")
 	if cliPath == "" {

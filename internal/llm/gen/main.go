@@ -39,8 +39,15 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = `
 
 func main() {
 	output := flag.String("output", "", "path to the generated TypeScript file")
+	checkOnly := flag.Bool("check", false, "verify the provider presets without writing the file")
 	flag.Parse()
-	if err := generate(*output); err != nil {
+	var err error
+	if *checkOnly {
+		err = check(*output)
+	} else {
+		err = generate(*output)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

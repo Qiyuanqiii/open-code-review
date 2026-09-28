@@ -42,6 +42,24 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 - **Translated prose has its own homes, none of them scanned.** `docs/i18n/README.<locale>.md` and `docs/i18n/CONTRIBUTING.<locale>.md` (`zh-CN`, `ja-JP`, `ko-KR`, `ru-RU`); the doc pages under `pages/src/content/docs/<locale>/` (`en`, `zh`, `ja`, `ru`, Markdown throughout); and the UI copy tables in `pages/src/i18n/<locale>.ts`. Markdown is out of scope by extension, so translations go there freely. The i18n tables are `.ts` and would be scanned, so they are exempt by prefix instead — translated UI strings belong in those tables rather than inline in a component.
 - **Two escape hatches for the exceptional case, narrower one preferred.** Append an `allow-non-english: <reason>` marker comment to the offending line — the right choice for a handful of lines, such as an encoding fixture or a language-switcher label, and it leaves the rest of the file protected. Only for a whole tree that is inherently non-English, add a prefix to `allowedPrefixes` in `scripts/verify-english-only.go`; that list records each exemption's reason and the removal conditions for temporary translation exemptions.
 
+## Provider Presets
+
+The built-in registry in `internal/llm/providers.go` is the source of truth for the shared frontend provider presets used by VS Code and IDEA. After changing a provider or its models, run this command from the repository root:
+
+```sh
+go generate ./internal/llm
+```
+
+Commit `extensions/frontend/src/shared/providers.generated.ts` with the registry change; do not edit the generated file by hand. When adding, renaming, or removing a provider, also update the IDEA host's names-only set in `extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/Providers.kt`.
+
+To verify the committed presets without rewriting them, run:
+
+```sh
+go run ./internal/llm/gen -check -output extensions/frontend/src/shared/providers.generated.ts
+```
+
+CI and the Go artifact test compare the existing frontend data directly with `llm.ListProviders()`, independently of the renderer. They require matching provider names, ordered model lists (including duplicates), and provider metadata. Missing or inconsistent files fail the check; regenerate and commit the result to fix them.
+
 ## Testing
 
 - Run unit tests with `make test`, not `go test` directly.

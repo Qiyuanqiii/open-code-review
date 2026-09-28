@@ -16,17 +16,9 @@ import (
 )
 
 func TestGeneratedProvidersUpToDate(t *testing.T) {
-	want, err := render(llm.ListProviders())
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join("..", "..", "..", "extensions", "frontend", "src", "shared", "providers.generated.ts")
-	got, err := os.ReadFile(path)
-	if err != nil {
+	if err := check(path); err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("shared frontend provider presets are stale; run go generate ./internal/llm from the repository root")
 	}
 }
 

@@ -38,7 +38,7 @@ type Provider struct {
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
-// and commit both generated catalogs. See PROVIDERS.md for paths and verification.
+// and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
 		Name:        "anthropic",

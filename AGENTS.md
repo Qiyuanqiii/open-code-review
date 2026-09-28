@@ -63,7 +63,7 @@ To verify the committed presets without rewriting them, run:
 go run ./internal/llm/gen -check -output extensions/frontend/src/shared/providers.generated.ts -kotlin-output extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
 ```
 
-CI and the Go artifact test compare both committed catalogs directly with `llm.ListProviders()`, independently of the renderer. Missing or inconsistent files fail without being rewritten. See [Provider registry and generated catalogs](internal/llm/PROVIDERS.md) for the update procedure, artifact responsibilities, and troubleshooting.
+CI and the Go artifact test compare both committed catalogs directly with `llm.ListProviders()`, independently of the renderer. Missing or inconsistent files fail without being rewritten.
 
 ## Testing
 

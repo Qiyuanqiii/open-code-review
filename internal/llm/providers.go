@@ -3,7 +3,7 @@
 
 package llm
 
-//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts
+//go:generate go run ./gen -output ../../extensions/frontend/src/shared/providers.generated.ts -kotlin-output ../../extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
 
 import (
 	"sort"
@@ -38,7 +38,7 @@ type Provider struct {
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
-// and commit extensions/frontend/src/shared/providers.generated.ts.
+// and commit both generated catalogs. See PROVIDERS.md for paths and verification.
 var registry = []Provider{
 	{
 		Name:        "anthropic",

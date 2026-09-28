@@ -44,21 +44,26 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 
 ## Provider Presets
 
-The built-in registry in `internal/llm/providers.go` is the source of truth for the shared frontend provider presets used by VS Code and IDEA. After changing a provider or its models, run this command from the repository root:
+The built-in registry in `internal/llm/providers.go` is the source of truth for the shared frontend provider presets and IDEA host names. After changing a provider or its models, run this command from the repository root:
 
 ```sh
 go generate ./internal/llm
 ```
 
-Commit `extensions/frontend/src/shared/providers.generated.ts` with the registry change; do not edit the generated file by hand. When adding, renaming, or removing a provider, also update the IDEA host's names-only set in `extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/Providers.kt`.
+Commit both generated artifacts with the registry change; do not edit them by hand:
+
+- `extensions/frontend/src/shared/providers.generated.ts`
+- `extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt`
+
+Model names must be unique within each provider. Generation rejects duplicates and reports the provider and model; it preserves the order of valid models.
 
 To verify the committed presets without rewriting them, run:
 
 ```sh
-go run ./internal/llm/gen -check -output extensions/frontend/src/shared/providers.generated.ts
+go run ./internal/llm/gen -check -output extensions/frontend/src/shared/providers.generated.ts -kotlin-output extensions/idea/src/main/kotlin/com/alibaba/opencodereview/idea/services/ProviderNames.generated.kt
 ```
 
-CI and the Go artifact test compare the existing frontend data directly with `llm.ListProviders()`, independently of the renderer. They require matching provider names, ordered model lists (including duplicates), and provider metadata. Missing or inconsistent files fail the check; regenerate and commit the result to fix them.
+CI and the Go artifact test compare both committed catalogs directly with `llm.ListProviders()`, independently of the renderer. Missing or inconsistent files fail without being rewritten. See [Provider registry and generated catalogs](internal/llm/PROVIDERS.md) for the update procedure, artifact responsibilities, and troubleshooting.
 
 ## Testing
 

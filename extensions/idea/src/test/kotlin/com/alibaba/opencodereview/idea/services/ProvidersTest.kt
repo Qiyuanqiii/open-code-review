@@ -17,8 +17,8 @@ import org.junit.Test
  * Consistency checks for the preset provider list.
  *
  * The host needs only names to route providers to `providers` or `custom_providers`,
- * while the frontend uses the full preset table generated from Go. Both name sets must match:
- * if the frontend adds a built-in provider without a host update, it is treated as custom,
+ * while the frontend uses the full preset table. Both are generated from Go and must match:
+ * if a built-in provider is missing on the host, it is treated as custom,
  * written to the wrong container, and silently ignored by the CLI, which reports no configured model during review.
  */
 class ProvidersTest {

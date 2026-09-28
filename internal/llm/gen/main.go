@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Command gen generates the shared frontend provider presets from the Go registry.
+// Command gen generates frontend presets and IDEA provider names from the Go registry.
 package main
 
 import (
@@ -39,13 +39,14 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = `
 
 func main() {
 	output := flag.String("output", "", "path to the generated TypeScript file")
-	checkOnly := flag.Bool("check", false, "verify the provider presets without writing the file")
+	kotlinOutput := flag.String("kotlin-output", "", "path to the generated Kotlin file")
+	checkOnly := flag.Bool("check", false, "verify the provider presets without writing files")
 	flag.Parse()
 	var err error
 	if *checkOnly {
-		err = check(*output)
+		err = check(*output, *kotlinOutput)
 	} else {
-		err = generate(*output)
+		err = generate(*output, *kotlinOutput)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -53,16 +54,20 @@ func main() {
 	}
 }
 
-func generate(output string) error {
-	if output == "" {
-		return fmt.Errorf("-output path is required; run go generate ./internal/llm from the repository root")
+func generate(output, kotlinOutput string) error {
+	if output == "" || kotlinOutput == "" {
+		return fmt.Errorf("-output and -kotlin-output paths are required; run go generate ./internal/llm from the repository root")
 	}
-	data, err := render(llm.ListProviders())
+	providers := llm.ListProviders()
+	data, err := render(providers)
 	if err != nil {
 		return err
 	}
 	if err := writeFileAtomically(output, data, 0o644); err != nil {
 		return fmt.Errorf("write provider presets: %w", err)
+	}
+	if err := writeFileAtomically(kotlinOutput, renderKotlin(providers), 0o644); err != nil {
+		return fmt.Errorf("write Kotlin provider names: %w", err)
 	}
 	return nil
 }
@@ -98,6 +103,9 @@ func writeFileAtomically(output string, data []byte, perm os.FileMode) error {
 }
 
 func render(providers []llm.Provider) ([]byte, error) {
+	if err := validateModelLists(providers); err != nil {
+		return nil, err
+	}
 	presets := make([]preset, 0, len(providers))
 	for _, p := range providers {
 		models := append([]string{}, p.Models...)
@@ -117,4 +125,17 @@ func render(providers []llm.Provider) ([]byte, error) {
 		return nil, fmt.Errorf("encode provider presets: %w", err)
 	}
 	return []byte(header + string(data) + ";\n"), nil
+}
+
+func validateModelLists(providers []llm.Provider) error {
+	for _, provider := range providers {
+		seen := make(map[string]bool, len(provider.Models))
+		for _, model := range provider.Models {
+			if seen[model] {
+				return fmt.Errorf("provider %q has duplicate model %q", provider.Name, model)
+			}
+			seen[model] = true
+		}
+	}
+	return nil
 }

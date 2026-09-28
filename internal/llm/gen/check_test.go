@@ -19,14 +19,14 @@ func TestCheckPresets(t *testing.T) {
 		{
 			Name: "alpha", DisplayName: "Alpha", Protocol: llm.ProtocolOpenAIChatCompletions,
 			BaseURL: "https://example.com/v1", AuthHeader: "Authorization",
-			EnvVar: "ALPHA_API_KEY", Models: []string{"default", "other", "default"},
+			EnvVar: "ALPHA_API_KEY", Models: []string{"default", "other"},
 		},
 		{
 			Name: "beta", DisplayName: "Beta", Protocol: llm.ProtocolAnthropicBedrock,
 			AmbientAuth: true,
 		},
 	}
-	const alpha = `{"name":"alpha","displayName":"Alpha","protocol":"openai","baseUrl":"https://example.com/v1","authHeader":"Authorization","envVar":"ALPHA_API_KEY","models":["default","other","default"]}`
+	const alpha = `{"name":"alpha","displayName":"Alpha","protocol":"openai","baseUrl":"https://example.com/v1","authHeader":"Authorization","envVar":"ALPHA_API_KEY","models":["default","other"]}`
 	const beta = `{"name":"beta","displayName":"Beta","protocol":"anthropic-bedrock","baseUrl":"","envVar":"","ambientAuth":true,"models":[]}`
 	valid := "[" + alpha + "," + beta + "]"
 	for _, tc := range []struct {
@@ -40,12 +40,11 @@ func TestCheckPresets(t *testing.T) {
 		{"duplicate provider", "[" + alpha + "," + alpha + "]", "provider at index"},
 		{"reordered providers", "[" + beta + "," + alpha + "]", "provider at index"},
 		{"changed model", strings.Replace(valid, `"other"`, `"changed"`, 1), `models for provider "alpha"`},
-		{"reordered models", strings.Replace(valid, `["default","other","default"]`, `["other","default","default"]`, 1), `models for provider "alpha"`},
-		{"removed model duplicate", strings.Replace(valid, `["default","other","default"]`, `["default","other"]`, 1), `models for provider "alpha"`},
+		{"reordered models", strings.Replace(valid, `["default","other"]`, `["other","default"]`, 1), `models for provider "alpha"`},
 		{"null models", strings.Replace(valid, `"models":[]`, `"models":null`, 1), "must not be null"},
 		{"missing models", strings.Replace(valid, `,"models":[]`, "", 1), `missing required field "models"`},
-		{"null model entry", strings.Replace(valid, `["default","other","default"]`, `["default",null,"default"]`, 1), "must be a string"},
-		{"wrong model type", strings.Replace(valid, `["default","other","default"]`, `["default",42,"default"]`, 1), `decode field "models"`},
+		{"null model entry", strings.Replace(valid, `["default","other"]`, `["default",null]`, 1), "must be a string"},
+		{"wrong model type", strings.Replace(valid, `["default","other"]`, `["default",42]`, 1), `decode field "models"`},
 		{"models object", strings.Replace(valid, `"models":[]`, `"models":{}`, 1), `decode field "models"`},
 		{"changed display name", strings.Replace(valid, `"displayName":"Alpha"`, `"displayName":"Changed"`, 1), "displayName"},
 		{"changed protocol", strings.Replace(valid, `"protocol":"openai"`, `"protocol":"anthropic"`, 1), "protocol"},
@@ -90,15 +89,39 @@ func TestCheckPresets(t *testing.T) {
 }
 
 func TestCheckRequiresExistingFile(t *testing.T) {
-	if err := check(""); err == nil || !strings.Contains(err.Error(), "-output") {
-		t.Fatalf("missing output path error = %v", err)
+	for _, paths := range [][2]string{{"", "providers.kt"}, {"providers.ts", ""}} {
+		if err := check(paths[0], paths[1]); err == nil || !strings.Contains(err.Error(), "-output") || !strings.Contains(err.Error(), "-kotlin-output") {
+			t.Fatalf("missing output path error = %v", err)
+		}
 	}
-	path := filepath.Join(t.TempDir(), "missing.ts")
-	if err := check(path); err == nil || !strings.Contains(err.Error(), "read provider presets") {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing.ts")
+	kotlinPath := filepath.Join(dir, "missing.kt")
+	if err := check(path, kotlinPath); err == nil || !strings.Contains(err.Error(), "read provider presets") {
 		t.Fatalf("missing artifact error = %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("check must not create a missing artifact: %v", err)
+	}
+	data, err := render(llm.ListProviders())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(path, kotlinPath); err == nil || !strings.Contains(err.Error(), "read Kotlin provider names") {
+		t.Fatalf("missing Kotlin artifact error = %v", err)
+	}
+	if _, err := os.Stat(kotlinPath); !os.IsNotExist(err) {
+		t.Fatalf("check must not create a missing Kotlin artifact: %v", err)
+	}
+}
+
+func TestCheckRejectsDuplicateRegistryModels(t *testing.T) {
+	providers := []llm.Provider{{Name: "example", Models: []string{"duplicate", "duplicate"}}}
+	if err := checkPresets(nil, providers); err == nil || !strings.Contains(err.Error(), `provider "example" has duplicate model "duplicate"`) {
+		t.Fatalf("invalid source registry must be rejected before comparison: %v", err)
 	}
 }
 
@@ -107,39 +130,49 @@ func TestCheckDoesNotRewriteArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	validKotlin := renderKotlin(llm.ListProviders())
 	for _, tc := range []struct {
-		name string
-		data []byte
+		name         string
+		data, kotlin []byte
+		inconsistent bool
 	}{
-		{"matching", valid},
-		{"inconsistent", []byte(presetDeclaration + " [];\n")},
+		{"matching", valid, validKotlin, false},
+		{"inconsistent frontend", []byte(presetDeclaration + " [];\n"), validKotlin, true},
+		{"inconsistent Kotlin", valid, []byte(kotlinDeclaration + ")\n"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "providers.ts")
-			if err := os.WriteFile(path, tc.data, 0o644); err != nil {
-				t.Fatal(err)
-			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, "providers.ts")
+			kotlinPath := filepath.Join(dir, "providers.kt")
 			modified := time.Unix(1600000000, 0)
-			if err := os.Chtimes(path, modified, modified); err != nil {
+			artifacts := map[string][]byte{path: tc.data, kotlinPath: tc.kotlin}
+			for artifact, data := range artifacts {
+				if err := os.WriteFile(artifact, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(artifact, modified, modified); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := check(path, kotlinPath)
+			if !tc.inconsistent && err != nil {
 				t.Fatal(err)
 			}
-			err := check(path)
-			if tc.name == "matching" && err != nil {
-				t.Fatal(err)
-			}
-			if tc.name == "inconsistent" && (err == nil || !strings.Contains(err.Error(), "go generate ./internal/llm")) {
+			if tc.inconsistent && (err == nil || !strings.Contains(err.Error(), "go generate ./internal/llm")) {
 				t.Fatalf("mismatch must include the regeneration command: %v", err)
 			}
-			got, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			info, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, tc.data) || !info.ModTime().Equal(modified) {
-				t.Fatal("check must not rewrite the artifact, even when it is inconsistent")
+			for artifact, data := range artifacts {
+				got, err := os.ReadFile(artifact)
+				if err != nil {
+					t.Fatal(err)
+				}
+				info, err := os.Stat(artifact)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, data) || !info.ModTime().Equal(modified) {
+					t.Fatalf("check must not rewrite %s, even when it is inconsistent", artifact)
+				}
 			}
 		})
 	}

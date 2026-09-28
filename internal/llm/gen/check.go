@@ -16,21 +16,32 @@ import (
 
 const presetDeclaration = "export const PROVIDER_PRESETS: OcrProviderPreset[] ="
 
-func check(output string) error {
-	if output == "" {
-		return fmt.Errorf("-output path is required for -check")
+func check(output, kotlinOutput string) error {
+	if output == "" || kotlinOutput == "" {
+		return fmt.Errorf("-output and -kotlin-output paths are required for -check")
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
 		return fmt.Errorf("read provider presets: %w", err)
 	}
-	if err := checkPresets(data, llm.ListProviders()); err != nil {
-		return fmt.Errorf("provider presets are inconsistent: %w; run go generate ./internal/llm from the repository root and commit the generated file", err)
+	providers := llm.ListProviders()
+	if err := checkPresets(data, providers); err != nil {
+		return fmt.Errorf("provider presets are inconsistent: %w; run go generate ./internal/llm from the repository root and commit the generated files", err)
+	}
+	kotlinData, err := os.ReadFile(kotlinOutput)
+	if err != nil {
+		return fmt.Errorf("read Kotlin provider names: %w", err)
+	}
+	if err := checkKotlinNames(kotlinData, providers); err != nil {
+		return fmt.Errorf("Kotlin provider names are inconsistent: %w; run go generate ./internal/llm from the repository root and commit the generated files", err)
 	}
 	return nil
 }
 
 func checkPresets(data []byte, providers []llm.Provider) error {
+	if err := validateModelLists(providers); err != nil {
+		return err
+	}
 	presets, err := decodePresets(data)
 	if err != nil {
 		return err
@@ -44,7 +55,7 @@ func checkPresets(data []byte, providers []llm.Provider) error {
 			return fmt.Errorf("provider at index %d is %q, want %q", i, actual.Name, provider.Name)
 		}
 		if !slices.Equal(actual.Models, provider.Models) {
-			return fmt.Errorf("models for provider %q are %v, want %v (including order and duplicates)", provider.Name, actual.Models, provider.Models)
+			return fmt.Errorf("models for provider %q are %v, want %v (including order)", provider.Name, actual.Models, provider.Models)
 		}
 		for _, field := range []struct{ name, actual, want string }{
 			{"displayName", actual.DisplayName, provider.DisplayName},

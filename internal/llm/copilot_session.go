@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +21,9 @@ import (
 // OCR still executes every tool and decides whether another model call is allowed.
 type copilotConversation struct {
 	mu          sync.Mutex
+	cancelMu    sync.Mutex
+	cancel      context.CancelFunc
+	closed      bool
 	client      *copilot.Client
 	session     *copilot.Session
 	stateDir    string
@@ -31,7 +34,7 @@ type copilotConversation struct {
 	system      string
 	toolsKey    string
 	maxTokens   int
-	history     []Message
+	history     []copilotReplayMessage
 	pending     map[string]string // tool call ID -> SDK request ID
 }
 
@@ -53,6 +56,13 @@ func (c *CopilotClient) complete(ctx context.Context, req ChatRequest, model, sy
 	}
 	conversation.mu.Lock()
 	defer conversation.mu.Unlock()
+	ctx, finishRequest := conversation.requestContext(ctx)
+	defer finishRequest()
+	if err := ctx.Err(); err != nil {
+		conversation.closeLocked()
+		c.discardConversation(req.SessionID, conversation)
+		return nil, err
+	}
 
 	// OCR compression or the grace round can replace the transcript or tool
 	// allowlist. In those cases a fresh session receives OCR's authoritative
@@ -91,7 +101,7 @@ func (c *CopilotClient) complete(ctx context.Context, req ChatRequest, model, sy
 		c.discardConversation(req.SessionID, conversation)
 		return nil, err
 	}
-	conversation.history = append(conversation.history[:0], req.Messages...)
+	conversation.history = copilotHistorySnapshot(req.Messages)
 	conversation.pending = pending
 	if req.SessionID == "" || len(pending) == 0 || hasCopilotTaskDone(response) {
 		conversation.closeLocked()
@@ -126,17 +136,53 @@ func (c *CopilotClient) CloseSession(id string) {
 		return
 	}
 	conversation := value.(*copilotConversation)
+	conversation.cancelRequest()
 	conversation.mu.Lock()
 	defer conversation.mu.Unlock()
 	conversation.closeLocked()
+}
+
+func (conversation *copilotConversation) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	conversation.cancelMu.Lock()
+	if conversation.closed {
+		cancel()
+	} else {
+		conversation.cancel = cancel
+	}
+	conversation.cancelMu.Unlock()
+	return ctx, func() {
+		cancel()
+		conversation.cancelMu.Lock()
+		conversation.cancel = nil
+		conversation.cancelMu.Unlock()
+	}
+}
+
+func (conversation *copilotConversation) cancelRequest() {
+	// Closing must interrupt the active request before waiting for its state lock.
+	conversation.cancelMu.Lock()
+	conversation.closed = true
+	if conversation.cancel != nil {
+		conversation.cancel()
+	}
+	conversation.cancelMu.Unlock()
 }
 
 func (conversation *copilotConversation) continuation(req ChatRequest, model, system, toolsKey string) (map[string]string, bool) {
 	if conversation.session == nil || conversation.model != model || conversation.system != system || conversation.toolsKey != toolsKey || conversation.maxTokens != req.MaxTokens {
 		return nil, false
 	}
-	if len(conversation.history) >= len(req.Messages) || !reflect.DeepEqual(conversation.history, req.Messages[:len(conversation.history)]) {
+	if len(conversation.history) >= len(req.Messages) {
 		return nil, false
+	}
+	for i, previous := range conversation.history {
+		current := req.Messages[i]
+		if previous.Role != current.Role || previous.Content != current.ExtractText() || previous.ToolCallID != current.ToolCallID || !slices.EqualFunc(previous.ToolCalls, current.ToolCalls, func(a, b ToolCall) bool {
+			return a.ID == b.ID && a.Type == b.Type && a.Function == b.Function
+		}) {
+			return nil, false
+		}
 	}
 	if len(conversation.pending) == 0 {
 		return nil, false
@@ -244,15 +290,19 @@ func (conversation *copilotConversation) wait(ctx context.Context) (*copilot.Ass
 		case event := <-conversation.events:
 			switch data := event.Data.(type) {
 			case *copilot.AssistantMessageData:
-				if haveMessage && message.MessageID != "" && data.MessageID != message.MessageID && len(message.ToolRequests) > 0 {
+				sameCall := message.APICallID != nil && data.APICallID != nil && *message.APICallID != "" && *message.APICallID == *data.APICallID
+				if haveMessage && message.MessageID != "" && data.MessageID != message.MessageID && len(message.ToolRequests) > 0 && !sameCall {
 					return nil, nil, nil, errors.New("Copilot advanced past an OCR tool request before OCR returned its result")
 				}
 				haveMessage = true
 				message.MessageID = data.MessageID
+				message.APICallID = data.APICallID
 				message.Content += data.Content
 				message.ToolRequests = append(message.ToolRequests, data.ToolRequests...)
-				if data.OutputTokens != nil {
-					message.OutputTokens = data.OutputTokens
+				// This is the API-call total, so repeated chunks must not be summed.
+				if data.OutputTokens != nil && (message.OutputTokens == nil || *data.OutputTokens > *message.OutputTokens) {
+					total := *data.OutputTokens
+					message.OutputTokens = &total
 				}
 				messageComplete = data.ChunkCount == nil || data.ChunkIndex == nil || *data.ChunkIndex >= *data.ChunkCount-1
 			case *copilot.AssistantUsageData:
@@ -278,27 +328,30 @@ func (conversation *copilotConversation) wait(ctx context.Context) (*copilot.Ass
 				if !haveMessage {
 					return nil, nil, nil, errors.New("Copilot session finished without an assistant message")
 				}
-				if len(message.ToolRequests) > 0 && len(pending) != len(message.ToolRequests) {
+				if !messageComplete || !copilotPendingMatches(message.ToolRequests, pending) {
 					return nil, nil, nil, errors.New("Copilot session stopped without all pending OCR tool requests")
 				}
 				return &message, usages, pending, nil
 			case *copilot.SessionErrorData:
 				return nil, nil, nil, fmt.Errorf("Copilot session error: %s", data.Message)
 			}
-			if haveMessage && messageComplete && len(message.ToolRequests) > 0 && len(pending) == len(message.ToolRequests) {
-				matched := true
-				for _, call := range message.ToolRequests {
-					if pending[call.ToolCallID] == "" {
-						matched = false
-						break
-					}
-				}
-				if matched {
-					return &message, usages, pending, nil
-				}
+			if haveMessage && messageComplete && len(message.ToolRequests) > 0 && copilotPendingMatches(message.ToolRequests, pending) {
+				return &message, usages, pending, nil
 			}
 		}
 	}
+}
+
+func copilotPendingMatches(requests []copilot.AssistantMessageToolRequest, pending map[string]string) bool {
+	if len(requests) != len(pending) {
+		return false
+	}
+	for _, call := range requests {
+		if pending[call.ToolCallID] == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (conversation *copilotConversation) closeLocked() {

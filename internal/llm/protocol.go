@@ -65,8 +65,7 @@ func NormalizeProtocol(raw string) string {
 	}
 }
 
-// ValidateProtocol accepts the four canonical protocol names and rejects
-// everything else.
+// ValidateProtocol rejects unsupported canonical protocol names.
 func ValidateProtocol(p string) error {
 	switch p {
 	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolCopilot:

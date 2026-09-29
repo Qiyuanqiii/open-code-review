@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,8 @@ type CopilotClient struct {
 	model    string
 	timeout  time.Duration
 	cliPath  string
-	provider *copilot.ProviderConfig
-	sessions sync.Map // OCR session ID -> *copilotConversation
+	provider *copilot.ProviderConfig // BYOK override for local tests; nil preserves CLI login.
+	sessions sync.Map                // OCR session ID -> *copilotConversation
 }
 
 func NewCopilotClient(cfg ClientConfig) *CopilotClient {
@@ -88,6 +89,20 @@ type copilotReplayMessage struct {
 	Content    string     `json:"content,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+}
+
+func copilotHistorySnapshot(messages []Message) []copilotReplayMessage {
+	history := make([]copilotReplayMessage, len(messages))
+	for i, message := range messages {
+		history[i] = copilotReplayMessage{
+			Role: message.Role, Content: message.ExtractText(), ToolCallID: message.ToolCallID,
+			ToolCalls: slices.Clone(message.ToolCalls),
+		}
+		for j := range history[i].ToolCalls {
+			history[i].ToolCalls[j].ExtraContent = nil
+		}
+	}
+	return history
 }
 
 func copilotPrompt(messages []Message) (string, string, error) {

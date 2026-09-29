@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -447,7 +448,7 @@ func TestCopilotConversationFallsBackAfterCompression(t *testing.T) {
 		system:    "Review this patch.",
 		toolsKey:  "tools",
 		maxTokens: 128,
-		history:   start,
+		history:   copilotHistorySnapshot(start),
 		pending:   map[string]string{"call-1": "request-1"},
 	}
 	call := ToolCall{ID: "call-1", Type: "function", Function: FunctionCall{Name: "file_read", Arguments: `{"path":"file.go"}`}}
@@ -498,38 +499,66 @@ func TestCopilotClientLocalCancellation(t *testing.T) {
 	if cliPath == "" {
 		t.Skip("set OCR_COPILOT_CLI_TEST_PATH to run the local Copilot CLI integration test")
 	}
-	received := make(chan struct{}, 1)
-	released := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		received <- struct{}{}
-		<-released
-	}))
-	defer server.Close()
-	defer close(released)
-	client := &CopilotClient{model: "gpt-4.1", cliPath: cliPath, provider: &copilot.ProviderConfig{
-		Type: "openai", BaseURL: server.URL + "/v1", APIKey: "local-probe", WireAPI: "completions",
-	}}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	finished := make(chan error, 1)
-	go func() {
-		_, err := client.CompletionsWithCtx(ctx, ChatRequest{Messages: []Message{
-			NewTextMessage("system", "Answer directly."), NewTextMessage("user", "Wait for the response."),
-		}})
-		finished <- err
-	}()
-	select {
-	case <-received:
-		cancel()
-	case <-ctx.Done():
-		t.Fatal("Copilot CLI did not reach the local model")
-	}
-	select {
-	case err := <-finished:
-		if err == nil {
-			t.Fatal("cancelled Copilot request returned no error")
+	for _, closeSession := range []bool{false, true} {
+		name := "caller context"
+		if closeSession {
+			name = "CloseSession"
 		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("cancelled Copilot request did not return promptly")
+		t.Run(name, func(t *testing.T) {
+			received := make(chan struct{}, 1)
+			released := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				received <- struct{}{}
+				<-released
+			}))
+			defer server.Close()
+			defer close(released)
+			client := &CopilotClient{model: "gpt-4.1", cliPath: cliPath, provider: &copilot.ProviderConfig{
+				Type: "openai", BaseURL: server.URL + "/v1", APIKey: "local-probe", WireAPI: "completions",
+			}}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			finished := make(chan error, 1)
+			go func() {
+				_, err := client.CompletionsWithCtx(ctx, ChatRequest{SessionID: "cancel-test", Messages: []Message{
+					NewTextMessage("system", "Answer directly."), NewTextMessage("user", "Wait for the response."),
+				}})
+				finished <- err
+			}()
+			closed := make(chan struct{})
+			select {
+			case <-received:
+				if closeSession {
+					go func() {
+						client.CloseSession("cancel-test")
+						close(closed)
+					}()
+				} else {
+					cancel()
+					close(closed)
+				}
+			case <-ctx.Done():
+				t.Fatal("Copilot CLI did not reach the local model")
+			}
+			select {
+			case err := <-finished:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled Copilot request = %v", err)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("cancelled Copilot request did not return promptly")
+			}
+			select {
+			case <-closed:
+			case <-time.After(15 * time.Second):
+				t.Fatal("CloseSession did not release the CLI process")
+			}
+			if closeSession && ctx.Err() != nil {
+				t.Fatal("CloseSession cancelled the caller's context")
+			}
+			if _, kept := client.sessions.Load("cancel-test"); kept {
+				t.Fatal("cancelled conversation remains registered")
+			}
+		})
 	}
 }

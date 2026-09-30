@@ -37,7 +37,7 @@ type ScanTemplate struct {
 	MainTask       LlmConversation  `json:"MAIN_TASK"`
 	PlanTask       *LlmConversation `json:"PLAN_TASK,omitempty"`
 	NoPlanGuidance string           `json:"NO_PLAN_GUIDANCE,omitempty"`
-	// PromptOverrideSHA256 identifies the effective custom prompts for scan checkpoints.
+	// PromptOverrideSHA256 identifies validated custom prompts before runtime inputs are applied.
 	PromptOverrideSHA256  string           `json:"-"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`

@@ -405,7 +405,7 @@ Both `MAIN_TASK` and nonempty, literal `NO_PLAN_GUIDANCE` are required. `MAIN_TA
 
 Unreadable files, invalid JSON, duplicate or unknown fields, unsupported message roles or placeholders, and missing required values fail before any model request, including with `--preview`. Runtime settings such as `MAX_TOKENS`, `MAX_COMPLETION_TOKENS`, and `MAX_TOOL_REQUEST_TIMES` are rejected in this file. Existing budget flags and tool configuration still apply; prompt instructions do not restrict the exposed tool set.
 
-Custom prompt identity participates in scan checkpoints. With `--resume`, changing the effective main/plan prompts or fallback text, or switching back to embedded prompts, reviews the affected files again. Moving or reformatting an otherwise identical override does not invalidate its checkpoints.
+Custom scan checkpoints include the main/plan prompts after language configuration, fallback text, background, resolved per-file rule, and whether planning is enabled. With `--resume`, changing any of these inputs, or switching back to embedded prompts, reviews the affected files again. Moving or reformatting an otherwise identical override preserves checkpoint reuse. Time passing alone does not invalidate a checkpoint because the value substituted for the current-date placeholder is excluded from the identity.
 
 
 ## `ocr session`

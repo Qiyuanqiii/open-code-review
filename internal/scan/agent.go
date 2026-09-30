@@ -106,6 +106,7 @@ type Agent struct {
 	runner           *llmloop.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
+	scanRules        map[string]string
 	projectSummary   string // populated post-run by maybeRunProjectSummary
 	budgetExceeded   bool   // set when the token budget gate stopped dispatch; written only by dispatchBatch's loop
 }
@@ -246,6 +247,14 @@ func (a *Agent) initScanFingerprints(items []model.ScanItem) {
 		return
 	}
 	a.scanFingerprints = make(map[string]string, len(items))
+	a.scanRules = nil
+	if a.args.Template.PromptOverrideSHA256 != "" {
+		// The fingerprint and request must share a rule even if resolution reads mutable files.
+		a.scanRules = make(map[string]string, len(items))
+		for _, it := range items {
+			a.scanRules[it.Path] = a.scanRule(it.Path)
+		}
+	}
 	for _, it := range items {
 		a.scanFingerprints[it.Path] = a.scanItemFingerprint(it)
 	}
@@ -259,10 +268,33 @@ func (a *Agent) scanItemFingerprint(it model.ScanItem) string {
 	}
 	fingerprint := scanItemFingerprint(it)
 	if a != nil && a.args.Template.PromptOverrideSHA256 != "" {
-		identity := a.args.Template.PromptOverrideSHA256 + "\x00" + fingerprint
-		return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+		contract := struct {
+			ItemFingerprint string
+			MainTask        template.LlmConversation
+			PlanTask        *template.LlmConversation
+			NoPlanGuidance  string
+			Background      string
+			Rule            string
+			Planning        bool
+		}{
+			fingerprint, a.args.Template.MainTask, a.args.Template.PlanTask,
+			a.args.Template.PlanFallbackGuidance(), a.args.Background, a.scanRule(it.Path), a.planEnabled(),
+		}
+		// Fixed message/string/bool fields cannot fail JSON encoding. Keep date placeholders unrendered.
+		identity, _ := json.Marshal(contract)
+		return fmt.Sprintf("%x", sha256.Sum256(identity))
 	}
 	return fingerprint
+}
+
+func (a *Agent) scanRule(path string) string {
+	if rule, ok := a.scanRules[path]; ok {
+		return rule
+	}
+	if a.args.SystemRule != nil {
+		return a.args.SystemRule.Resolve(path)
+	}
+	return ""
 }
 
 func (a *Agent) initResumeInfo(items []model.ScanItem) {
@@ -804,10 +836,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", ctx.Err()
 	}
 
-	rule := ""
-	if a.args.SystemRule != nil {
-		rule = a.args.SystemRule.Resolve(it.Path)
-	}
+	rule := a.scanRule(it.Path)
 
 	planGuidance := a.maybeRunPlan(ctx, it, rule)
 

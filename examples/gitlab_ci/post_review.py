@@ -360,7 +360,7 @@ def build_summary_body(total, inline, summary, skipped, routed, failed, warnings
     if total > 0:
         body += "\n- ✅ Successfully posted inline: %d comment(s)" % inline
         if summary > 0:
-            body += "\n- 📝 In summary (no line info): %d comment(s)" % summary
+            body += "\n- 📝 Kept in summary: %d comment(s)" % summary
         if routed > 0:
             body += "\n- 📋 Routed to summary by policy: %d comment(s)" % routed
         if skipped > 0:

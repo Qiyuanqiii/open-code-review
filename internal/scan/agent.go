@@ -247,7 +247,7 @@ func (a *Agent) initScanFingerprints(items []model.ScanItem) {
 	}
 	a.scanFingerprints = make(map[string]string, len(items))
 	for _, it := range items {
-		a.scanFingerprints[it.Path] = scanItemFingerprint(it)
+		a.scanFingerprints[it.Path] = a.scanItemFingerprint(it)
 	}
 }
 
@@ -257,7 +257,12 @@ func (a *Agent) scanItemFingerprint(it model.ScanItem) string {
 			return fingerprint
 		}
 	}
-	return scanItemFingerprint(it)
+	fingerprint := scanItemFingerprint(it)
+	if a != nil && a.args.Template.PromptOverrideSHA256 != "" {
+		identity := a.args.Template.PromptOverrideSHA256 + "\x00" + fingerprint
+		return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+	}
+	return fingerprint
 }
 
 func (a *Agent) initResumeInfo(items []model.ScanItem) {
@@ -840,13 +845,13 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
-// guidance string suitable for {{plan_guidance}} substitution. Returns "(no
-// pre-scan plan; review the entire file as usual)" when planning is
-// disabled or fails — that sentinel is intentionally non-empty so the
+// guidance string suitable for {{plan_guidance}} substitution. Returns the
+// template's fallback guidance when planning is disabled or fails. The
+// fallback is intentionally non-empty so the
 // surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
 // instead of dangling.
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
-	const noPlan = "(no pre-scan plan; review the entire file as usual)"
+	noPlan := a.args.Template.PlanFallbackGuidance()
 
 	if !a.planEnabled() {
 		return noPlan

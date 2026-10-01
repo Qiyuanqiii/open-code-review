@@ -32,6 +32,97 @@ func TestCountMessagesTokens_Empty(t *testing.T) {
 	}
 }
 
+// TestCountMessagesTokens_IncludesNativePayload guards a gap found in review
+// of the #805 fix: once an assistant turn's Native payload (thinking blocks,
+// reasoning items, encrypted_content, reasoning_content) actually replays on
+// the wire, a token budget computed only from ExtractText() would
+// systematically under-count reasoning-heavy conversations and could let
+// compression's threshold checks fire too late.
+func TestCountMessagesTokens_IncludesNativePayload(t *testing.T) {
+	withoutNative := []llm.Message{msg("user", "hello world")}
+	withNative := []llm.Message{
+		msg("user", "hello world"),
+		llm.NewToolCallMessage("", nil, llm.NativeTurn{
+			Family:  "openai-chat-completions",
+			Payload: llm.ReasoningPayload(strings.Repeat("reasoning ", 200)),
+		}, ""),
+	}
+
+	base := CountMessagesTokens(withoutNative)
+	got := CountMessagesTokens(withNative)
+	if got <= base {
+		t.Errorf("CountMessagesTokens with a Native payload = %d, want more than the base count %d", got, base)
+	}
+}
+
+// TestCountMessagesTokens_IncludesToolCalls guards against under-counting
+// assistant turns that invoke tools under protocols where tool calls live on
+// ToolCalls rather than a Native payload (e.g. OpenAI chat completions).
+func TestCountMessagesTokens_IncludesToolCalls(t *testing.T) {
+	withoutTools := []llm.Message{msg("user", "hello world")}
+	withTools := []llm.Message{
+		msg("user", "hello world"),
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID: "call_1",
+				Function: llm.FunctionCall{
+					Name:      "file_write",
+					Arguments: strings.Repeat("content line\n", 100),
+				},
+			},
+		}, llm.NativeTurn{}, ""),
+	}
+
+	base := CountMessagesTokens(withoutTools)
+	got := CountMessagesTokens(withTools)
+	if got <= base {
+		t.Errorf("CountMessagesTokens with tool calls = %d, want more than base count %d", got, base)
+	}
+
+	expectedToolTokens := (len("call_1") + len("file_write") + len(strings.Repeat("content line\n", 100))) / 4
+	if diff := got - base; diff < expectedToolTokens-10 || diff > expectedToolTokens+10 {
+		t.Errorf("token diff for tool calls = %d, expected roughly %d", diff, expectedToolTokens)
+	}
+}
+
+// TestComputeActiveZoneSize_AccountsForToolCalls verifies that rounds with
+// heavy tool-call arguments consume active-zone budget properly rather than
+// evaluating as 0 tokens.
+func TestComputeActiveZoneSize_AccountsForToolCalls(t *testing.T) {
+	largeArgs := strings.Repeat("argument data ", 200) // ~2800 bytes => ~700 tokens
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "task"),
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID: "call_large",
+				Function: llm.FunctionCall{
+					Name:      "code_search",
+					Arguments: largeArgs,
+				},
+			},
+		}, llm.NativeTurn{}, ""),
+		msg("tool", "search result"),
+	}
+
+	rounds := groupIntoRounds(msgs, 2)
+	if len(rounds) != 1 {
+		t.Fatalf("expected 1 round, got %d", len(rounds))
+	}
+
+	smallBudgetMaxTokens := 100
+	count := computeActiveZoneSize(rounds, msgs, smallBudgetMaxTokens, 0)
+	if count != 0 {
+		t.Errorf("computeActiveZoneSize() = %d, want 0 because large tool arguments exceed budget", count)
+	}
+
+	generousMaxTokens := 10000
+	count = computeActiveZoneSize(rounds, msgs, generousMaxTokens, 0)
+	if count != 1 {
+		t.Errorf("computeActiveZoneSize() = %d, want 1 under generous budget", count)
+	}
+}
+
 func TestGroupIntoRounds(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),

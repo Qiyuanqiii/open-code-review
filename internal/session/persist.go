@@ -29,6 +29,7 @@ type jsonlWriter struct {
 	repoDir     string
 	gitBranch   string
 	model       string
+	llmSource   string
 	reviewMode  string
 	diffFrom    string
 	diffTo      string
@@ -47,6 +48,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		repoDir:     repoDir,
 		gitBranch:   gitBranch,
 		model:       model,
+		llmSource:   opts.LLMSource,
 		reviewMode:  opts.ReviewMode,
 		diffFrom:    opts.DiffFrom,
 		diffTo:      opts.DiffTo,
@@ -145,6 +147,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 		"gitBranch":  jw.gitBranch,
 		"model":      jw.model,
 	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
+	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
 	}
@@ -242,8 +247,8 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 	return uuid
 }
 
-// WriteLLMResponse writes a response entry with model, content, tool calls, usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+// WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, and usage.
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -267,6 +272,12 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 			"cache_write_tokens": usage.CacheWriteTokens,
 		},
 	}
+	if reasoningContent != "" {
+		rec["reasoning_content"] = reasoningContent
+	}
+	if nativePayload != nil {
+		rec["native_payload"] = nativePayload
+	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
@@ -289,6 +300,9 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
+	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

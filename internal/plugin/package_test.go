@@ -88,6 +88,20 @@ func TestUnsafeZIPEntries(t *testing.T) {
 	requireError(t, extractZIP(cancelled, data, t.TempDir()), "context canceled")
 }
 
+func TestZIPExtractionRejectsDestinationSymlink(t *testing.T) {
+	stage, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(stage, "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := zipEntries(t, map[string]string{"linked/escaped.txt": "malicious"})
+	if err := extractZIP(context.Background(), data, stage); err == nil {
+		t.Fatal("ZIP extraction followed a symlink outside its destination")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escaped.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside file exists or cannot be inspected: %v", err)
+	}
+}
+
 func TestZIPBoundsAndCorruption(t *testing.T) {
 	ctx := context.Background()
 	requireError(t, extractZIP(ctx, make([]byte, maxArchiveBytes+1), t.TempDir()), "byte limit")

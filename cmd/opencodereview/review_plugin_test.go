@@ -66,7 +66,10 @@ func TestReviewPluginFullFlow(t *testing.T) {
 					if _, err := store.Install(context.Background(), source, false); err != nil {
 						t.Fatal(err)
 					}
-					repo := initRulesCheckTestRepo(t)
+					repo, err := resolveRepoDir(initRulesCheckTestRepo(t))
+					if err != nil {
+						t.Fatal(err)
+					}
 					gitCommitFile(t, repo, "main.go", "package main\nfunc value() int { return 0 }\n", "initial")
 					if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\nfunc value() int { return 1 }\n"), 0600); err != nil {
 						t.Fatal(err)

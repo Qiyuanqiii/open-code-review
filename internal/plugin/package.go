@@ -192,6 +192,11 @@ func extractZIP(ctx context.Context, data []byte, destination string) error {
 	if len(archive.File) > maxPackageFiles {
 		return fmt.Errorf("ZIP exceeds %d entries", maxPackageFiles)
 	}
+	root, err := os.OpenRoot(destination)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	seen := make(map[string]bool)
 	var total uint64
 	for _, entry := range archive.File {
@@ -214,30 +219,30 @@ func extractZIP(ctx context.Context, data []byte, destination string) error {
 			return fmt.Errorf("ZIP exceeds %d uncompressed byte limit", maxPackageBytes)
 		}
 		total += entry.UncompressedSize64
-		target := filepath.Join(destination, filepath.FromSlash(name))
+		target := filepath.FromSlash(name)
 		if entry.Mode().IsDir() {
-			if err := os.MkdirAll(target, 0700); err != nil {
+			if err := root.MkdirAll(target, 0700); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		if err := root.MkdirAll(filepath.Dir(target), 0700); err != nil {
 			return err
 		}
-		if err := extractFile(entry, target); err != nil {
+		if err := extractFile(root, entry, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func extractFile(entry *zip.File, target string) error {
+func extractFile(root *os.Root, entry *zip.File, target string) error {
 	input, err := entry.Open()
 	if err != nil {
 		return err
 	}
 	defer input.Close()
-	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600|entry.Mode().Perm()&0111)
+	output, err := root.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600|entry.Mode().Perm()&0111)
 	if err != nil {
 		return err
 	}

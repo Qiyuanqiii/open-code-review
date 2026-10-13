@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
@@ -51,6 +52,7 @@ type reviewOptions struct {
 	effort                string
 	noFilter              bool
 	preview               bool
+	tuiControlAddress     string
 }
 
 var reviewOpts reviewOptions
@@ -103,12 +105,23 @@ var reviewCmd = &cobra.Command{
 		// for the whole shutdown window (see interrupt.go).
 		ctx, stop := interruptContextWithForcedExit(cmd.Context())
 		defer stop()
+		controlToken := ""
+		if reviewOpts.tuiControlAddress != "" {
+			controlToken = os.Getenv(tuiControlTokenEnv)
+		}
+		ctx, closeControl, err := tuiChildContext(ctx, reviewOpts.tuiControlAddress, controlToken)
+		if err != nil {
+			return err
+		}
+		defer closeControl()
 		return executeReviewContext(ctx, reviewOpts)
 	},
 }
 
 func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewCmd.Flags().StringVar(&reviewOpts.tuiControlAddress, "tui-control-address", "", "internal TUI cancellation connection")
+	_ = reviewCmd.Flags().MarkHidden("tui-control-address")
 }
 
 func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
@@ -144,8 +157,20 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
 		return err
 	}
+	if err := prepareRepositoryReview(ctx, cc, opts); err != nil {
+		// A fresh run cancelled during preflight still follows the normal
+		// failed-run reporting path so the TUI receives its saved JSON result.
+		// Preview and resume admission must remain free of session writes.
+		if ctx.Err() == nil || opts.preview || opts.resume != "" {
+			return err
+		}
+	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	backgroundCommit := opts.commit
+	if backgroundCommit != "" && cc.Review != nil {
+		backgroundCommit = cc.Review.Head
+	}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {
 		return err
 	}
@@ -193,21 +218,35 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
+	resolvedReview := cc.Review
 	var sealedInput *diff.InputResolution
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
+		resolvedReview = &sealed.Review
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	readContent := vcs.ContentRef{Revision: fileReadRef(mode, opts, sealedInput)}
+	if resolvedReview != nil {
+		readContent = resolvedReview.Content
+	}
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
 		Ref:     fileReadRef(mode, opts, sealedInput),
 		Runner:  cc.GitRunner,
+		Source:  cc.Repository,
+		Content: readContent,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
+	var mcpClients []*mcp.Client
+	if ctx.Err() == nil {
+		mcpClients, err = initRuntimeMCPClients(ctx, rt.AppCfg, cc.Resolver, tools, cc.RepoDir, Version)
+		if err != nil {
+			return err
+		}
+	}
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
@@ -236,6 +275,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		EndpointSource:        rt.Source,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		Repository:            cc.Repository,
+		ResolvedReview:        resolvedReview,
 		Resume:                resumeState,
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
@@ -315,7 +356,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if emitted {
 			failureReport = nil
 		}
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
+		failureUsageFormat := opts.outputFormat
+		if opts.tuiControlAddress != "" {
+			// The TUI reads structured results from the report file; stderr is
+			// human-readable progress and diagnostics inside its activity pane.
+			failureUsageFormat = "text"
+		}
+		emitFailureUsage(ag, time.Since(startTime), failureUsageFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
@@ -398,15 +445,17 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		ReviewMode:     reviewModeFromOptions(opts),
+		Template:       *cc.Template,
+		SystemRule:     cc.Resolver,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -513,13 +562,15 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	tpl.MaxTokens = maxTokens
 
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		Template:   tpl,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		Template:       tpl,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

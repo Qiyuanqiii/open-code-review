@@ -16,6 +16,8 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/pathutil"
+	"github.com/alibaba/open-code-review/internal/vcs"
+	vcsGit "github.com/alibaba/open-code-review/internal/vcs/git"
 )
 
 // Resolver resolves a review rule for a file path.
@@ -129,6 +131,8 @@ type RuleDetail struct {
 	Rule    string // rule text
 	Source  string // "custom" | "project" | "global" | "system"
 	Pattern string // glob pattern that matched, or "default" for fallback — always a plain glob, never annotated
+	// PluginRules identifies the additive rule packs that matched this path.
+	PluginRules []PluginRuleDetail `json:"plugin_rules,omitempty"`
 	// SniffedAs is "" for a plain path match, or the sniffed language (e.g.
 	// "objc") when content sniffing overrode the path-based rule. Internal
 	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
@@ -270,18 +274,23 @@ type composedResolver struct {
 	system  systemLayer  // lowest: embedded default, decorated by sniffer
 }
 
-// ResolverOptions carries the optional git context the resolver needs to read
+// ResolverOptions carries the optional repository context the resolver needs to read
 // file content when disambiguating extensions shared by several languages
 // (currently only ".m": MATLAB vs Objective-C). The zero value is valid and
-// makes content reads fall back to the working tree.
+// makes content reads use the working tree through the Git adapter.
 type ResolverOptions struct {
+	// Files reads content at Content. Its zero Content selects the workspace,
+	// including when the legacy Ref field is also set.
+	Files   vcs.FileSource
+	Content vcs.ContentRef
+
 	// Ref is the git ref whose content should be inspected — the review head
 	// (--to) in range mode, or --commit in commit mode. Empty reads the
 	// working tree, which is what `ocr scan` and `ocr rules check` want.
 	Ref string
 
 	// Runner bounds concurrent git subprocesses. Optional; when nil the
-	// resolver shells out to git directly.
+	// Git adapter creates its own subprocesses.
 	Runner *gitcmd.Runner
 }
 
@@ -331,19 +340,31 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 	}
 
 	filter := buildFileFilter(customRule, projectRule, globalRule)
+	files := opts.Files
+	content := opts.Content
+	if files == nil {
+		files = vcsGit.New(repoDir, opts.Runner)
+		if content.IsWorkspace() {
+			content.Revision = opts.Ref
+		}
+	}
 
-	return &composedResolver{
+	resolver := &composedResolver{
 		custom:  customRule,
 		project: projectRule,
 		global:  globalRule,
 		system: &sniffer{
 			inner:    sysRule,
-			repoDir:  repoDir,
-			ref:      opts.Ref,
-			runner:   opts.Runner,
+			files:    files,
+			content:  content,
 			objcRule: objcRule,
 		},
-	}, filter, nil
+	}
+	withPlugins, err := loadPluginRules(resolver)
+	if err != nil {
+		return nil, nil, err
+	}
+	return withPlugins, filter, nil
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude

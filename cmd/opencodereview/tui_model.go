@@ -248,11 +248,13 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.err != nil {
+			m.refresh(false)
 			return m, nil
 		}
 		if msg.resume {
 			if err := m.prepareResume(msg.summary); err != nil {
 				m.notice, m.isError = err.Error(), true
+				m.refresh(false)
 				return m, nil
 			}
 			m.notice = "Session scope restored. /review to resume with the current model."
@@ -411,12 +413,13 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if count > 0 {
 					m.selected = max(0, min(count-1, m.selected+delta))
-					m.refresh(false)
-					m.ensureSelectionVisible()
 				} else {
 					m.moveHistory(delta)
 				}
 				m.refresh(false)
+				if count > 0 {
+					m.ensureSelectionVisible()
+				}
 				return m, nil
 			}
 			if len(m.history) > 0 {

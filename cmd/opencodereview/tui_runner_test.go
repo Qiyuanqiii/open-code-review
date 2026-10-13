@@ -71,6 +71,9 @@ func TestTUIReviewProcessHelper(t *testing.T) {
 		fmt.Fprintln(report, "invalid JSON")
 		os.Exit(0)
 	}
+	if mode == "empty" {
+		os.Exit(0)
+	}
 	if mode == "failure" {
 		fmt.Fprintln(os.Stderr, "credential helper needs interactive input")
 		os.Exit(1)
@@ -291,6 +294,17 @@ func TestTUIPreviewSubprocess(t *testing.T) {
 	preview, err := runTUIPreview(context.Background(), reviewOptions{})
 	if err != nil || preview.ReviewableCount != 1 || len(preview.Entries) != 1 {
 		t.Fatalf("preview = %+v, error = %v", preview, err)
+	}
+}
+
+func TestTUIEmptyResultReportsMissingOutput(t *testing.T) {
+	useTUIProcessHelper(t, "empty")
+	_, reviewErr := runTUIReview(context.Background(), reviewOptions{}, nil)
+	_, previewErr := runTUIPreview(context.Background(), reviewOptions{})
+	for _, err := range []error{reviewErr, previewErr} {
+		if err == nil || !strings.Contains(err.Error(), "review process produced no result") {
+			t.Fatalf("missing result diagnostic = %v", err)
+		}
 	}
 }
 

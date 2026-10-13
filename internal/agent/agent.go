@@ -298,8 +298,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if err := a.loadDiffs(ctx); err != nil {
 		diffSpan.End()
 		// Merge-base lookup may omit the context error from its diagnostic.
-		if cause := ctx.Err(); cause != nil {
-			err = cause
+		if cause := ctx.Err(); cause != nil && !errors.Is(err, cause) {
+			err = errors.Join(err, cause)
 		}
 		// The builder already exists (agent.New created session + manifest), but
 		// no item was selected yet. Record the run-level failure at this

@@ -166,6 +166,36 @@ func TestTUIResumePreservesReviewContract(t *testing.T) {
 	}
 }
 
+func TestTUISessionFailureRefreshesShortLayout(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resume=%v", resume), func(t *testing.T) {
+			m := testReviewTUI()
+			m.screen = tuiSessions
+			m.height = 10
+			for i := 0; i < 8; i++ {
+				m.sessions = append(m.sessions, session.Summary{SessionID: fmt.Sprintf("session-%d", i)})
+			}
+			_, id := m.beginJob("Loading session")
+			m.refresh(false)
+			msg := tuiSessionMsg{id: id, err: errors.New("session could not be loaded")}
+			if resume {
+				msg.err = nil
+				msg.resume = true
+				msg.summary = &session.Summary{RunManifest: &session.RunManifest{Operation: "scan"}}
+			}
+			next, _ := m.Update(msg)
+			m = next.(reviewTUIModel)
+			view := m.View().Content
+			if m.busy || !m.isError || m.notice == "" || !strings.Contains(view, m.notice) {
+				t.Fatal("session failure did not finish the job and display its diagnostic")
+			}
+			if rows := len(strings.Split(view, "\n")); rows > m.height {
+				t.Fatalf("session failure pushed the footer outside the terminal: %d > %d", rows, m.height)
+			}
+		})
+	}
+}
+
 func TestTUIFindingNavigation(t *testing.T) {
 	m := testReviewTUI()
 	m.screen = tuiResults

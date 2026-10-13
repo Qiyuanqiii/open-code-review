@@ -29,8 +29,11 @@ var tuiReviewCommand = exec.Command
 func runTUIReview(ctx context.Context, opts reviewOptions, progress func(string)) (jsonOutput, error) {
 	var result jsonOutput
 	data, runErr := runTUIProcess(ctx, opts, progress)
-	if len(data) == 0 && runErr != nil {
-		return result, runErr
+	if len(data) == 0 {
+		if runErr != nil {
+			return result, runErr
+		}
+		return result, errors.New("review process produced no result")
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, errors.Join(runErr, fmt.Errorf("decode review result: %w", err))
@@ -43,8 +46,11 @@ func runTUIPreview(ctx context.Context, opts reviewOptions) (model.Preview, erro
 	opts.preview = true
 	var result model.Preview
 	data, runErr := runTUIProcess(ctx, opts, nil)
-	if len(data) == 0 && runErr != nil {
-		return result, runErr
+	if len(data) == 0 {
+		if runErr != nil {
+			return result, runErr
+		}
+		return result, errors.New("review process produced no result")
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, errors.Join(runErr, fmt.Errorf("decode preview result: %w", err))

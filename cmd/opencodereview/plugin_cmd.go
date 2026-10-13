@@ -21,15 +21,16 @@ import (
 // pluginInfo is the public management view. It omits MCP arguments, environment
 // variables and authentication headers, which can contain credentials.
 type pluginInfo struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Enabled     bool     `json:"enabled"`
-	Source      string   `json:"source"`
-	Directory   string   `json:"directory"`
-	Rules       []string `json:"rules"`
-	MCPServers  []string `json:"mcp_servers"`
+	ID          string                     `json:"id"`
+	Name        string                     `json:"name"`
+	Version     string                     `json:"version"`
+	Description string                     `json:"description"`
+	Enabled     bool                       `json:"enabled"`
+	Source      string                     `json:"source"`
+	Directory   string                     `json:"directory"`
+	Rules       []string                   `json:"rules"`
+	MCPServers  []string                   `json:"mcp_servers"`
+	Review      *plugin.ReviewContribution `json:"review,omitempty"`
 }
 
 func pluginManagementInfo(installed plugin.Installed) pluginInfo {
@@ -39,7 +40,7 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return pluginInfo{m.ID, m.Name, m.Version, m.Description, installed.Enabled, plugin.DisplaySource(installed.Source), installed.Dir, append([]string{}, m.Rules...), names}
+	return pluginInfo{m.ID, m.Name, m.Version, m.Description, installed.Enabled, plugin.DisplaySource(installed.Source), installed.Dir, append([]string{}, m.Rules...), names, m.Review}
 }
 
 func pluginText(value string) string {
@@ -82,6 +83,9 @@ func newPluginCmd() *cobra.Command {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s)\n%s\nSource: %s\nPackage: %s\nRules: %s\nMCP servers: %s\n",
 			pluginText(info.ID), pluginText(info.Version), state, pluginText(info.Description), pluginText(info.Source),
 			pluginText(info.Directory), pluginText(strings.Join(info.Rules, ", ")), pluginText(strings.Join(info.MCPServers, ", ")))
+		if err == nil && info.Review != nil {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
+		}
 		return err
 	}
 	command.AddCommand(&cobra.Command{
@@ -109,7 +113,11 @@ func newPluginCmd() *cobra.Command {
 				if info.Enabled {
 					state = "enabled"
 				}
-				fmt.Fprintf(out, "%s\t%s\t%s\t%d rule packs, %d MCP servers\n", pluginText(info.ID), pluginText(info.Version), state, len(info.Rules), len(info.MCPServers))
+				capabilities := fmt.Sprintf("%d rule packs, %d MCP servers", len(info.Rules), len(info.MCPServers))
+				if info.Review != nil {
+					capabilities += ", review policy (explicit selection)"
+				}
+				fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", pluginText(info.ID), pluginText(info.Version), state, capabilities)
 			}
 			return out.Flush()
 		}),

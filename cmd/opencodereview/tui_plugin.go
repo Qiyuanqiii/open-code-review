@@ -389,6 +389,9 @@ func (m reviewTUIModel) pluginContent() string {
 			m.tr("Enable or disable: /plugin enable | /plugin disable"),
 			m.tr("Update or remove: /plugin update | /plugin remove"),
 			m.tr("Enabled MCP tools can execute code during reviews."))
+		if p.Review != nil {
+			lines = append(lines, "", m.tr("Run once: /review %s", pluginText(p.ID)))
+		}
 	} else if m.screen == tuiMarketDetails && m.marketDetail != nil {
 		p := m.marketDetail
 		lines = append(lines, pluginText(p.Name)+"  "+pluginText(p.Version)+"  ·  "+m.pluginState(p.ID),

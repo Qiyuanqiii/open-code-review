@@ -50,6 +50,7 @@ type reviewOptions struct {
 	maxTokens             int
 	maxTokensBudget       int
 	effort                string
+	reviewPlugin          string
 	noFilter              bool
 	preview               bool
 	tuiControlAddress     string
@@ -254,6 +255,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
+		BehaviorPrompt:        selectedReviewPrompt(cc.Resolver),
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,
@@ -325,7 +327,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
-	resultErr := reviewResultError(runErr, manifest)
+	resultErr := pluginReviewResultError(runErr, manifest, opts.reviewPlugin)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)
@@ -364,11 +366,32 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 		emitFailureUsage(ag, time.Since(startTime), failureUsageFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			if opts.reviewPlugin != "" {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (start a fresh review with --review-plugin %s)\n", id, opts.reviewPlugin)
+			} else {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			}
 		}
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func selectedReviewPrompt(resolver any) string {
+	if p, ok := resolver.(interface{ ReviewPrompt() string }); ok {
+		return p.ReviewPrompt()
+	}
+	return ""
+}
+
+func pluginReviewResultError(runErr error, manifest *session.RunManifest, reviewPlugin string) error {
+	if err := reviewResultError(runErr, manifest); err != nil {
+		return err
+	}
+	if reviewPlugin != "" && manifest != nil && manifest.TerminalState == session.StatePartial {
+		return fmt.Errorf("required plugin review work is incomplete; inspect behavior_review and manifest.coverage.failed")
+	}
+	return nil
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

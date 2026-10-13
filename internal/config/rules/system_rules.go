@@ -279,6 +279,8 @@ type composedResolver struct {
 // (currently only ".m": MATLAB vs Objective-C). The zero value is valid and
 // makes content reads use the working tree through the Git adapter.
 type ResolverOptions struct {
+	// ReviewPlugin opts into one installed review contribution without changing its saved state.
+	ReviewPlugin string
 	// Files reads content at Content. Its zero Content selects the workspace,
 	// including when the legacy Ref field is also set.
 	Files   vcs.FileSource
@@ -360,7 +362,7 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 			objcRule: objcRule,
 		},
 	}
-	withPlugins, err := loadPluginRules(resolver)
+	withPlugins, err := loadPluginRules(resolver, opts.ReviewPlugin)
 	if err != nil {
 		return nil, nil, err
 	}

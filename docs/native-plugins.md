@@ -1,9 +1,13 @@
 # Native OCR plugins and marketplaces
 
-OCR can host plugins that contribute review rules and MCP tools. A package can
-provide either capability or both. The CLI and interactive TUI share the same
+OCR can host plugins that contribute review rules, MCP tools and an explicitly
+selected review policy. The CLI and interactive TUI share the same
 installer, registry, and runtime. These packages use `ocr-plugin.json` and are
 separate from the integrations that install OCR into other coding agents.
+
+[Review policy plugins](behavior-review-plugins.md) run through a host-owned
+three-stage engine. Start one with `ocr review --review-plugin ID` or TUI
+`/review ID`. Selecting a policy affects that invocation only.
 
 ## Try the bundled marketplace
 
@@ -45,7 +49,7 @@ including executing their server commands with your account's permissions.
 | `ocr plugin show ID` | Show source, package location, and contributed capabilities |
 | `ocr plugin install PATH` | Copy a local directory or ZIP package |
 | `ocr plugin install ID@MARKET` | Install the selected marketplace entry |
-| `ocr plugin enable ID` / `disable ID` | Change contributions for subsequent reviews |
+| `ocr plugin enable ID` / `disable ID` | Change rule and MCP contributions for subsequent reviews |
 | `ocr plugin update ID` | Replace the snapshot from its original source; preserve enabled state |
 | `ocr plugin remove ID` | Unregister a package |
 | `ocr plugin market add NAME SOURCE` | Register a local or HTTPS catalog and cache it |
@@ -106,8 +110,8 @@ Place `ocr-plugin.json` at the root of a directory or ZIP archive:
   underscores, or hyphens, with an alphanumeric first and last character, at
   most 64 characters. Windows reserved filenames are rejected.
 - `name` and `version` are required nonempty strings. Change the version when
-  publishing a different release. At least one rule pack or MCP server is
-  required.
+  publishing a different release. At least one rule pack, MCP server or review
+  policy is required.
 - `rules` contains relative `.json` paths. All packaged files must be regular
   files or directories. Symlinks, traversal, absolute paths, conflicting names,
   and special files are rejected.

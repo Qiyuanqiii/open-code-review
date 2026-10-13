@@ -17,7 +17,7 @@ type tuiCommand struct {
 }
 
 var tuiCommands = []tuiCommand{
-	{"/review", "Start a review of the selected scope", "/review", true},
+	{"/review", "Start a review of the selected scope", "/review [PLUGIN_ID]", true},
 	{"/preview", "List files without calling the model", "/preview", true},
 	{"/scope", "Select the changes to review", "/scope workspace | range BASE HEAD | commit REF", false},
 	{"/settings", "Change the interface language", "/settings", true},

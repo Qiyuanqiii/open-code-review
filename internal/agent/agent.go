@@ -54,6 +54,9 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	// BehaviorPrompt selects the behavior-v1 engine for this invocation only.
+	BehaviorPrompt string
+
 	// RepoDir is the root of the git repository.
 	RepoDir string
 
@@ -189,6 +192,8 @@ type RuntimeConfig struct {
 // compression / token aggregation now live in internal/llmloop.Runner; this
 // struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
+	behaviorMu      sync.Mutex
+	behaviorReports []BehaviorReport
 	args            Args
 	diffs           []model.Diff // parsed diffs
 	totalInsertions int64
@@ -656,7 +661,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	sem := make(chan struct{}, concurrency)
-	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
+	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.reviewRounds())
 
 	var dispatched int64
 dispatchLoop:
@@ -767,7 +772,7 @@ dispatchLoop:
 					var failedCount int64
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
+						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 && !stop.required {
 							a.markCompleted(d)
 							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
 							continue
@@ -1045,6 +1050,9 @@ func (a *Agent) sourceArtifactSHA256() string {
 // digest. Rule order is significant (first match wins) and never sorted.
 func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
+	if a.args.BehaviorPrompt != "" {
+		fields = append(fields, "review_engine", "behavior-v1", "policy", a.args.BehaviorPrompt)
+	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)
 	}
@@ -1210,7 +1218,7 @@ func classifyItemError(err error) (session.FailureClass, string) {
 // json runs the progress lines that would say why an item stopped are discarded,
 // so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget {
+	if stop == llmloop.StopMaxRounds || stop == llmloop.StopTokenBudget || stop == llmloop.StopCompletionBudget {
 		return session.FailureBudget, stop.Reason()
 	}
 	return session.FailureUnknown, stop.Reason()
@@ -1223,6 +1231,8 @@ func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, stri
 // detailed human-facing text preserved for the legacy RecordReviewItemFailed
 // resume record (unchanged behavior).
 type subtaskStop struct {
+	// Findings do not complete missing required stages.
+	required      bool
 	class         session.FailureClass
 	reason        string
 	checkpoint    string
@@ -1365,6 +1375,9 @@ func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
 // for a non-error early exit (token budget, main-loop stop) carrying the manifest
 // class recorded at its trigger point. A completed review returns (true, nil, nil).
 func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
+	if a.args.BehaviorPrompt != "" {
+		return a.executeBehaviorReview(ctx, g)
+	}
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()

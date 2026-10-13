@@ -26,6 +26,13 @@ type Manifest struct {
 	Description   string               `json:"description,omitempty"`
 	Rules         []string             `json:"rules,omitempty"`
 	MCPServers    map[string]MCPServer `json:"mcp_servers,omitempty"`
+	Review        *ReviewContribution  `json:"review,omitempty"`
+}
+
+// ReviewContribution selects a host engine and a package policy for an explicit run.
+type ReviewContribution struct {
+	Engine string `json:"engine"`
+	Prompt string `json:"prompt"`
 }
 
 // MCPServer supports the existing stdio and remote MCP transports. Installation
@@ -66,8 +73,19 @@ func (m Manifest) Validate() error {
 	if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Version) == "" {
 		return fmt.Errorf("plugin name and version are required")
 	}
-	if len(m.Rules) == 0 && len(m.MCPServers) == 0 {
-		return fmt.Errorf("plugin must contribute rules or MCP servers")
+	if len(m.Rules) == 0 && len(m.MCPServers) == 0 && m.Review == nil {
+		return fmt.Errorf("plugin must contribute rules, MCP servers or a review policy")
+	}
+	if m.Review != nil {
+		if m.Review.Engine != "behavior-v1" {
+			return fmt.Errorf("unsupported review engine %q (expected behavior-v1)", m.Review.Engine)
+		}
+		if err := safeRelativePath(m.Review.Prompt); err != nil {
+			return fmt.Errorf("invalid review prompt path: %w", err)
+		}
+		if !strings.HasSuffix(m.Review.Prompt, ".md") {
+			return fmt.Errorf("review prompt must name a Markdown file")
+		}
 	}
 	seen := make(map[string]bool)
 	for _, rule := range m.Rules {

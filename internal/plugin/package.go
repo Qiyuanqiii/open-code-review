@@ -116,6 +116,11 @@ func inspectPackage(ctx context.Context, root string) (Manifest, error) {
 			return m, fmt.Errorf("rule %q must be an existing regular file", rule)
 		}
 	}
+	if m.Review != nil {
+		if _, err := ReviewPrompt(Installed{Manifest: m, Dir: root}); err != nil {
+			return m, err
+		}
+	}
 	return m, nil
 }
 

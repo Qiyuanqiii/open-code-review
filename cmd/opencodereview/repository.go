@@ -23,8 +23,9 @@ func prepareRepositoryReview(ctx context.Context, cc *commonContext, opts review
 		return fmt.Errorf("resolve review input: %w", err)
 	}
 	resolver, filter, err := rules.NewResolver(cc.RepoDir, opts.rulePath, rules.ResolverOptions{
-		Files:   cc.Repository,
-		Content: resolved.Content,
+		ReviewPlugin: opts.reviewPlugin,
+		Files:        cc.Repository,
+		Content:      resolved.Content,
 	})
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)

@@ -24,7 +24,62 @@ import (
 	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+func TestScanPluginSetupErrorsRecordTrace(t *testing.T) {
+	for _, mode := range []string{"canceled", "collision"} {
+		t.Run(mode, func(t *testing.T) {
+			store := pluginRuntimeHome(t)
+			marker := filepath.Join(t.TempDir(), "started")
+			installRuntimePlugin(t, store, marker, true)
+			repo := initRulesCheckTestRepo(t)
+			gitCommitFile(t, repo, "main.go", "package main\n", "initial")
+			t.Setenv("OCR_LLM_URL", "http://127.0.0.1:1/v1/messages")
+			t.Setenv("OCR_LLM_TOKEN", "test-token")
+			t.Setenv("OCR_LLM_MODEL", "test")
+			t.Setenv("OCR_LLM_PROTOCOL", "anthropic")
+			if mode == "collision" {
+				path, err := defaultConfigPath()
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg := &Config{MCPServers: map[string]MCPServerConfig{"plugin/runtime/tools": {Command: "user-command"}}}
+				if err := saveConfig(path, cfg); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+			ctx, span := provider.Tracer("test").Start(context.Background(), "scan-caller")
+			defer span.End()
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			if mode == "canceled" {
+				cancel()
+			}
+			err := executeScanContext(ctx, scanOptions{repoDir: repo, paths: "main.go", outputFormat: "json", audience: "agent", concurrency: 1, maxGitProcs: 2})
+			if err == nil || (mode == "canceled" && !errors.Is(err, context.Canceled)) || (mode == "collision" && !strings.Contains(err.Error(), "conflicts")) {
+				t.Fatalf("unexpected setup error: %v", err)
+			}
+			span.End()
+			ended := recorder.Ended()
+			if len(ended) != 1 || ended[0].Status().Code != codes.Error || ended[0].Status().Description != err.Error() {
+				t.Fatalf("setup failure missing from trace: %+v", ended)
+			}
+			events := ended[0].Events()
+			if len(events) != 1 || events[0].Name != "exception" {
+				t.Fatalf("setup error event missing: %+v", events)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("failed setup started a plugin: %v", err)
+			}
+		})
+	}
+}
 
 const pluginRuntimeServerEnv = "_OCR_PLUGIN_RUNTIME_SERVER"
 

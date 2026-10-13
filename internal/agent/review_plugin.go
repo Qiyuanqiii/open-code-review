@@ -26,8 +26,8 @@ var errReviewPlugin = errors.New("review plugin failed")
 
 func (a *Agent) PluginReviewReports() []PluginReviewReport {
 	a.pluginReviewMu.Lock()
-	defer a.pluginReviewMu.Unlock()
 	out := append([]PluginReviewReport(nil), a.pluginReviewReports...)
+	a.pluginReviewMu.Unlock()
 	// Stages are appended in package order within each group.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Group < out[j].Group })
 	return out
@@ -175,9 +175,16 @@ func pluginReviewTools(defs []llm.ToolDef, completion plugin.ReviewCompletion) [
 
 func validatePluginComments(comments []model.LlmComment, paths []string) error {
 	severities, categories := tool.CodeCommentClassifications()
-	for _, comment := range comments {
-		if !slices.Contains(paths, comment.Path) || strings.TrimSpace(comment.Content) == "" || !slices.Contains(severities, comment.Severity) || !slices.Contains(categories, comment.Category) {
-			return fmt.Errorf("plugin finding requires a selected path, content and native severity/category")
+	for i, comment := range comments {
+		switch {
+		case !slices.Contains(paths, comment.Path):
+			return fmt.Errorf("plugin finding %d: path %q is not selected", i+1, comment.Path)
+		case strings.TrimSpace(comment.Content) == "":
+			return fmt.Errorf("plugin finding %d: content must not be empty", i+1)
+		case !slices.Contains(severities, comment.Severity):
+			return fmt.Errorf("plugin finding %d: unsupported severity %q", i+1, comment.Severity)
+		case !slices.Contains(categories, comment.Category):
+			return fmt.Errorf("plugin finding %d: unsupported category %q", i+1, comment.Category)
 		}
 	}
 	return nil

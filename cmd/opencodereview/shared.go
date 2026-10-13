@@ -880,10 +880,16 @@ func emitRunResult(
 		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
 			groups = p.FileGroups()
 		}
+		var reports []agent.PluginReviewReport
+		if p, ok := ag.(interface {
+			PluginReviewReports() []agent.PluginReviewReport
+		}); ok {
+			reports = p.PluginReviewReports()
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, reports)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)

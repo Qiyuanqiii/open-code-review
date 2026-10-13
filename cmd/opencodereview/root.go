@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)
+	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(completionCmd)
 }
 

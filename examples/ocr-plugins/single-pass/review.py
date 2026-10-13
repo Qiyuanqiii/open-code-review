@@ -8,9 +8,15 @@ import sys
 
 
 def respond(request):
+    if not isinstance(request, dict):
+        return {"version": 1, "error": "Request must be a JSON object"}
     if request.get("version") != 1 or request.get("stage") != "review":
         return {"version": 1, "error": "Unsupported protocol or stage"}
-    if request["method"] == "begin":
+    if request.get("method") == "begin":
+        for field in ("severities", "categories"):
+            values = request.get(field)
+            if not isinstance(values, list) or not values or not all(isinstance(value, str) and value.strip() for value in values):
+                return {"version": 1, "error": f"{field} must be a nonempty array of strings"}
         finding = {
             "type": "object",
             "properties": {
@@ -33,9 +39,9 @@ def respond(request):
                 }, "required": ["complete", "summary", "comments"],
             }},
         }}
-    if request["method"] == "submit":
+    if request.get("method") == "submit":
         args = request.get("arguments", {})
-        if type(args.get("complete")) is not bool or not isinstance(args.get("summary"), str) or not args["summary"].strip() or not isinstance(args.get("comments"), list):
+        if not isinstance(args, dict) or type(args.get("complete")) is not bool or not isinstance(args.get("summary"), str) or not args["summary"].strip() or not isinstance(args.get("comments"), list):
             return {"version": 1, "accepted": False, "feedback": "Supply a boolean complete, nonempty summary and comments array."}
         return {"version": 1, "accepted": True, "complete": args["complete"], "report": {"summary": args["summary"]}, "comments": args["comments"], "feedback": "" if args["complete"] else args["summary"]}
     return {"version": 1, "error": "Unsupported method"}
@@ -45,4 +51,10 @@ if __name__ == "__main__":
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     for line in sys.stdin:
-        print(json.dumps(respond(json.loads(line)), ensure_ascii=True), flush=True)
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            response = {"version": 1, "error": "Invalid JSON request"}
+        else:
+            response = respond(request)
+        print(json.dumps(response, ensure_ascii=True), flush=True)

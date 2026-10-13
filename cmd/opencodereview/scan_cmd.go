@@ -209,10 +209,14 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "scan.run")
 	defer span.End()
 	if err := ctx.Err(); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return err
 	}
 	mcpClients, err := initRuntimeMCPClients(ctx, rt.AppCfg, cc.Resolver, tools, cc.RepoDir, Version)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return err
 	}
 	defer closeReviewMCPClients(mcpClients)

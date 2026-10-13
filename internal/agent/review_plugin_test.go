@@ -29,6 +29,35 @@ type pluginReviewClient struct {
 	requests []llm.ChatRequest
 }
 
+func TestValidatePluginCommentsIdentifiesInvalidFinding(t *testing.T) {
+	valid := model.LlmComment{Path: "good.go", Content: "A value is lost.", Severity: "medium", Category: "bug"}
+	paths := []string{"good.go"}
+	for _, tc := range []struct {
+		field string
+		edit  func(*model.LlmComment)
+	}{
+		{"path", func(c *model.LlmComment) { c.Path = "outside.go" }},
+		{"content", func(c *model.LlmComment) { c.Content = " \n\t" }},
+		{"severity", func(c *model.LlmComment) { c.Severity = "urgent" }},
+		{"category", func(c *model.LlmComment) { c.Category = "unknown" }},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			invalid := valid
+			tc.edit(&invalid)
+			err := validatePluginComments([]model.LlmComment{valid, invalid}, paths)
+			if err == nil || !strings.Contains(err.Error(), "plugin finding 2:") || !strings.Contains(err.Error(), tc.field) {
+				t.Fatalf("diagnostic must identify the finding and field: %v", err)
+			}
+		})
+	}
+	if err := validatePluginComments([]model.LlmComment{valid}, paths); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePluginComments(nil, paths); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPluginStartupCancellationClassification(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "good.go", Diff: "+value", Insertions: 1}}
 	a := newManifestFlowAgentWithClient(t, diffs, nil, &pluginReviewClient{})

@@ -305,11 +305,18 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if err := a.loadDiffs(ctx); err != nil {
 		diffSpan.End()
 		// The builder already exists (agent.New created session + manifest), but
-		// no item was selected yet. Record the run-level input failure at this
+		// no item was selected yet. Record the run-level failure at this
 		// trigger point, then finalize and persist so the run still emits a
 		// session_end with a failed manifest instead of looking aborted.
 		if b := a.session.Manifest(); b != nil {
-			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
+			class, reason := session.RunFailureInput, "failed to resolve review input"
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				class, reason = session.RunFailureTimeout, "review input deadline exceeded"
+			case errors.Is(err, context.Canceled):
+				class, reason = session.RunFailureCancelled, "review was cancelled"
+			}
+			_ = b.SetRunFailure(class, reason)
 		}
 		manifestErr := a.finalizeManifest()
 		// Keep the load failure as the primary cause, but never drop a persistence

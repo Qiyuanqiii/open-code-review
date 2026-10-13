@@ -25,6 +25,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 )
 
 // changeFilesScanLiteral substitutes for the {{change_files}} placeholder.
@@ -56,6 +57,7 @@ type Args struct {
 	Model                 string
 	Background            string
 	GitRunner             *gitcmd.Runner
+	Files                 vcs.FileSource // nil uses the Git workspace adapter
 	Session               *session.SessionHistory
 	// Resume is an optional read-only checkpoint index from a previous scan
 	// session.
@@ -300,6 +302,13 @@ func resumedFromSession(resume *session.ResumeState) string {
 	return resume.SessionID
 }
 
+func (a *Agent) fileProvider() *Provider {
+	if a.args.Files == nil {
+		return NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
+	}
+	return NewProviderWithSource(a.args.RepoDir, a.args.Paths, a.args.Files, a.args.MaxFileSizeBytes)
+}
+
 // Run executes the full-scan pipeline: enumerate → filter → token-filter →
 // dispatch one subtask per file → collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
@@ -315,7 +324,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
 	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
-	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
+	provider := a.fileProvider()
 	items, err := provider.Enumerate(ctx)
 	if err != nil {
 		scanSpan.End()

@@ -198,6 +198,7 @@ func executeScan(opts scanOptions) (retErr error) {
 		RepoDir: cc.RepoDir,
 		Mode:    tool.ModeWorkspace,
 		Runner:  cc.GitRunner,
+		Source:  cc.Repository,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
@@ -217,6 +218,7 @@ func executeScan(opts scanOptions) (retErr error) {
 		Model:                 rt.Model,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		Files:                 cc.Repository,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
 		MaxTokensBudget:       budget,
 		SkipPlan:              opts.noPlan,
@@ -278,6 +280,7 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		Paths:            scanPaths,
 		FileFilter:       cc.FileFilter,
 		GitRunner:        cc.GitRunner,
+		Files:            cc.Repository,
 		MaxFileSizeBytes: scanTpl.MaxFileSizeBytes,
 		// Template's prompt fields are unused by Preview; pass the same
 		// value so MaxFileSizeBytes is consistent.

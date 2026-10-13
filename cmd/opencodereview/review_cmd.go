@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/vcs"
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
@@ -156,8 +157,20 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
 		return err
 	}
+	if err := prepareRepositoryReview(ctx, cc, opts); err != nil {
+		// A fresh run cancelled during preflight still follows the normal
+		// failed-run reporting path so the TUI receives its saved JSON result.
+		// Preview and resume admission must remain free of session writes.
+		if ctx.Err() == nil || opts.preview || opts.resume != "" {
+			return err
+		}
+	}
 
-	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	backgroundCommit := opts.commit
+	if backgroundCommit != "" && cc.Review != nil {
+		backgroundCommit = cc.Review.Head
+	}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, backgroundCommit)
 	if err != nil {
 		return err
 	}
@@ -204,17 +217,25 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
+	resolvedReview := cc.Review
 	var sealedInput *diff.InputResolution
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
+		resolvedReview = &sealed.Review
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	readContent := vcs.ContentRef{Revision: fileReadRef(mode, opts, sealedInput)}
+	if resolvedReview != nil {
+		readContent = resolvedReview.Content
+	}
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
 		Ref:     fileReadRef(mode, opts, sealedInput),
 		Runner:  cc.GitRunner,
+		Source:  cc.Repository,
+		Content: readContent,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
@@ -246,6 +267,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Provider:              rt.Provider,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		Repository:            cc.Repository,
+		ResolvedReview:        resolvedReview,
 		Resume:                resumeState,
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
@@ -414,15 +437,17 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		ReviewMode:     reviewModeFromOptions(opts),
+		Template:       *cc.Template,
+		SystemRule:     cc.Resolver,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -529,13 +554,15 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	tpl.MaxTokens = maxTokens
 
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		Template:   tpl,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		Template:       tpl,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		Repository:     cc.Repository,
+		ResolvedReview: cc.Review,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

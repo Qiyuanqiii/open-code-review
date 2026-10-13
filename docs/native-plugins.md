@@ -1,13 +1,14 @@
 # Native OCR plugins and marketplaces
 
 OCR can host plugins that contribute review rules, MCP tools and an explicitly
-selected review policy. The CLI and interactive TUI share the same
+selected review workflow. The CLI and interactive TUI share the same
 installer, registry, and runtime. These packages use `ocr-plugin.json` and are
 separate from the integrations that install OCR into other coding agents.
 
-[Review policy plugins](behavior-review-plugins.md) run through a host-owned
-three-stage engine. Start one with `ocr review --review-plugin ID` or TUI
-`/review ID`. Selecting a policy affects that invocation only.
+[Review workflow plugins](review-workflow-plugins.md) provide their own stage plan,
+prompts and validators through a local process. Start one with
+`ocr review --review-plugin ID` or TUI `/review ID`. Selection affects that
+invocation only.
 
 ## Try the bundled marketplace
 

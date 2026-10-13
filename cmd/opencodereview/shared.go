@@ -886,9 +886,11 @@ func emitRunResult(
 		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
 			groups = p.FileGroups()
 		}
-		var reports []agent.BehaviorReport
-		if p, ok := ag.(interface{ BehaviorReports() []agent.BehaviorReport }); ok {
-			reports = p.BehaviorReports()
+		var reports []agent.PluginReviewReport
+		if p, ok := ag.(interface {
+			PluginReviewReports() []agent.PluginReviewReport
+		}); ok {
+			reports = p.PluginReviewReports()
 		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),

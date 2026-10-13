@@ -5,6 +5,8 @@ package rules
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -14,8 +16,8 @@ import (
 func TestReviewPluginIsInvocationScoped(t *testing.T) {
 	store := pluginRuleTestHome(t)
 	source := t.TempDir()
-	writePluginRuleFile(t, source, plugin.ManifestFilename, `{"schema_version":1,"id":"behavior","name":"Behavior","version":"1","review":{"engine":"behavior-v1","prompt":"policy.md"}}`)
-	writePluginRuleFile(t, source, "policy.md", "Selected behavior policy.")
+	writePluginRuleFile(t, source, plugin.ManifestFilename, `{"schema_version":1,"id":"example","name":"Behavior","version":"1","review":{"protocol":"stdio-v1","command":"example-reviewer","stages":["inspect"]}}`)
+	writePluginRuleFile(t, source, "policy.md", "Selected example policy.")
 	if _, err := store.Install(context.Background(), source, false); err != nil {
 		t.Fatal(err)
 	}
@@ -29,8 +31,8 @@ func TestReviewPluginIsInvocationScoped(t *testing.T) {
 		return r.(*pluginResolver)
 	}
 	ordinary := resolve("")
-	selected := resolve("behavior")
-	if ordinary.ReviewPrompt() != "" || selected.ReviewPrompt() != "Selected behavior policy." {
+	selected := resolve("example")
+	if ordinary.ReviewPlugin() != nil || selected.ReviewPlugin() == nil {
 		t.Fatal("selection lost")
 	}
 	if ordinary.Resolve("main.go") != selected.Resolve("main.go") {
@@ -46,21 +48,23 @@ func TestReviewPluginIsInvocationScoped(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].Enabled {
 		t.Fatalf("saved state changed: %+v %v", items, err)
 	}
-	if resolve("").ReviewPrompt() != "" {
+	if resolve("").ReviewPlugin() != nil {
 		t.Fatal("selection persisted")
 	}
-	if err := store.SetEnabled("behavior", true); err != nil {
+	if err := store.SetEnabled("example", true); err != nil {
 		t.Fatal(err)
 	}
-	if resolve("").ReviewPrompt() != "" {
+	if resolve("").ReviewPlugin() != nil {
 		t.Fatal("global enable activated a review policy")
 	}
 	writePluginRuleFile(t, source, "policy.md", "Updated policy.")
-	if _, err := store.Update(context.Background(), "behavior"); err != nil {
+	if _, err := store.Update(context.Background(), "example"); err != nil {
 		t.Fatal(err)
 	}
-	updated := resolve("behavior")
-	if selected.ReviewPrompt() != "Selected behavior policy." || updated.ReviewPrompt() != "Updated policy." {
+	updated := resolve("example")
+	before, _ := os.ReadFile(filepath.Join(selected.ReviewPlugin().Dir, "policy.md"))
+	after, _ := os.ReadFile(filepath.Join(updated.ReviewPlugin().Dir, "policy.md"))
+	if string(before) != "Selected example policy." || string(after) != "Updated policy." {
 		t.Fatal("snapshot changed during run")
 	}
 	if reflect.DeepEqual(selected.CanonicalConfig(), updated.CanonicalConfig()) {

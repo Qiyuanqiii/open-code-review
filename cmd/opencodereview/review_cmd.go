@@ -18,6 +18,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -255,7 +256,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
-		BehaviorPrompt:        selectedReviewPrompt(cc.Resolver),
+		ReviewPlugin:          selectedReviewPlugin(cc.Resolver),
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,
@@ -377,11 +378,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	return emitErr
 }
 
-func selectedReviewPrompt(resolver any) string {
-	if p, ok := resolver.(interface{ ReviewPrompt() string }); ok {
-		return p.ReviewPrompt()
+func selectedReviewPlugin(resolver any) *plugin.Installed {
+	if p, ok := resolver.(interface{ ReviewPlugin() *plugin.Installed }); ok {
+		return p.ReviewPlugin()
 	}
-	return ""
+	return nil
 }
 
 func pluginReviewResultError(runErr error, manifest *session.RunManifest, reviewPlugin string) error {
@@ -389,7 +390,7 @@ func pluginReviewResultError(runErr error, manifest *session.RunManifest, review
 		return err
 	}
 	if reviewPlugin != "" && manifest != nil && manifest.TerminalState == session.StatePartial {
-		return fmt.Errorf("required plugin review work is incomplete; inspect behavior_review and manifest.coverage.failed")
+		return fmt.Errorf("required plugin review work is incomplete; inspect review_plugin and manifest.coverage.failed")
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -31,6 +32,10 @@ type TaskOptions struct {
 }
 
 type taskOptionsKey struct{}
+
+// ErrCompletionUnavailable stops a task when its validator cannot run. Invalid
+// model submissions return ordinary errors and remain eligible for correction.
+var ErrCompletionUnavailable = errors.New("completion handler unavailable")
 
 const scopedCompletionPrompt = "Submit the required task_done report now. Address every required item and any validation errors. Do not invent missing evidence; record incomplete work as required by the task. Only task_done is available. No further investigation is allowed."
 
@@ -102,6 +107,9 @@ func (r *Runner) completeTask(ctx context.Context, taskKey string, args map[stri
 	}
 	comments, err := opts.Complete(args)
 	if err != nil {
+		if errors.Is(err, ErrCompletionUnavailable) {
+			return tool.Fail(err.Error())
+		}
 		message := fmt.Sprintf("Error: completion report rejected: %v", err)
 		if rec != nil {
 			rec.AddToolResult("task_done", "", message)
@@ -111,16 +119,16 @@ func (r *Runner) completeTask(ctx context.Context, taskKey string, args map[stri
 	if len(comments) > 0 {
 		data, err := json.Marshal(map[string]any{"comments": comments})
 		if err != nil {
-			return tool.Fail(fmt.Sprintf("encode adjudicated comments: %v", err))
+			return tool.Fail(fmt.Sprintf("encode accepted comments: %v", err))
 		}
 		// This internal publication is authorized by the completion contract;
-		// the model cannot bypass adjudication by calling code_comment directly.
+		// the model cannot bypass the validator by calling code_comment directly.
 		publishCtx := context.WithValue(ctx, taskOptionsKey{}, (*TaskOptions)(nil))
 		cp := r.executeToolCall(publishCtx, taskKey, llm.ToolCall{
 			Type: "function", Function: llm.FunctionCall{Name: "code_comment", Arguments: string(data)},
 		}, rec, thinking)
 		if cp.Failed || cp.Data != tool.CommentSucceed {
-			return tool.Fail("adjudicated comments could not be published: " + cp.Data)
+			return tool.Fail("accepted comments could not be published: " + cp.Data)
 		}
 	}
 	return tool.Complete()

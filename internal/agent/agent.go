@@ -30,6 +30,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -54,8 +55,8 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
-	// BehaviorPrompt selects the behavior-v1 engine for this invocation only.
-	BehaviorPrompt string
+	// ReviewPlugin is the explicitly selected package snapshot for this invocation.
+	ReviewPlugin *plugin.Installed
 
 	// RepoDir is the root of the git repository.
 	RepoDir string
@@ -192,18 +193,18 @@ type RuntimeConfig struct {
 // compression / token aggregation now live in internal/llmloop.Runner; this
 // struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
-	behaviorMu      sync.Mutex
-	behaviorReports []BehaviorReport
-	args            Args
-	diffs           []model.Diff // parsed diffs
-	totalInsertions int64
-	totalDeletions  int64
-	currentDate     string
-	session         *session.SessionHistory
-	subtaskFailed   int64 // count of failed subtasks, accessed atomically
-	runner          *llmloop.Runner
-	resumeInfo      *ResumeInfo
-	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
+	pluginReviewMu      sync.Mutex
+	pluginReviewReports []PluginReviewReport
+	args                Args
+	diffs               []model.Diff // parsed diffs
+	totalInsertions     int64
+	totalDeletions      int64
+	currentDate         string
+	session             *session.SessionHistory
+	subtaskFailed       int64 // count of failed subtasks, accessed atomically
+	runner              *llmloop.Runner
+	resumeInfo          *ResumeInfo
+	budgetExceeded      atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
 	fileGroups []FileGroup // semantic grouping result, stored for JSON output
 
@@ -1050,8 +1051,9 @@ func (a *Agent) sourceArtifactSHA256() string {
 // digest. Rule order is significant (first match wins) and never sorted.
 func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
-	if a.args.BehaviorPrompt != "" {
-		fields = append(fields, "review_engine", "behavior-v1", "policy", a.args.BehaviorPrompt)
+	if a.args.ReviewPlugin != nil {
+		manifest, _ := json.Marshal(a.args.ReviewPlugin.Manifest)
+		fields = append(fields, "review_plugin", string(manifest), "directory", a.args.ReviewPlugin.Dir)
 	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)
@@ -1199,6 +1201,8 @@ func classifyItemError(err error) (session.FailureClass, string) {
 		return session.FailureCancelled, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
 		return session.FailureConfiguration, "review template main_task is empty"
+	case errors.Is(err, errReviewPlugin):
+		return session.FailureUnknown, "review plugin execution or protocol failed"
 	default:
 		return session.FailureProvider, "provider or subtask request failed"
 	}
@@ -1375,8 +1379,8 @@ func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
 // for a non-error early exit (token budget, main-loop stop) carrying the manifest
 // class recorded at its trigger point. A completed review returns (true, nil, nil).
 func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
-	if a.args.BehaviorPrompt != "" {
-		return a.executeBehaviorReview(ctx, g)
+	if a.args.ReviewPlugin != nil {
+		return a.executePluginReview(ctx, g)
 	}
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)

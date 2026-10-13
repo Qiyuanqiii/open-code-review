@@ -480,6 +480,9 @@ func (m reviewTUIModel) work(run func() tea.Msg) tea.Cmd {
 func (m reviewTUIModel) startReview(preview bool) (tea.Model, tea.Cmd) {
 	ctx, id := m.beginJob("Reviewing")
 	opts := m.opts
+	if opts.reviewPlugin != "" {
+		opts.resume = ""
+	}
 	m.progress = &tuiProgressTail{}
 	m.screen = tuiLog
 	m.viewport.GotoTop()
@@ -572,11 +575,18 @@ func (m reviewTUIModel) command(line string) (tea.Model, tea.Cmd) {
 	case "/plugin":
 		return m.pluginCommand(arg)
 	case "/review", "/preview":
-		if arg != "" {
-			m.notice, m.isError = "Use /background to describe the changes, then /review.", true
+		if strings.ContainsAny(arg, " \t\r\n") || strings.HasPrefix(arg, "-") {
+			m.notice, m.isError = "Use /review [PLUGIN_ID] or /preview [PLUGIN_ID].", true
 			break
 		}
-		return m.startReview(name == "/preview")
+		if arg != "" {
+			m.opts.reviewPlugin = arg
+		}
+		next, cmd := m.startReview(name == "/preview")
+		updated := next.(reviewTUIModel)
+		// startReview captures its options; later commands must opt in again.
+		updated.opts.reviewPlugin = ""
+		return updated, cmd
 	case "/scope":
 		parts := strings.Fields(arg)
 		opts := m.opts

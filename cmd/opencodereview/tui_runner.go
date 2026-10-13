@@ -60,6 +60,7 @@ func tuiReviewArgs(opts reviewOptions, address string) []string {
 		{"resume", opts.resume}, {"tools", opts.toolConfigPath}, {"rule", opts.rulePath},
 		{"exclude", opts.excludes}, {"background", opts.background}, {"background-file", opts.backgroundFile},
 		{"provider", opts.provider}, {"model", opts.model}, {"effort", opts.effort},
+		{"review-plugin", opts.reviewPlugin},
 	} {
 		if flag.value != "" {
 			args = append(args, "--"+flag.name, flag.value)

@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)
+	rootCmd.AddCommand(newTUICmd())
 	rootCmd.AddCommand(completionCmd)
 }
 
@@ -71,7 +72,7 @@ func commandNeedsGit(cmd *cobra.Command) bool {
 		topLevel = topLevel.Parent()
 	}
 	switch topLevel.Name() {
-	case "review", "scan", "delegate":
+	case "review", "scan", "delegate", "tui":
 		return true
 	default:
 		return false

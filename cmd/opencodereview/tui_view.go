@@ -103,6 +103,9 @@ func (m reviewTUIModel) View() tea.View {
 			state := m.tr(m.jobName)
 			if m.stopping {
 				state = m.tr("Saving results…")
+				if m.pluginJob {
+					state = m.tr("Stopping…")
+				}
 			}
 			status = "● " + state + "  " + time.Since(m.started).Truncate(time.Second).String()
 		}
@@ -115,9 +118,20 @@ func (m reviewTUIModel) View() tea.View {
 		} else if m.screen == tuiFinding || m.screen == tuiHelp || m.screen == tuiResults || m.screen == tuiSessions {
 			hint = m.tr("PgUp/PgDn scroll · Esc back")
 		}
+		if !m.busy && m.isPluginScreen() {
+			hint = m.tr("↑/↓ select · Enter details · /plugin actions · Esc back")
+			if m.screen == tuiPluginDetails || m.screen == tuiMarketDetails || m.pluginError != "" {
+				hint = m.tr("PgUp/PgDn scroll · /plugin actions · Esc back")
+			}
+		}
 		lines = append(lines, m.tint(ansi.Truncate(status, w, "…"), tuiBrandMuted), m.tint(ansi.Truncate(hint, w, "…"), tuiBrandMuted))
 	}
 	body := lipgloss.NewStyle().Padding(0, 2).Render(strings.Join(lines, "\n"))
+	rows := strings.Split(body, "\n")
+	for i := range rows {
+		rows[i] = ansi.Truncate(rows[i], m.width, "")
+	}
+	body = strings.Join(rows, "\n")
 	v := tea.NewView(body)
 	v.AltScreen = true
 	if m.colored {
@@ -162,7 +176,7 @@ func (m reviewTUIModel) homeContent() string {
 	if inner >= tuiBrandFullWidth && m.viewport.Height() >= 17 && len(m.commandChoices()) == 0 {
 		rows := strings.Split(renderTUIWordmark(inner, m.colored), "\n")
 		if inner >= 88 {
-			side := []string{m.tr("Review your changes"), "", m.tr("Scope"), m.scope(), "", m.tr("Model"), m.modelLabel(), "", "/preview", m.tr("Inspect files"), "/review", m.tr("Start review"), "", "/settings", m.tr("Interface language")}
+			side := []string{m.tr("Review your changes"), "", m.tr("Scope"), m.scope(), "", m.tr("Model"), m.modelLabel(), "", "/preview", m.tr("Inspect files"), "/review", m.tr("Start review"), "", "/plugins", m.tr("Plugins and marketplace")}
 			for i := range rows {
 				rows[i] += strings.Repeat(" ", max(0, 67-ansi.StringWidth(rows[i]))) + m.tint("│", "#284B37") + "  " + ansi.Truncate(side[i], inner-70, "…")
 			}
@@ -175,6 +189,8 @@ func (m reviewTUIModel) homeContent() string {
 		m.tr("Model") + "  " + m.modelLabel(), "",
 		m.tint("/preview", tuiBrandFace) + "  " + m.tr("Inspect files"),
 		m.tint("/review", tuiBrandFace) + "   " + m.tr("Start review"),
+		m.tint("/plugins", tuiBrandFace) + "  " + m.tr("Manage installed plugins"),
+		m.tint("/market", tuiBrandFace) + "   " + m.tr("Browse marketplace plugins"),
 	})
 }
 
@@ -206,6 +222,8 @@ func (m reviewTUIModel) content() string {
 		return m.homeContent()
 	case tuiSettings:
 		return m.settingsContent()
+	case tuiPlugins, tuiPluginDetails, tuiMarket, tuiMarketDetails:
+		return m.pluginContent()
 	case tuiLog:
 		lines := []string{m.tint(m.tr("Review activity"), tuiBrandFace), m.scope(), ""}
 		if m.progress != nil {

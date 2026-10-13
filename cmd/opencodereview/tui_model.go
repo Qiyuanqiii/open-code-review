@@ -33,6 +33,10 @@ const (
 	tuiSessions
 	tuiHelp
 	tuiSettings
+	tuiPlugins
+	tuiPluginDetails
+	tuiMarket
+	tuiMarketDetails
 )
 
 type tuiTickMsg time.Time
@@ -106,6 +110,7 @@ type reviewTUIModel struct {
 	busy              bool
 	job               int
 	jobName           string
+	pluginJob         bool
 	started           time.Time
 	cancel            context.CancelFunc
 	stopping          bool
@@ -127,6 +132,13 @@ type reviewTUIModel struct {
 	history           []string
 	historyIndex      int
 	historyDraft      string
+	plugins           []pluginInfo
+	pluginDetail      *pluginInfo
+	marketEntries     []tuiCatalogPlugin
+	marketDetail      *tuiCatalogPlugin
+	markets           []tuiMarketInfo
+	pluginQuery       string
+	pluginError       string
 }
 
 func newReviewTUI(ctx context.Context, opts reviewOptions, services tuiServices, colored bool) reviewTUIModel {
@@ -269,6 +281,8 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refresh(false)
 		return m, nil
+	case tuiPluginDoneMsg:
+		return m.finishPluginJob(msg)
 	case tea.KeyPressMsg:
 		if m.screen == tuiSettings && msg.String() != "ctrl+c" {
 			return m.updateSettings(msg)
@@ -327,6 +341,12 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.SetValue("")
 			} else if m.screen == tuiFinding {
 				m.screen = tuiResults
+			} else if m.screen == tuiPluginDetails {
+				m.screen = tuiPlugins
+				m.viewport.GotoTop()
+			} else if m.screen == tuiMarketDetails {
+				m.screen = tuiMarket
+				m.viewport.GotoTop()
 			} else {
 				m.screen = tuiHome
 			}
@@ -338,6 +358,9 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			m.menuDismissed = false
 			if line == "" {
+				if m.isPluginScreen() {
+					return m.openSelectedPlugin()
+				}
 				if m.screen == tuiResults && len(m.result.Comments) > 0 {
 					m.screen = tuiFinding
 					m.viewport.GotoTop()
@@ -363,6 +386,12 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if m.screen == tuiSessions {
 					count = len(m.sessions)
+				}
+				if m.pluginError == "" && m.screen == tuiPlugins {
+					count = len(m.plugins)
+				}
+				if m.pluginError == "" && m.screen == tuiMarket {
+					count = len(m.marketEntries)
 				}
 				if count > 0 {
 					m.selected = max(0, min(count-1, m.selected+delta))
@@ -421,11 +450,15 @@ func (m *reviewTUIModel) stopJob() {
 	}
 	m.stopping = true
 	m.notice = "Stopping... waiting for the review to save results."
+	if m.pluginJob {
+		m.notice = "Stopping... waiting for the plugin task to finish."
+	}
 }
 
 func (m *reviewTUIModel) beginJob(name string) (context.Context, int) {
 	m.job++
 	m.busy, m.stopping, m.notice, m.isError = true, false, "", false
+	m.pluginJob = false
 	m.jobName, m.started = name, time.Now()
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancel = cancel
@@ -523,6 +556,21 @@ func (m reviewTUIModel) command(line string) (tea.Model, tea.Cmd) {
 	}
 	m.notice, m.isError = "", false
 	switch name {
+	case "/plugins":
+		if arg != "" {
+			m.notice, m.isError = m.tr("Use /plugins to list installed plugins."), true
+			break
+		}
+		return m.startPluginView(tuiPlugins, "")
+	case "/market":
+		parts, err := tuiPluginArgs(arg)
+		if err != nil {
+			m.notice, m.isError = m.tr("Invalid plugin arguments: %s", m.tr(err.Error())), true
+			break
+		}
+		return m.startPluginView(tuiMarket, strings.Join(parts, " "))
+	case "/plugin":
+		return m.pluginCommand(arg)
 	case "/review", "/preview":
 		if arg != "" {
 			m.notice, m.isError = "Use /background to describe the changes, then /review.", true

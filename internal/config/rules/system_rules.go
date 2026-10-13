@@ -131,6 +131,8 @@ type RuleDetail struct {
 	Rule    string // rule text
 	Source  string // "custom" | "project" | "global" | "system"
 	Pattern string // glob pattern that matched, or "default" for fallback — always a plain glob, never annotated
+	// PluginRules identifies the additive rule packs that matched this path.
+	PluginRules []PluginRuleDetail `json:"plugin_rules,omitempty"`
 	// SniffedAs is "" for a plain path match, or the sniffed language (e.g.
 	// "objc") when content sniffing overrode the path-based rule. Internal
 	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
@@ -347,7 +349,7 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 		}
 	}
 
-	return &composedResolver{
+	resolver := &composedResolver{
 		custom:  customRule,
 		project: projectRule,
 		global:  globalRule,
@@ -357,7 +359,12 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 			content:  content,
 			objcRule: objcRule,
 		},
-	}, filter, nil
+	}
+	withPlugins, err := loadPluginRules(resolver)
+	if err != nil {
+		return nil, nil, err
+	}
+	return withPlugins, filter, nil
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude

@@ -33,6 +33,7 @@ Use /scope to select changes, /preview to inspect the files, and /review to
 start. Type a description of your changes to set the review background.
 Use /model or /provider for configuration, /sessions for history, and /help
 for all commands. /settings changes the interface language and remembers it.
+Use /plugins to manage installed packages and /market to browse marketplaces.
 Esc cancels a running review and waits for saved results.
 
 Requires an interactive terminal. Credential commands used during a review
@@ -80,6 +81,7 @@ type tuiServices struct {
 	sessions        func(string) ([]session.Summary, error)
 	load            func(string, string) (*session.Summary, []model.LlmComment, error)
 	config          func(string) tea.Cmd
+	pluginCommand   func(context.Context, []string) (string, error)
 	workers         *tuiWorkers
 	savePreferences func(tuiPreferences) error
 }
@@ -123,6 +125,7 @@ func runReviewTUI(parent context.Context, opts reviewOptions) error {
 	services := tuiServices{
 		review: runTUIReview, preview: runTUIPreview,
 		savePreferences: saveTUIPreferences,
+		pluginCommand:   runPluginCommand,
 		sessions:        session.ListSessions,
 		load: func(repo, id string) (*session.Summary, []model.LlmComment, error) {
 			summary, err := session.LoadSummary(repo, id)

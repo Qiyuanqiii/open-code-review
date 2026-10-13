@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -49,6 +51,7 @@ type reviewOptions struct {
 	maxTokens             int
 	maxTokensBudget       int
 	effort                string
+	reviewPlugin          string
 	noFilter              bool
 	preview               bool
 }
@@ -138,6 +141,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
+	if opts.reviewPlugin != "" {
+		cc.Resolver, cc.FileFilter, err = rules.NewResolver(cc.RepoDir, opts.rulePath, rules.ResolverOptions{
+			Ref: contentRef, Runner: cc.GitRunner, ReviewPlugin: opts.reviewPlugin,
+		})
+		if err != nil {
+			return fmt.Errorf("load review plugin: %w", err)
+		}
+	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
@@ -207,7 +218,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
+	var mcpClients []*mcp.Client
+	if ctx.Err() == nil {
+		mcpClients, err = initRuntimeMCPClients(ctx, rt.AppCfg, cc.Resolver, tools, cc.RepoDir, Version)
+		if err != nil {
+			return err
+		}
+	}
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
@@ -215,6 +232,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
+		ReviewPlugin:          selectedReviewPlugin(cc.Resolver),
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,
@@ -284,7 +302,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
-	resultErr := reviewResultError(runErr, manifest)
+	resultErr := pluginReviewResultError(runErr, manifest, opts.reviewPlugin)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)
@@ -317,11 +335,32 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			if opts.reviewPlugin != "" {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (start a fresh review with --review-plugin %s)\n", id, opts.reviewPlugin)
+			} else {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			}
 		}
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func selectedReviewPlugin(resolver any) *plugin.Installed {
+	if p, ok := resolver.(interface{ ReviewPlugin() *plugin.Installed }); ok {
+		return p.ReviewPlugin()
+	}
+	return nil
+}
+
+func pluginReviewResultError(runErr error, manifest *session.RunManifest, reviewPlugin string) error {
+	if err := reviewResultError(runErr, manifest); err != nil {
+		return err
+	}
+	if reviewPlugin != "" && manifest != nil && manifest.TerminalState == session.StatePartial {
+		return fmt.Errorf("required plugin review work is incomplete; inspect review_plugin and manifest.coverage.failed")
+	}
+	return nil
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

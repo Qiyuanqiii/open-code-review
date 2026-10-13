@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "OCR example plugins",
+  "plugins": [
+    {
+      "id": "review-checklist",
+      "name": "Review Checklist",
+      "version": "1.0.0",
+      "description": "Additional review checks for error handling and resource ownership.",
+      "source": "review-checklist"
+    },
+    {
+      "id": "project-notes",
+      "name": "Project Notes",
+      "version": "1.0.0",
+      "description": "Read REVIEW_NOTES.md from the reviewed repository through an MCP tool. Requires Node.js.",
+      "source": "project-notes"
+    }
+  ]
+}

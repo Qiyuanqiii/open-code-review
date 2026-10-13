@@ -110,6 +110,10 @@ stages share it; no additional total token limit is imposed.
 JSON output includes `review_plugin`: records with `plugin`, `group`, `stage`,
 `complete`, optional `token_limit`, opaque `report` and any execution `error`.
 The latest returned report is retained if later model or process execution fails.
+Each finished or interrupted stage also saves a `plugin_review` record to the
+session, including in text and TUI runs. Inspect those reports after the run with
+`ocr session show SESSION_ID --json`; its `review_plugin` array contains the saved
+stage records. A response that omits `report` leaves the previous report intact.
 Unfinished required work enters the existing coverage manifest and causes a
 nonzero CLI exit. Ordinary review exit behavior is unchanged.
 

@@ -5,7 +5,9 @@ package llmloop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -43,6 +45,69 @@ func TestTaskCompletionContract(t *testing.T) {
 			cp = r.executeToolCall(context.Background(), "a.go", llm.ToolCall{Function: llm.FunctionCall{Name: "task_done", Arguments: `{}`}}, nil, "")
 			if !cp.Completed {
 				t.Fatal("stage options leaked into classic review")
+			}
+		})
+	}
+}
+
+func TestScopedCompletionOwnsStateField(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state any
+	}{
+		{"custom string", "verified"},
+		{"boolean", false},
+		{"native failure string", "FAILED"},
+		{"object", map[string]any{"phase": "verify"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRunner(newTestDeps(&fakeClient{}))
+			args := map[string]any{"state": tc.state, "report": "retained"}
+			raw, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			opts := &TaskOptions{
+				Tools: []llm.ToolDef{{Function: llm.FunctionDef{Name: "task_done"}}},
+				Complete: func(submitted map[string]any) ([]model.LlmComment, error) {
+					calls++
+					if !reflect.DeepEqual(submitted, args) {
+						t.Fatalf("completion arguments changed: got %#v, want %#v", submitted, args)
+					}
+					return nil, nil
+				},
+			}
+			ctx := context.WithValue(context.Background(), taskOptionsKey{}, opts)
+			cp := r.executeToolCall(ctx, "a.go", llm.ToolCall{Function: llm.FunctionCall{Name: "task_done", Arguments: string(raw)}}, nil, "")
+			if !cp.Completed || cp.Failed || calls != 1 {
+				t.Fatalf("plugin completion bypassed validation: %+v, calls=%d", cp, calls)
+			}
+		})
+	}
+}
+
+func TestTaskCompletionWithoutHandlerKeepsNativeState(t *testing.T) {
+	for _, tc := range []struct {
+		args      string
+		completed bool
+		failed    bool
+	}{
+		{`{}`, true, false},
+		{`{"state":"DONE"}`, true, false},
+		{`{"state":"FAILED"}`, false, true},
+		{`{"state":"verified"}`, false, false},
+		{`{"state":false}`, false, false},
+		{`{"state":{"phase":"verify"}}`, false, false},
+	} {
+		t.Run(tc.args, func(t *testing.T) {
+			r := NewRunner(newTestDeps(&fakeClient{}))
+			opts := &TaskOptions{Tools: []llm.ToolDef{{Function: llm.FunctionDef{Name: "task_done"}}}}
+			for _, ctx := range []context.Context{context.Background(), context.WithValue(context.Background(), taskOptionsKey{}, opts)} {
+				cp := r.executeToolCall(ctx, "a.go", llm.ToolCall{Function: llm.FunctionCall{Name: "task_done", Arguments: tc.args}}, nil, "")
+				if cp.Completed != tc.completed || cp.Failed != tc.failed {
+					t.Fatalf("native completion changed: %+v", cp)
+				}
 			}
 		})
 	}

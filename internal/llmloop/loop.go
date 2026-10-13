@@ -697,6 +697,9 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		if err != nil {
 			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 		}
+		if opts, _ := ctx.Value(taskOptionsKey{}).(*TaskOptions); opts != nil && opts.Complete != nil {
+			return r.completeTask(ctx, taskKey, args, rec, thinking)
+		}
 		rawState, hasState := args["state"]
 		if !hasState {
 			return r.completeTask(ctx, taskKey, args, rec, thinking)

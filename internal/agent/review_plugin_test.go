@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func (c *pluginReviewClient) CompletionsWithCtx(_ context.Context, req llm.ChatR
 }
 
 func TestPluginReviewRecoveryAndFailures(t *testing.T) {
-	for _, mode := range []string{"complete", "retry", "provider-after-rejection", "incomplete", "finding-incomplete", "missing-complete", "crash", "invalid-comment"} {
+	for _, mode := range []string{"complete", "retry", "provider-after-rejection", "incomplete", "finding-incomplete", "missing-complete", "crash", "invalid-comment", "omit-report", "report-error"} {
 		t.Run(mode, func(t *testing.T) {
 			client := &pluginReviewClient{retry: mode == "retry" || mode == "provider-after-rejection"}
 			if mode == "provider-after-rejection" {
@@ -77,7 +78,7 @@ func TestPluginReviewRecoveryAndFailures(t *testing.T) {
 			a.runner = llmloop.NewRunner(llmloop.Deps{LLMClient: client, Model: a.args.Model, Template: a.args.Template, Tools: a.args.Tools, MainToolDefs: a.args.MainToolDefs, CommentCollector: a.args.CommentCollector, Session: a.session, DiffLookup: a.findDiff, AllDiffs: a.allDiffs, NewRequestMeta: a.newRequestMeta})
 			comments, _ := a.dispatchSubtasks(context.Background())
 			manifest := finishManifestFlow(t, a)
-			complete := mode == "complete" || mode == "retry"
+			complete := mode == "complete" || mode == "retry" || mode == "omit-report"
 			if (manifest.TerminalState == session.StateComplete) != complete {
 				t.Fatalf("wrong completion: %+v", manifest)
 			}
@@ -85,11 +86,18 @@ func TestPluginReviewRecoveryAndFailures(t *testing.T) {
 			if len(reports) == 0 || len(reports[0].Report) == 0 {
 				t.Fatal("plugin state lost")
 			}
+			saved, err := session.LoadPluginReviewReports(a.args.RepoDir, a.SessionID())
+			if err != nil || !reflect.DeepEqual(saved, reports) {
+				t.Fatalf("persisted reports = %+v, want %+v, error = %v", saved, reports, err)
+			}
+			if mode == "report-error" && !strings.Contains(string(reports[0].Report), "updated-before-error") {
+				t.Fatalf("failed response report lost: %s", reports[0].Report)
+			}
 			if complete && (len(reports) != 2 || !reports[1].Complete) {
 				t.Fatalf("stage plan not completed: %+v", reports)
 			}
 			wantCalls := 1
-			if mode == "complete" || mode == "provider-after-rejection" {
+			if mode == "complete" || mode == "provider-after-rejection" || mode == "omit-report" {
 				wantCalls = 2
 			}
 			if mode == "retry" {
@@ -108,7 +116,7 @@ func TestPluginReviewRecoveryAndFailures(t *testing.T) {
 			if mode == "provider-after-rejection" && (!strings.Contains(reports[0].Error, "checked is required") || manifest.Coverage.Failed[0].Classification != session.FailureProvider) {
 				t.Fatalf("last accepted state/feedback lost: %+v %+v", reports, manifest)
 			}
-			if mode == "crash" || mode == "missing-complete" || mode == "invalid-comment" {
+			if mode == "crash" || mode == "missing-complete" || mode == "invalid-comment" || mode == "report-error" {
 				if manifest.Coverage.Failed[0].Classification != session.FailureUnknown {
 					t.Fatalf("plugin fault classified as provider fault: %+v", manifest)
 				}
@@ -153,6 +161,13 @@ func TestAgentReviewProcess(t *testing.T) {
 			}
 			if mode == "missing-complete" {
 				res.Complete = nil
+			}
+			if mode == "omit-report" {
+				res.Report = nil
+			}
+			if mode == "report-error" {
+				res.Report = json.RawMessage(`{"saved":"updated-before-error"}`)
+				res.Error = "validator unavailable"
 			}
 			if mode == "finding-incomplete" || mode == "invalid-comment" {
 				res.Comments = []model.LlmComment{{Path: "good.go", Content: "The value is lost.", ExistingCode: "value", Severity: "medium", Category: "bug"}}

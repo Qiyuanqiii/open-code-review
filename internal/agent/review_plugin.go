@@ -20,15 +20,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
-type PluginReviewReport struct {
-	Plugin     string          `json:"plugin"`
-	Group      string          `json:"group"`
-	Stage      string          `json:"stage"`
-	Complete   bool            `json:"complete"`
-	TokenLimit int64           `json:"token_limit,omitempty"`
-	Report     json.RawMessage `json:"report,omitempty"`
-	Error      string          `json:"error,omitempty"`
-}
+type PluginReviewReport = session.PluginReviewReport
 
 var errReviewPlugin = errors.New("review plugin failed")
 
@@ -88,11 +80,13 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 					TokenLimit: report.TokenLimit, FrozenMessageCount: len(messages),
 					Complete: func(args map[string]any) ([]model.LlmComment, error) {
 						response, callErr := client.Call(plugin.ReviewRequest{Method: "submit", Stage: stage, Arguments: args})
+						if json.Valid(response.Report) {
+							report.Report = response.Report
+						}
 						if callErr != nil {
 							transportErr = callErr
 							return nil, fmt.Errorf("%w: %v", llmloop.ErrCompletionUnavailable, callErr)
 						}
-						report.Report = response.Report
 						if !*response.Accepted {
 							completionErr = fmt.Errorf("%s", response.Feedback)
 							return nil, completionErr
@@ -156,6 +150,9 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 		a.pluginReviewMu.Lock()
 		a.pluginReviewReports = append(a.pluginReviewReports, report)
 		a.pluginReviewMu.Unlock()
+		if err := a.session.RecordPluginReview(report); err != nil {
+			stageErr = errors.Join(stageErr, fmt.Errorf("persist plugin report: %w", err))
+		}
 		if stageErr != nil {
 			return false, nil, stageErr
 		}

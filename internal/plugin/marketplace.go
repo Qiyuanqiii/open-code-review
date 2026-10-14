@@ -44,6 +44,15 @@ type downloadError struct {
 	cause   error
 }
 
+type httpStatusError struct {
+	status int
+	source string
+}
+
+func (e httpStatusError) Error() string {
+	return fmt.Sprintf("download %s: HTTP %d", DisplaySource(e.source), e.status)
+}
+
 func (e downloadError) Error() string { return e.message }
 func (e downloadError) Unwrap() error { return e.cause }
 
@@ -158,7 +167,7 @@ func (s *Store) download(ctx context.Context, source string, limit int64) ([]byt
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s: HTTP %d", DisplaySource(source), response.StatusCode)
+		return nil, httpStatusError{status: response.StatusCode, source: source}
 	}
 	if response.ContentLength > limit {
 		return nil, fmt.Errorf("download exceeds %d byte limit", limit)
@@ -188,6 +197,12 @@ func (s *Store) loadMarket(ctx context.Context, name, source string) (Market, er
 	if err != nil {
 		return result, err
 	}
+	return parseMarket(name, resolved, data, remote)
+}
+
+func parseMarket(name, resolved string, data []byte, remote bool) (Market, error) {
+	result := Market{Name: name}
+	var err error
 	var published catalog
 	if err := decodeStrict(data, &published); err != nil {
 		return result, fmt.Errorf("parse marketplace: %w", err)
@@ -354,10 +369,7 @@ func resolveInstallSource(source string, markets map[string]Market) (resolved, o
 		}
 		return "", "", expected, fmt.Errorf("plugin %q is absent from marketplace %q", id, name)
 	}
-	resolved, remote, err := canonicalSource(source, "")
-	if err == nil && remote {
-		err = fmt.Errorf("install remote plugins through id@market with a catalog sha256")
-	}
+	resolved, _, err = canonicalSource(source, "")
 	return resolved, resolved, expected, err
 }
 
@@ -370,50 +382,70 @@ func parseDigest(value string) ([]byte, error) {
 }
 
 func (s *Store) prepare(ctx context.Context, source, digest, stage string) error {
+	_, err := s.preparePackage(ctx, source, digest, stage)
+	return err
+}
+
+func (s *Store) preparePackage(ctx context.Context, source, digest, stage string) (string, error) {
 	if strings.HasPrefix(strings.ToLower(source), "https:") {
 		data, err := s.download(ctx, source, maxArchiveBytes)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if err := verifyDigest(data, digest); err != nil {
-			return err
+		if digest != "" {
+			if err := verifyDigest(data, digest); err != nil {
+				return "", err
+			}
 		}
-		return extractZIP(ctx, data, stage)
+		return archiveDigest(data), extractZIP(ctx, data, stage)
 	}
 	info, err := os.Lstat(source)
 	if err != nil {
-		return fmt.Errorf("read plugin source: %w", err)
+		return "", fmt.Errorf("read plugin source: %w", err)
 	}
 	if info.IsDir() {
 		if digest != "" {
-			return fmt.Errorf("sha256 applies to ZIP archives, not directory sources")
+			return "", fmt.Errorf("sha256 applies to ZIP archives, not directory sources")
 		}
 		absoluteStore, err := filepath.Abs(s.root)
 		if err != nil {
-			return err
+			return "", err
 		}
 		rel, err := filepath.Rel(source, absoluteStore)
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
-			return fmt.Errorf("plugin source directory cannot contain the plugin store")
+			return "", fmt.Errorf("plugin source directory cannot contain the plugin store")
+		}
+		absoluteStage, err := filepath.Abs(stage)
+		if err != nil {
+			return "", err
+		}
+		rel, err = filepath.Rel(source, absoluteStage)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return "", fmt.Errorf("plugin source directory cannot contain the staging directory")
 		}
 		if _, err := inspectPackage(ctx, source); err != nil {
-			return err
+			return "", err
 		}
-		return copyPackage(ctx, source, stage)
+		return "", copyPackage(ctx, source, stage)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("plugin source is a symlink or special file")
+		return "", fmt.Errorf("plugin source is a symlink or special file")
 	}
 	data, err := readFileBounded(source, maxArchiveBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if digest != "" {
 		if err := verifyDigest(data, digest); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return extractZIP(ctx, data, stage)
+	return archiveDigest(data), extractZIP(ctx, data, stage)
+}
+
+func archiveDigest(data []byte) string {
+	actual := sha256.Sum256(data)
+	return hex.EncodeToString(actual[:])
 }
 
 func verifyDigest(data []byte, expected string) error {

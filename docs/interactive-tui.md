@@ -45,7 +45,37 @@ Russian. This setting controls interface text independently of review output.
 
 ## Plugins and marketplaces
 
-The workspace uses the same [plugin store](native-plugins.md) as the CLI:
+The workspace uses the same [plugin store](native-plugins.md) as the CLI.
+
+### Install from a link
+
+1. Open `/plugins`, select **Install from link**, and press Enter.
+2. Paste an HTTPS ZIP, public GitHub plugin repository, or marketplace JSON URL.
+3. Press Enter to download and preview the package. If the source contains
+   multiple plugins, choose one to preview.
+4. Inspect the name, version, source, digest, and contributed capabilities.
+   Choose **Install** to keep it disabled, or **Install and enable** to activate
+   its rules and MCP tools for subsequent reviews.
+
+For example, paste `https://github.com/Qiyuanqiii/ocr-behavior-review`.
+You can also open its preview directly:
+
+```text
+/plugin install https://github.com/Qiyuanqiii/ocr-behavior-review
+```
+
+No marketplace registration is required. Confirmation installs the package
+already downloaded for the preview. Esc cancels a download or leaves a preview
+without installing it; temporary preview files are removed. PgUp and PgDn scroll
+long package details.
+
+Use `/plugin update behavior-review` to fetch the original source again while
+preserving the selected plugin and its enabled state. If the plugin is already
+installed, use update instead of installing it a second time.
+
+### Browse a marketplace
+
+Add a marketplace when you want to browse and search its catalog:
 
 ```text
 /plugin market add examples ./examples/ocr-plugins
@@ -61,3 +91,6 @@ the selected installed package. Explicit package IDs also work.
 Use `/preview PACKAGE_ID` or `/review PACKAGE_ID` to select an installed
 [review workflow](review-workflow-plugins.md) for that invocation. The following
 plain `/review` uses the ordinary workflow. Workflow plugins require a fresh run.
+For Behavior Review, use `/preview behavior-review` to inspect the scope, then
+`/review behavior-review` to run its workflow. Installing or enabling a package
+does not automatically select its review workflow.

@@ -622,6 +622,11 @@ func (m reviewTUIModel) command(line string) (tea.Model, tea.Cmd) {
 		return m.loadSession(arg, true)
 	case "/results":
 		m.screen = tuiResults
+		m.selected = max(0, min(m.selected, len(m.result.Comments)-1))
+		m.viewport.GotoTop()
+		m.refresh(false)
+		m.ensureSelectionVisible()
+		return m, nil
 	case "/settings", "/setting", "/config":
 		m.settingsReturn, m.screen = m.screen, tuiSettings
 		for i, id := range tuiLanguageIDs {

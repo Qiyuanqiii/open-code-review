@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -190,5 +191,46 @@ func TestTUIReviewFlowLoadsHistoryAndResumesRange(t *testing.T) {
 	if m.result.SessionID != "resumed-run" || m.screen != tuiResults ||
 		!reflect.DeepEqual(loaded, []string{workspace.SessionID, workspace.SessionID, savedRange.SessionID, savedRange.SessionID}) {
 		t.Fatalf("history/resume completion did not retain the new run: result=%+v, loads=%v", m.result, loaded)
+	}
+}
+
+func TestTUIReviewFlowReturnsToResultsFromHistory(t *testing.T) {
+	for _, height := range []int{10, 40} {
+		t.Run(fmt.Sprintf("height=%d", height), func(t *testing.T) {
+			m := testReviewTUI()
+			next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
+			m = next.(reviewTUIModel)
+			finding := model.LlmComment{Path: "only.go", StartLine: 1, Content: "Preserved finding"}
+			m.services.review = func(context.Context, reviewOptions, func(string)) (jsonOutput, error) {
+				return jsonOutput{
+					Status: "complete", SessionID: "latest-run", Comments: []model.LlmComment{finding},
+					Manifest: &session.RunManifest{TerminalState: session.StateComplete},
+				}, nil
+			}
+			m.services.sessions = func(string) ([]session.Summary, error) {
+				return []session.Summary{{SessionID: "first"}, {SessionID: "second"}}, nil
+			}
+
+			m, cmd := submitTUIReviewFlow(m, "/review")
+			m = finishTUIReviewFlow(t, m, cmd)
+			m, cmd = submitTUIReviewFlow(m, "/sessions")
+			m = finishTUIReviewFlow(t, m, cmd)
+			m, _ = pressTUI(m, tea.KeyDown)
+			if m.selected != 1 {
+				t.Fatal("second saved session was not selected")
+			}
+			m, _ = pressTUI(m, tea.KeyPgDown)
+			m, _ = submitTUIReviewFlow(m, "/results")
+			if m.screen != tuiResults || !strings.Contains(m.viewport.View(), "> only.go:1") {
+				t.Fatal("returning to results did not display the selected finding")
+			}
+			if m.result.SessionID != "latest-run" || !reflect.DeepEqual(m.result.Comments, []model.LlmComment{finding}) {
+				t.Fatal("browsing history replaced the latest review result")
+			}
+			m, _ = pressTUI(m, tea.KeyEnter)
+			if m.screen != tuiFinding || !strings.Contains(m.viewport.View(), finding.Content) {
+				t.Fatal("Enter did not open the preserved finding")
+			}
+		})
 	}
 }

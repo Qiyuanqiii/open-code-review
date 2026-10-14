@@ -10,7 +10,43 @@ prompts and validators through a local process. Start one with
 `ocr review --review-plugin ID`. Selection affects that
 invocation only.
 
-## Try the bundled marketplace
+## Install from a link
+
+Install a public GitHub plugin repository or an HTTPS ZIP directly. No
+marketplace registration is required:
+
+```text
+ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review
+ocr plugin install https://example.com/team-review.zip --enable
+```
+
+For a GitHub repository, OCR discovers its plugin package or published catalog.
+A catalog can point to release ZIPs containing executable builds that are not
+present in the source tree. Installation downloads and inspects the package; it
+does not execute plugin commands or install dependencies.
+
+Preview a source without installing or enabling anything:
+
+```text
+ocr plugin install https://example.com/team-review.zip --dry-run
+ocr plugin install https://example.com/ocr-marketplace.json --dry-run --json
+```
+
+A catalog containing one plugin selects it automatically. If it contains
+multiple plugins, the command lists them and asks for an explicit selection:
+
+```text
+ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review --enable
+```
+
+Direct installations remember their original source and selected plugin.
+`ocr plugin update ID` checks that source again and preserves the enabled state.
+The stored metadata includes the downloaded archive's SHA-256 and the resolved
+GitHub revision when available. A direct ZIP's recorded digest identifies its
+downloaded bytes; marketplace-provided digests are also checked against the
+download before installation.
+
+## Browse the bundled marketplace
 
 From this checkout:
 
@@ -48,6 +84,9 @@ including executing their server commands with your account's permissions.
 | --- | --- |
 | `ocr plugin list` | List installed packages and enabled state |
 | `ocr plugin show ID` | Show source, package location, and contributed capabilities |
+| `ocr plugin install URL` | Install an HTTPS ZIP, public GitHub plugin repository, or single-plugin catalog |
+| `ocr plugin install URL --plugin ID` | Choose a plugin from a source containing multiple packages |
+| `ocr plugin install SOURCE --dry-run` | Inspect packages without installing or enabling them |
 | `ocr plugin install PATH` | Copy a local directory or ZIP package |
 | `ocr plugin install ID@MARKET` | Install the selected marketplace entry |
 | `ocr plugin enable ID` / `disable ID` | Change rule and MCP contributions for subsequent reviews |

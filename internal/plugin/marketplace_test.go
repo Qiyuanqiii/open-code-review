@@ -256,8 +256,10 @@ func TestMarketplaceValidation(t *testing.T) {
 			t.Fatalf("invalid market source accepted: %q", source)
 		}
 	}
-	_, err = store.Install(ctx, "https://example.com/plugin.zip", true)
-	requireError(t, err, "through id@market")
+	resolved, _, _, err := resolveInstallSource("https://example.com/plugin.zip", nil)
+	if err != nil || resolved != "https://example.com/plugin.zip" {
+		t.Fatalf("direct HTTPS source resolution = %s, %v", resolved, err)
+	}
 	_, err = store.Install(ctx, "", true)
 	requireError(t, err, "source is required")
 	_, err = store.Install(ctx, "missing-file", true)

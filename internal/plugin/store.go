@@ -22,6 +22,9 @@ type Installed struct {
 	Enabled  bool     `json:"enabled"`
 	Source   string   `json:"source"`
 	Dir      string   `json:"dir"`
+	SHA256   string   `json:"sha256,omitempty"`
+	Revision string   `json:"revision,omitempty"`
+	PluginID string   `json:"plugin_id,omitempty"`
 }
 
 // Store owns an independent plugin registry. Constructing or reading an empty
@@ -211,16 +214,12 @@ func (s *Store) List() ([]Installed, error)    { return s.list(false) }
 func (s *Store) Enabled() ([]Installed, error) { return s.list(true) }
 
 func (s *Store) Install(ctx context.Context, source string, enable bool) (Installed, error) {
-	unlock, err := s.lock(ctx)
+	prepared, err := s.PrepareInstall(ctx, source, "")
 	if err != nil {
 		return Installed{}, err
 	}
-	defer unlock()
-	value, err := s.readState()
-	if err != nil {
-		return Installed{}, err
-	}
-	return s.install(ctx, &value, source, enable, "")
+	defer prepared.Close()
+	return s.InstallPrepared(ctx, prepared, enable)
 }
 
 func (s *Store) Update(ctx context.Context, id string) (Installed, error) {
@@ -237,13 +236,31 @@ func (s *Store) Update(ctx context.Context, id string) (Installed, error) {
 	if !ok {
 		return Installed{}, fmt.Errorf("plugin %q is not installed", id)
 	}
-	return s.install(ctx, &value, old.Source, old.Enabled, id)
-}
-
-func (s *Store) install(ctx context.Context, value *state, source string, enabled bool, updating string) (Installed, error) {
-	resolved, origin, expected, err := resolveInstallSource(source, value.Markets)
+	prepared, err := s.prepareInstall(ctx, old.Source, old.PluginID, value.Markets)
 	if err != nil {
 		return Installed{}, err
+	}
+	defer prepared.Close()
+	return s.installPrepared(ctx, &value, prepared, old.Enabled, id)
+}
+
+func (s *Store) installPrepared(ctx context.Context, value *state, prepared *PreparedInstall, enabled bool, updating string) (Installed, error) {
+	manifest := prepared.item.Manifest
+	if updating != "" && manifest.ID != updating {
+		return Installed{}, fmt.Errorf("updated package id %q does not match installed id %q", manifest.ID, updating)
+	}
+	if _, exists := value.Installed[manifest.ID]; exists && updating == "" {
+		return Installed{}, fmt.Errorf("plugin %q is already installed; use update", manifest.ID)
+	}
+	if _, err := inspectPackage(ctx, prepared.packageDir); err != nil {
+		return Installed{}, err
+	}
+	digest, err := packageDigest(ctx, prepared.packageDir)
+	if err != nil {
+		return Installed{}, err
+	}
+	if digest != prepared.packageHash {
+		return Installed{}, fmt.Errorf("prepared plugin changed after inspection; prepare it again")
 	}
 	packages := filepath.Join(s.root, "packages")
 	if err := os.MkdirAll(packages, 0700); err != nil {
@@ -262,34 +279,34 @@ func (s *Store) install(ctx context.Context, value *state, source string, enable
 			os.RemoveAll(stage)
 		}
 	}()
-	if err := s.prepare(ctx, resolved, expected.SHA256, stage); err != nil {
+	if err := copyPackage(ctx, prepared.packageDir, stage); err != nil {
 		return Installed{}, err
 	}
-	manifest, err := inspectPackage(ctx, stage)
-	if err != nil {
+	if _, err := inspectPackage(ctx, stage); err != nil {
 		return Installed{}, err
 	}
-	if expected.ID != "" && (manifest.ID != expected.ID || manifest.Version != expected.Version) {
-		return Installed{}, fmt.Errorf("package id/version %s@%s does not match catalog %s@%s", manifest.ID, manifest.Version, expected.ID, expected.Version)
+	if digest, err := packageDigest(ctx, stage); err != nil {
+		return Installed{}, err
+	} else if digest != prepared.packageHash {
+		return Installed{}, fmt.Errorf("prepared plugin changed while installing; prepare it again")
 	}
-	if updating != "" && manifest.ID != updating {
-		return Installed{}, fmt.Errorf("updated package id %q does not match installed id %q", manifest.ID, updating)
-	}
-	_, exists := value.Installed[manifest.ID]
-	if exists && updating == "" {
-		return Installed{}, fmt.Errorf("plugin %q is already installed; use update", manifest.ID)
+	if err := ctx.Err(); err != nil {
+		return Installed{}, err
 	}
 	final := filepath.Join(packages, manifest.ID+"-"+strings.TrimPrefix(filepath.Base(stage), ".snapshot-"))
 	if err := os.Rename(stage, final); err != nil {
 		return Installed{}, err
 	}
 	stage = final
-	item := Installed{Manifest: manifest, Enabled: enabled, Source: origin, Dir: "packages/" + filepath.Base(final)}
+	item := prepared.item
+	item.Enabled, item.Dir = enabled, "packages/"+filepath.Base(final)
 	value.Installed[manifest.ID] = item
 	if err := s.writeState(*value); err != nil {
 		return Installed{}, err
 	}
 	committed = true
+	prepared.closed = true
+	os.RemoveAll(prepared.directory)
 	item.Dir, _ = filepath.Abs(final)
 	// Retain previous snapshots: another review process may still be reading the
 	// directory captured before this update.

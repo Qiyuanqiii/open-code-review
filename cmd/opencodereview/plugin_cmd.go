@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -31,6 +32,8 @@ type pluginInfo struct {
 	Rules       []string                   `json:"rules"`
 	MCPServers  []string                   `json:"mcp_servers"`
 	Review      *plugin.ReviewContribution `json:"review,omitempty"`
+	SHA256      string                     `json:"sha256,omitempty"`
+	Revision    string                     `json:"revision,omitempty"`
 }
 
 func pluginManagementInfo(installed plugin.Installed) pluginInfo {
@@ -40,7 +43,47 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return pluginInfo{m.ID, m.Name, m.Version, m.Description, installed.Enabled, plugin.DisplaySource(installed.Source), installed.Dir, append([]string{}, m.Rules...), names, m.Review}
+	return pluginInfo{
+		ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
+		Enabled: installed.Enabled, Source: plugin.DisplaySource(installed.Source), Directory: installed.Dir,
+		Rules: append([]string{}, m.Rules...), MCPServers: names, Review: m.Review,
+		SHA256: installed.SHA256, Revision: installed.Revision,
+	}
+}
+
+type pluginInstallPreview struct {
+	Source  string       `json:"source"`
+	Plugins []pluginInfo `json:"plugins"`
+}
+
+func printPluginInstallPreview(out io.Writer, preview pluginInstallPreview, jsonOutput bool) error {
+	if jsonOutput {
+		return pluginJSON(out, preview)
+	}
+	if _, err := fmt.Fprintf(out, "Install source: %s\n", pluginText(preview.Source)); err != nil {
+		return err
+	}
+	for _, p := range preview.Plugins {
+		if _, err := fmt.Fprintf(out, "%s  %s  %s\n  %s\n", pluginText(p.ID), pluginText(p.Version), pluginText(p.Name), pluginText(p.Description)); err != nil {
+			return err
+		}
+		if len(preview.Plugins) == 1 {
+			if _, err := fmt.Fprintf(out, "Rules: %s\nMCP servers: %s\n", pluginText(strings.Join(p.Rules, ", ")), pluginText(strings.Join(p.MCPServers, ", "))); err != nil {
+				return err
+			}
+			if p.Review != nil {
+				if _, err := fmt.Fprintf(out, "Review stages: %s\n", pluginText(strings.Join(p.Review.Stages, ", "))); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	message := "No plugin was installed."
+	if len(preview.Plugins) > 1 {
+		message += " Use --plugin ID to choose from multiple plugins."
+	}
+	_, err := fmt.Fprintln(out, message)
+	return err
 }
 
 func pluginText(value string) string {
@@ -86,6 +129,12 @@ func newPluginCmd() *cobra.Command {
 		if err == nil && info.Review != nil {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
 		}
+		if err == nil && info.Revision != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revision: %s\n", pluginText(info.Revision))
+		}
+		if err == nil && info.SHA256 != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "SHA-256: %s\n", pluginText(info.SHA256))
+		}
 		return err
 	}
 	command.AddCommand(&cobra.Command{
@@ -103,7 +152,7 @@ func newPluginCmd() *cobra.Command {
 				return pluginJSON(cmd.OutOrStdout(), infos)
 			}
 			if len(infos) == 0 {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No plugins installed. Use 'ocr plugin install PATH' or browse 'ocr plugin market search'.")
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No plugins installed. Use 'ocr plugin install URL_OR_PATH' or browse 'ocr plugin market search'.")
 				return err
 			}
 			out := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
@@ -132,12 +181,36 @@ func newPluginCmd() *cobra.Command {
 			return printInstalled(cmd, installed)
 		}),
 	})
-	var enable bool
+	var enable, dryRun bool
+	var selectedPlugin string
 	install := &cobra.Command{
-		Use: "install <path|id@market>", Short: "Copy a local package or install from a registered marketplace",
-		Example: "  ocr plugin install ./examples/ocr-plugins/review-checklist\n  ocr plugin install review-checklist@examples --enable", Args: exactArgs(1),
+		Use: "install <url|path|id@market>", Short: "Install from a plugin link, local package or marketplace",
+		Example: "  ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review\n  ocr plugin install https://example.com/plugin.zip --enable\n  ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review\n  ocr plugin install ./examples/ocr-plugins/review-checklist", Args: exactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
-			installed, err := store.Install(cmd.Context(), args[0], enable)
+			prepared, err := store.PrepareInstall(cmd.Context(), args[0], selectedPlugin)
+			var choices *plugin.SelectionRequiredError
+			if errors.As(err, &choices) {
+				preview := pluginInstallPreview{Source: plugin.DisplaySource(args[0]), Plugins: make([]pluginInfo, 0, len(choices.Candidates))}
+				for _, item := range choices.Candidates {
+					preview.Plugins = append(preview.Plugins, pluginInfo{ID: item.ID, Name: item.Name, Version: item.Version, Description: item.Description, Source: plugin.DisplaySource(item.Source), SHA256: item.SHA256})
+				}
+				if printErr := printPluginInstallPreview(cmd.OutOrStdout(), preview, jsonOutput); printErr != nil {
+					return printErr
+				}
+				if dryRun {
+					return nil
+				}
+				return fmt.Errorf("source contains multiple plugins; choose one with --plugin ID")
+			}
+			if err != nil {
+				return err
+			}
+			defer prepared.Close()
+			if dryRun {
+				info := pluginManagementInfo(plugin.Installed{Manifest: prepared.Manifest, Source: prepared.Source, SHA256: prepared.SHA256, Revision: prepared.Revision})
+				return printPluginInstallPreview(cmd.OutOrStdout(), pluginInstallPreview{Source: info.Source, Plugins: []pluginInfo{info}}, jsonOutput)
+			}
+			installed, err := store.InstallPrepared(cmd.Context(), prepared, enable)
 			if err != nil {
 				return err
 			}
@@ -151,6 +224,8 @@ func newPluginCmd() *cobra.Command {
 		}),
 	}
 	install.Flags().BoolVar(&enable, "enable", false, "activate the package for subsequent reviews; its MCP tools can execute code")
+	install.Flags().StringVar(&selectedPlugin, "plugin", "", "select a plugin ID when a link contains multiple plugins")
+	install.Flags().BoolVar(&dryRun, "dry-run", false, "download and inspect the source without installing or enabling plugins")
 	command.AddCommand(install)
 	command.AddCommand(&cobra.Command{
 		Use: "update <id>", Short: "Refresh a plugin from its original source, preserving enabled state", Args: exactArgs(1),

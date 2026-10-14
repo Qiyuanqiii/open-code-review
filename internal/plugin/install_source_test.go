@@ -323,6 +323,51 @@ func TestDirectHTTPSZIPDiscoveryAndInvalidPackages(t *testing.T) {
 	requireError(t, err, "owner and repository")
 }
 
+func TestHTTPSZIPPreservesNestedManifestData(t *testing.T) {
+	manifest, err := json.Marshal(testManifest("example", "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []struct{ name, content string }{
+		{"malformed", "{"},
+		{"duplicate", string(manifest)},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			archives := make(map[string][]byte)
+			for _, prefix := range []string{"", "wrapped/"} {
+				archives["/"+prefix+"plugin.zip"] = zipEntries(t, map[string]string{
+					prefix + ManifestFilename:               string(manifest),
+					prefix + "rules.json":                   "{}",
+					prefix + "fixtures/" + ManifestFilename: fixture.content,
+					prefix + "fixtures/rules.json":          "{}",
+				})
+			}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if archive, ok := archives[r.URL.Path]; ok {
+					w.Write(archive)
+				} else {
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			for _, path := range []string{"/plugin.zip", "/wrapped/plugin.zip"} {
+				t.Run(path, func(t *testing.T) {
+					store := NewStore(t.TempDir())
+					store.client = server.Client()
+					installed, err := store.Install(context.Background(), server.URL+path, false)
+					if err != nil {
+						t.Fatal(err)
+					}
+					data, err := os.ReadFile(filepath.Join(installed.Dir, "fixtures", ManifestFilename))
+					if err != nil || string(data) != fixture.content {
+						t.Fatalf("nested manifest data = %q, %v", data, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 type pluginRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f pluginRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {

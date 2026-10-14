@@ -221,6 +221,60 @@ func TestRemoteMarketplaceIntegrityAndCache(t *testing.T) {
 	}
 }
 
+func TestRedirectedCatalogInstallAndUpdate(t *testing.T) {
+	archives := map[string][]byte{"1": testZIP(t, "example", "1"), "2": testZIP(t, "example", "2")}
+	var release atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/entry":
+			http.Redirect(w, r, fmt.Sprintf("/v%d/ocr-marketplace.json", release.Load()), http.StatusFound)
+		case "/v1/ocr-marketplace.json", "/v2/ocr-marketplace.json":
+			version := strings.TrimPrefix(strings.Split(r.URL.Path, "/")[1], "v")
+			json.NewEncoder(w).Encode(catalog{SchemaVersion: 1, Name: "Redirected catalog", Plugins: []catalogPlugin{{
+				ID: "example", Name: "Example", Version: version, Source: "plugin.zip", SHA256: zipDigest(archives[version]),
+			}}})
+		case "/v1/plugin.zip", "/v2/plugin.zip":
+			version := strings.TrimPrefix(strings.Split(r.URL.Path, "/")[1], "v")
+			w.Write(archives[version])
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	for _, mode := range []string{"direct", "registered"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			release.Store(1)
+			store := NewStore(t.TempDir())
+			store.client = server.Client()
+			origin := server.URL + "/entry"
+			source := origin
+			if mode == "registered" {
+				market, err := store.AddMarket(ctx, "remote", origin)
+				if err != nil || market.Source != origin || len(market.Plugins) != 1 || market.Plugins[0].Source != server.URL+"/v1/plugin.zip" {
+					t.Fatalf("redirected market = %+v, %v", market, err)
+				}
+				source = "example@remote"
+			}
+			installed, err := store.Install(ctx, source, false)
+			if err != nil || installed.Manifest.Version != "1" || installed.Source != source {
+				t.Fatalf("redirected install = %+v, %v", installed, err)
+			}
+			release.Store(2)
+			if mode == "registered" {
+				market, err := store.RefreshMarket(ctx, "remote")
+				if err != nil || market.Source != origin || len(market.Plugins) != 1 || market.Plugins[0].Source != server.URL+"/v2/plugin.zip" {
+					t.Fatalf("redirected refresh = %+v, %v", market, err)
+				}
+			}
+			updated, err := store.Update(ctx, "example")
+			if err != nil || updated.Manifest.Version != "2" || updated.Source != source {
+				t.Fatalf("redirected update = %+v, %v", updated, err)
+			}
+		})
+	}
+}
+
 func TestMarketplaceValidation(t *testing.T) {
 	ctx := context.Background()
 	for _, data := range []string{
@@ -295,18 +349,18 @@ func TestHTTPSRedirectsAndDownloadBounds(t *testing.T) {
 	store := NewStore(t.TempDir())
 	store.client = server.Client()
 	for _, test := range []struct{ path, want string }{{"/downgrade", "HTTPS"}, {"/redirect", "too many redirects"}, {"/large", "byte limit"}, {"/chunked", "byte limit"}, {"/missing", "HTTP 404"}} {
-		_, err := store.download(ctx, server.URL+test.path, 10)
+		_, _, err := store.download(ctx, server.URL+test.path, 10)
 		requireError(t, err, test.want)
 	}
-	data, err := store.download(ctx, server.URL+"/ok", 10)
+	data, _, err := store.download(ctx, server.URL+"/ok", 10)
 	if err != nil || string(data) != "ok" {
 		t.Fatalf("download = %s, %v", data, err)
 	}
-	_, err = store.download(ctx, plain.URL, 10)
+	_, _, err = store.download(ctx, plain.URL, 10)
 	requireError(t, err, "HTTPS")
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	_, err = store.download(cancelled, server.URL+"/ok", 10)
+	_, _, err = store.download(cancelled, server.URL+"/ok", 10)
 	requireError(t, err, "context canceled")
 }
 
@@ -397,7 +451,7 @@ func TestDownloadErrorsRedactQueries(t *testing.T) {
 	store := NewStore(t.TempDir())
 	store.client = server.Client()
 	for _, path := range []string{"/missing", "/redirect"} {
-		_, err := store.download(context.Background(), server.URL+path+"?token=request-secret", 100)
+		_, _, err := store.download(context.Background(), server.URL+path+"?token=request-secret", 100)
 		if err == nil {
 			t.Fatal("expected download failure")
 		}
@@ -407,7 +461,7 @@ func TestDownloadErrorsRedactQueries(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := store.download(cancelled, server.URL+"/catalog?token=request-secret", 100)
+	_, _, err := store.download(cancelled, server.URL+"/catalog?token=request-secret", 100)
 	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "request-secret") {
 		t.Fatalf("redacted cancellation error = %v", err)
 	}

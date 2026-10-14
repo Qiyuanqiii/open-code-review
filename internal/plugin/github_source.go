@@ -73,7 +73,7 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 	base := url.PathEscape(repository.owner) + "/" + url.PathEscape(repository.repo)
 	ref := repository.ref
 	revision := ""
-	data, err := s.download(ctx, "https://api.github.com/repos/"+base+"/commits/"+url.PathEscape(ref), maxManifestBytes)
+	data, _, err := s.download(ctx, "https://api.github.com/repos/"+base+"/commits/"+url.PathEscape(ref), maxManifestBytes)
 	if err != nil {
 		var status httpStatusError
 		// Public API quotas can be exhausted independently of archive downloads.
@@ -94,7 +94,7 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 		}
 		ref, revision = strings.ToLower(commit.SHA), strings.ToLower(commit.SHA)
 	}
-	archive, err := s.download(ctx, "https://codeload.github.com/"+base+"/zip/"+url.PathEscape(ref), maxArchiveBytes)
+	archive, _, err := s.download(ctx, "https://codeload.github.com/"+base+"/zip/"+url.PathEscape(ref), maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err
 	}

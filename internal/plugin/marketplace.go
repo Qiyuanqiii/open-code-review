@@ -146,13 +146,13 @@ func validateHTTPS(source string) error {
 	return nil
 }
 
-func (s *Store) download(ctx context.Context, source string, limit int64) ([]byte, error) {
+func (s *Store) download(ctx context.Context, source string, limit int64) ([]byte, string, error) {
 	if err := validateHTTPS(source); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	client := *s.client
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -163,20 +163,20 @@ func (s *Store) download(ctx context.Context, source string, limit int64) ([]byt
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", DisplaySource(source), redactDownloadError(err, source))
+		return nil, "", fmt.Errorf("download %s: %w", DisplaySource(source), redactDownloadError(err, source))
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, httpStatusError{status: response.StatusCode, source: source}
+		return nil, "", httpStatusError{status: response.StatusCode, source: source}
 	}
 	if response.ContentLength > limit {
-		return nil, fmt.Errorf("download exceeds %d byte limit", limit)
+		return nil, "", fmt.Errorf("download exceeds %d byte limit", limit)
 	}
 	data, err := readBounded(response.Body, limit)
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", DisplaySource(source), redactDownloadError(err, source))
+		return nil, "", fmt.Errorf("download %s: %w", DisplaySource(source), redactDownloadError(err, source))
 	}
-	return data, nil
+	return data, response.Request.URL.String(), nil
 }
 
 func (s *Store) loadMarket(ctx context.Context, name, source string) (Market, error) {
@@ -189,15 +189,19 @@ func (s *Store) loadMarket(ctx context.Context, name, source string) (Market, er
 		return result, err
 	}
 	var data []byte
+	catalogSource := resolved
 	if remote {
-		data, err = s.download(ctx, resolved, maxCatalogBytes)
+		data, catalogSource, err = s.download(ctx, resolved, maxCatalogBytes)
 	} else {
 		data, err = readFileBounded(resolved, maxCatalogBytes)
 	}
 	if err != nil {
 		return result, err
 	}
-	return parseMarket(name, resolved, data, remote)
+	result, err = parseMarket(name, catalogSource, data, remote)
+	// Refresh the subscribed URL so redirects can track new releases.
+	result.Source = resolved
+	return result, err
 }
 
 func parseMarket(name, resolved string, data []byte, remote bool) (Market, error) {
@@ -388,7 +392,7 @@ func (s *Store) prepare(ctx context.Context, source, digest, stage string) error
 
 func (s *Store) preparePackage(ctx context.Context, source, digest, stage string) (string, error) {
 	if strings.HasPrefix(strings.ToLower(source), "https:") {
-		data, err := s.download(ctx, source, maxArchiveBytes)
+		data, _, err := s.download(ctx, source, maxArchiveBytes)
 		if err != nil {
 			return "", err
 		}

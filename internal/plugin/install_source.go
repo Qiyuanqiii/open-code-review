@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -151,7 +152,7 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 		}
 		return s.prepareGitHub(ctx, repository, pluginID, directory)
 	}
-	data, err := s.download(ctx, source, maxArchiveBytes)
+	data, catalogSource, err := s.download(ctx, source, maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err
 	}
@@ -160,7 +161,7 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 		if len(data) > maxCatalogBytes {
 			return "", "", "", "", fmt.Errorf("marketplace exceeds %d byte limit", maxCatalogBytes)
 		}
-		packageDir, digest, selection, err = s.prepareCatalog(ctx, source, data, pluginID, directory)
+		packageDir, digest, selection, err = s.prepareCatalog(ctx, catalogSource, data, pluginID, directory)
 		return packageDir, digest, "", selection, err
 	}
 	if !bytes.HasPrefix(data, []byte("PK")) {
@@ -237,19 +238,24 @@ func selectPackage(ctx context.Context, directory, source, pluginID string) (str
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if entry.IsDir() || entry.Name() != ManifestFilename {
+		if !entry.IsDir() {
 			return nil
 		}
-		manifest, err := inspectPackage(ctx, filepath.Dir(name))
+		if _, err := os.Stat(filepath.Join(name, ManifestFilename)); errors.Is(err, os.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		manifest, err := inspectPackage(ctx, name)
 		if err != nil {
 			return err
 		}
 		if _, exists := paths[manifest.ID]; exists {
 			return fmt.Errorf("source contains duplicate plugin id %q", manifest.ID)
 		}
-		paths[manifest.ID] = filepath.Dir(name)
+		paths[manifest.ID] = name
 		entries = append(entries, CatalogEntry{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Description: manifest.Description, Source: source})
-		return nil
+		return filepath.SkipDir
 	})
 	if err != nil {
 		return "", err

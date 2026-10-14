@@ -1,0 +1,32 @@
+name: PR 1738 CodeQL validation
+on:
+  push:
+    branches: [codex/validate-pr1738-codeql-20261014]
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 135138a4ed409bf696018dc28a79d3c6a53d9b75
+          persist-credentials: false
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3
+        with:
+          languages: go
+          build-mode: autobuild
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.2/codeql-bundle-linux64.tar.zst
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
+        with:
+          output: codeql-results
+          upload: never
+          upload-database: false
+          category: /language:go
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr1738-codeql-sarif
+          path: codeql-results/*.sarif
+          if-no-files-found: error
+          retention-days: 7

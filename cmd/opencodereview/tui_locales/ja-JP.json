@@ -222,6 +222,23 @@
     "Use /login to sign in with ChatGPT.": "/login で ChatGPT にサインインします。",
     "ChatGPT sign-in did not complete: %s": "ChatGPT へのサインインが完了しませんでした：%s",
     "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.": "ChatGPT へのサインインが完了しました。/provider で ChatGPT とモデルを設定してください。",
-    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "サインイン済みですが、ChatGPT プランの使用は無効です。ocr auth login --provider chatgpt --enable-plan を実行して許可してください。"
+    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "サインイン済みですが、ChatGPT プランの使用は無効です。ocr auth login --provider chatgpt --enable-plan を実行して許可してください。",
+    "Install from link": "リンクからインストール",
+    "Paste a plugin URL": "プラグインの URL を貼り付け",
+    "Use arrow keys and Enter to choose": "矢印キーで選択し Enter で確定",
+    "↑/↓ choose · Enter confirm · Esc back": "↑/↓ 選択 · Enter 確定 · Esc 戻る",
+    "Enter preview · Esc cancel": "Enter プレビュー · Esc キャンセル",
+    "Preparing plugin": "プラグインを準備中",
+    "Installing plugin": "プラグインをインストール中",
+    "Plugin task cancelled.": "プラグインの処理をキャンセルしました。",
+    "Paste a ZIP, GitHub repository, or marketplace URL.": "ZIP、GitHub リポジトリ、またはマーケットの URL を貼り付けてください。",
+    "Enter previews the plugin before installation.": "Enter でインストール前にプラグインを確認できます。",
+    "Choose a plugin from this source.": "このソースからプラグインを選択してください。",
+    "Revision: %s": "リビジョン: %s",
+    "Review stages: %s": "レビュー段階: %s",
+    "Install": "インストール",
+    "Install and enable": "インストールして有効化",
+    "plugin preparation produced no package": "プラグインの準備でパッケージが生成されませんでした",
+    "Enter an HTTPS plugin URL.": "HTTPS のプラグイン URL を入力してください。"
   }
 }

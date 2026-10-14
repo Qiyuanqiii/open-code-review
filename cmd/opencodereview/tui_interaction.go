@@ -41,7 +41,7 @@ var tuiCommands = []tuiCommand{
 
 func (m reviewTUIModel) commandChoices() []tuiCommand {
 	value := m.input.Value()
-	if m.menuDismissed || m.screen == tuiSettings || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \t\n") {
+	if m.menuDismissed || m.screen == tuiSettings || m.isPluginInstallScreen() || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \t\n") {
 		return nil
 	}
 	var choices []tuiCommand

@@ -222,6 +222,23 @@
     "Use /login to sign in with ChatGPT.": "Use /login to sign in with ChatGPT.",
     "ChatGPT sign-in did not complete: %s": "ChatGPT sign-in did not complete: %s",
     "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.": "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.",
-    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission."
+    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.",
+    "Install from link": "Install from link",
+    "Paste a plugin URL": "Paste a plugin URL",
+    "Use arrow keys and Enter to choose": "Use arrow keys and Enter to choose",
+    "↑/↓ choose · Enter confirm · Esc back": "↑/↓ choose · Enter confirm · Esc back",
+    "Enter preview · Esc cancel": "Enter preview · Esc cancel",
+    "Preparing plugin": "Preparing plugin",
+    "Installing plugin": "Installing plugin",
+    "Plugin task cancelled.": "Plugin task cancelled.",
+    "Paste a ZIP, GitHub repository, or marketplace URL.": "Paste a ZIP, GitHub repository, or marketplace URL.",
+    "Enter previews the plugin before installation.": "Enter previews the plugin before installation.",
+    "Choose a plugin from this source.": "Choose a plugin from this source.",
+    "Revision: %s": "Revision: %s",
+    "Review stages: %s": "Review stages: %s",
+    "Install": "Install",
+    "Install and enable": "Install and enable",
+    "plugin preparation produced no package": "plugin preparation produced no package",
+    "Enter an HTTPS plugin URL.": "Enter an HTTPS plugin URL."
   }
 }

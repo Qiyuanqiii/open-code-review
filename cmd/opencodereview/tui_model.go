@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -37,6 +38,9 @@ const (
 	tuiPluginDetails
 	tuiMarket
 	tuiMarketDetails
+	tuiPluginLink
+	tuiPluginChoose
+	tuiPluginInstallPreview
 )
 
 type tuiTickMsg time.Time
@@ -144,6 +148,13 @@ type reviewTUIModel struct {
 	markets           []tuiMarketInfo
 	pluginQuery       string
 	pluginError       string
+	pluginSource      string
+	pluginCandidates  []plugin.CatalogEntry
+	pluginChoice      int
+	pluginPrepared    *tuiPreparedPlugin
+	pluginEnable      bool
+	pluginReturn      tuiScreen
+	pluginReturnIndex int
 }
 
 func newReviewTUI(ctx context.Context, opts reviewOptions, services tuiServices, colored bool) reviewTUIModel {
@@ -301,7 +312,12 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tuiPluginDoneMsg:
 		return m.finishPluginJob(msg)
+	case tuiPluginPreparedMsg:
+		return m.finishPluginPrepare(msg)
 	case tea.KeyPressMsg:
+		if m.isPluginInstallScreen() {
+			return m.updatePluginInstall(msg)
+		}
 		if m.screen == tuiSettings && msg.String() != "ctrl+c" {
 			return m.updateSettings(msg)
 		}
@@ -406,7 +422,7 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					count = len(m.sessions)
 				}
 				if m.pluginError == "" && m.screen == tuiPlugins {
-					count = len(m.plugins)
+					count = len(m.plugins) + 1
 				}
 				if m.pluginError == "" && m.screen == tuiMarket {
 					count = len(m.marketEntries)
@@ -436,6 +452,9 @@ func (m reviewTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 		}
+	}
+	if m.isPluginInstallScreen() && (m.screen != tuiPluginLink || m.busy) {
+		return m, nil
 	}
 	var cmd tea.Cmd
 	before := m.input.Value()
@@ -575,6 +594,10 @@ func (m reviewTUIModel) command(line string) (tea.Model, tea.Cmd) {
 	if m.busy {
 		m.notice = "A task is running. Esc cancels it; /logs shows its progress."
 		return m, nil
+	}
+	if m.isPluginScreen() && tuiPluginURL(line) {
+		m = m.openPluginLink(false)
+		return m.startPluginPrepare(line, "")
 	}
 	m.notice, m.isError = "", false
 	switch name {

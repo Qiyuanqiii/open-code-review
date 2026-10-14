@@ -222,6 +222,23 @@
     "Use /login to sign in with ChatGPT.": "Используйте /login для входа в ChatGPT.",
     "ChatGPT sign-in did not complete: %s": "Вход в ChatGPT не завершён: %s",
     "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.": "Вход в ChatGPT завершён. Настройте ChatGPT и его модель командой /provider.",
-    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "Вход выполнен; использование тарифа ChatGPT отключено. Выполните ocr auth login --provider chatgpt --enable-plan, чтобы предоставить разрешение."
+    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "Вход выполнен; использование тарифа ChatGPT отключено. Выполните ocr auth login --provider chatgpt --enable-plan, чтобы предоставить разрешение.",
+    "Install from link": "Установить по ссылке",
+    "Paste a plugin URL": "Вставьте URL плагина",
+    "Use arrow keys and Enter to choose": "Выберите стрелками и нажмите Enter",
+    "↑/↓ choose · Enter confirm · Esc back": "↑/↓ выбор · Enter подтвердить · Esc назад",
+    "Enter preview · Esc cancel": "Enter просмотр · Esc отмена",
+    "Preparing plugin": "Подготовка плагина",
+    "Installing plugin": "Установка плагина",
+    "Plugin task cancelled.": "Задача плагина отменена.",
+    "Paste a ZIP, GitHub repository, or marketplace URL.": "Вставьте URL ZIP, репозитория GitHub или каталога плагинов.",
+    "Enter previews the plugin before installation.": "Enter покажет плагин перед установкой.",
+    "Choose a plugin from this source.": "Выберите плагин из этого источника.",
+    "Revision: %s": "Ревизия: %s",
+    "Review stages: %s": "Этапы ревью: %s",
+    "Install": "Установить",
+    "Install and enable": "Установить и включить",
+    "plugin preparation produced no package": "Подготовка плагина не создала пакет",
+    "Enter an HTTPS plugin URL.": "Введите URL плагина с HTTPS."
   }
 }

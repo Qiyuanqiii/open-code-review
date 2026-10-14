@@ -222,6 +222,23 @@
     "Use /login to sign in with ChatGPT.": "/login으로 ChatGPT에 로그인하세요.",
     "ChatGPT sign-in did not complete: %s": "ChatGPT 로그인이 완료되지 않았습니다: %s",
     "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.": "ChatGPT 로그인이 완료되었습니다. /provider로 ChatGPT와 모델을 설정하세요.",
-    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "로그인했지만 ChatGPT 요금제 사용 권한이 비활성화되어 있습니다. ocr auth login --provider chatgpt --enable-plan을 실행하여 권한을 부여하세요."
+    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "로그인했지만 ChatGPT 요금제 사용 권한이 비활성화되어 있습니다. ocr auth login --provider chatgpt --enable-plan을 실행하여 권한을 부여하세요.",
+    "Install from link": "링크로 설치",
+    "Paste a plugin URL": "플러그인 URL 붙여넣기",
+    "Use arrow keys and Enter to choose": "방향키로 선택하고 Enter로 확인",
+    "↑/↓ choose · Enter confirm · Esc back": "↑/↓ 선택 · Enter 확인 · Esc 뒤로",
+    "Enter preview · Esc cancel": "Enter 미리 보기 · Esc 취소",
+    "Preparing plugin": "플러그인 준비 중",
+    "Installing plugin": "플러그인 설치 중",
+    "Plugin task cancelled.": "플러그인 작업을 취소했습니다.",
+    "Paste a ZIP, GitHub repository, or marketplace URL.": "ZIP, GitHub 저장소 또는 마켓 URL을 붙여넣으세요.",
+    "Enter previews the plugin before installation.": "Enter를 누르면 설치 전에 플러그인을 미리 볼 수 있습니다.",
+    "Choose a plugin from this source.": "이 소스에서 플러그인을 선택하세요.",
+    "Revision: %s": "리비전: %s",
+    "Review stages: %s": "리뷰 단계: %s",
+    "Install": "설치",
+    "Install and enable": "설치 후 활성화",
+    "plugin preparation produced no package": "플러그인 준비 과정에서 패키지가 생성되지 않았습니다",
+    "Enter an HTTPS plugin URL.": "HTTPS 플러그인 URL을 입력하세요."
   }
 }

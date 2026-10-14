@@ -222,7 +222,7 @@ func TestTUIPluginActionsRefreshSelectedDetails(t *testing.T) {
 
 func TestTUIPluginCommandValidationAndBusyGuard(t *testing.T) {
 	for _, line := range []string{
-		"/plugins extra", "/plugin enable", "/plugin install", "/plugin remove first second", "/plugin update --json", "/plugin install source --unknown",
+		"/plugins extra", "/plugin enable", "/plugin remove first second", "/plugin update --json", "/plugin install source --unknown",
 		"/plugin market add name", "/plugin market refresh", "/plugin market remove one two", "/plugin market unknown", "/plugin arbitrary", `/plugin install "unterminated`,
 	} {
 		t.Run(line, func(t *testing.T) {

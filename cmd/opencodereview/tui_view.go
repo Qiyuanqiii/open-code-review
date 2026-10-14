@@ -46,6 +46,11 @@ func (m reviewTUIModel) modelLabel() string {
 
 func (m *reviewTUIModel) refresh(bottom bool) {
 	m.input.Placeholder = m.tr("Type a command or describe your changes")
+	if m.screen == tuiPluginLink {
+		m.input.Placeholder = m.tr("Paste a plugin URL")
+	} else if m.screen == tuiPluginChoose || m.screen == tuiPluginInstallPreview {
+		m.input.Placeholder = m.tr("Use arrow keys and Enter to choose")
+	}
 	reserve := 6
 	if m.notice != "" {
 		reserve++
@@ -122,6 +127,12 @@ func (m reviewTUIModel) View() tea.View {
 			hint = m.tr("↑/↓ select · Enter details · /plugin actions · Esc back")
 			if m.screen == tuiPluginDetails || m.screen == tuiMarketDetails || m.pluginError != "" {
 				hint = m.tr("PgUp/PgDn scroll · /plugin actions · Esc back")
+			}
+		}
+		if !m.busy && m.isPluginInstallScreen() {
+			hint = m.tr("↑/↓ choose · Enter confirm · Esc back")
+			if m.screen == tuiPluginLink {
+				hint = m.tr("Enter preview · Esc cancel")
 			}
 		}
 		lines = append(lines, m.tint(ansi.Truncate(status, w, "…"), tuiBrandMuted), m.tint(ansi.Truncate(hint, w, "…"), tuiBrandMuted))
@@ -217,6 +228,9 @@ func (m reviewTUIModel) settingsContent() string {
 }
 
 func (m reviewTUIModel) content() string {
+	if m.isPluginInstallScreen() {
+		return m.pluginInstallContent()
+	}
 	switch m.screen {
 	case tuiHome:
 		return m.homeContent()

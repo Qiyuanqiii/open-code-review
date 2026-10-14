@@ -147,9 +147,15 @@ func (m reviewTUIModel) pluginCommand(line string) (tea.Model, tea.Cmd) {
 		if len(args) == 1 || (len(args) == 2 && args[1] == "--enable") {
 			if source := m.selectedMarketPlugin(); source != "" {
 				args = append([]string{args[0], source}, args[1:]...)
+			} else {
+				return m.openPluginLink(len(args) == 2), nil
 			}
 		}
 		valid = (len(args) == 2 || (len(args) == 3 && args[2] == "--enable")) && args[1] != "" && !strings.HasPrefix(args[1], "-")
+		if valid && tuiPluginURL(args[1]) {
+			m = m.openPluginLink(len(args) == 3)
+			return m.startPluginPrepare(args[1], "")
+		}
 	case "market":
 		if len(args) >= 2 {
 			switch args[1] {
@@ -340,6 +346,9 @@ func (m reviewTUIModel) openSelectedPlugin() (tea.Model, tea.Cmd) {
 	if m.busy || m.pluginError != "" {
 		return m, nil
 	}
+	if m.screen == tuiPlugins && m.selected == len(m.plugins) {
+		return m.openPluginLink(false), nil
+	}
 	if m.screen == tuiPlugins && m.selected >= 0 && m.selected < len(m.plugins) {
 		p := m.plugins[m.selected]
 		m.pluginDetail, m.screen = &p, tuiPluginDetails
@@ -435,6 +444,7 @@ func (m reviewTUIModel) pluginContent() string {
 		if len(m.plugins) == 0 {
 			lines = append(lines, m.tr("No plugins installed. /market browses available packages."))
 		}
+		lines = append(lines, "", m.pluginActionRow(len(m.plugins), "Install from link"))
 		lines = append(lines, "", m.tr("Enable or disable: /plugin enable [ID] | /plugin disable [ID]"),
 			m.tr("Update or remove: /plugin update [ID] | /plugin remove [ID]"),
 			m.tr("Install local package: /plugin install \"PATH\" [--enable]"))

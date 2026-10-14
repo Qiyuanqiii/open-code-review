@@ -20,6 +20,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/chatgptauth"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -85,6 +86,8 @@ type tuiServices struct {
 	config          func(string) tea.Cmd
 	login           func() tea.Cmd
 	pluginCommand   func(context.Context, []string) (string, error)
+	preparePlugin   func(context.Context, string, string) (*plugin.PreparedInstall, error)
+	installPlugin   func(context.Context, *plugin.PreparedInstall, bool) (plugin.Installed, error)
 	workers         *tuiWorkers
 	savePreferences func(tuiPreferences) error
 }
@@ -129,6 +132,8 @@ func runReviewTUI(parent context.Context, opts reviewOptions) error {
 		review: runTUIReview, preview: runTUIPreview,
 		savePreferences: saveTUIPreferences,
 		pluginCommand:   runPluginCommand,
+		preparePlugin:   prepareTUIPlugin,
+		installPlugin:   installTUIPlugin,
 		sessions:        session.ListSessions,
 		load: func(repo, id string) (*session.Summary, []model.LlmComment, error) {
 			summary, err := session.LoadSummary(repo, id)

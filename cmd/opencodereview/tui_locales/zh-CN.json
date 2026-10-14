@@ -222,6 +222,23 @@
     "Use /login to sign in with ChatGPT.": "使用 /login 登录 ChatGPT。",
     "ChatGPT sign-in did not complete: %s": "ChatGPT 登录未完成：%s",
     "ChatGPT sign-in completed. Use /provider to configure ChatGPT and its model.": "ChatGPT 登录已完成。使用 /provider 配置 ChatGPT 及其模型。",
-    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "已登录；ChatGPT 套餐使用权限尚未启用。运行 ocr auth login --provider chatgpt --enable-plan 授予权限。"
+    "Signed in; ChatGPT plan usage is disabled. Run ocr auth login --provider chatgpt --enable-plan to grant permission.": "已登录；ChatGPT 套餐使用权限尚未启用。运行 ocr auth login --provider chatgpt --enable-plan 授予权限。",
+    "Install from link": "从链接安装",
+    "Paste a plugin URL": "粘贴插件网址",
+    "Use arrow keys and Enter to choose": "使用方向键选择，按 Enter 确认",
+    "↑/↓ choose · Enter confirm · Esc back": "↑/↓ 选择 · Enter 确认 · Esc 返回",
+    "Enter preview · Esc cancel": "Enter 预览 · Esc 取消",
+    "Preparing plugin": "正在准备插件",
+    "Installing plugin": "正在安装插件",
+    "Plugin task cancelled.": "插件任务已取消。",
+    "Paste a ZIP, GitHub repository, or marketplace URL.": "粘贴 ZIP、GitHub 仓库或插件市场的网址。",
+    "Enter previews the plugin before installation.": "按 Enter 在安装前预览插件。",
+    "Choose a plugin from this source.": "从此来源选择一个插件。",
+    "Revision: %s": "修订版：%s",
+    "Review stages: %s": "审查阶段：%s",
+    "Install": "安装",
+    "Install and enable": "安装并启用",
+    "plugin preparation produced no package": "插件准备未生成安装包",
+    "Enter an HTTPS plugin URL.": "请输入 HTTPS 插件网址。"
   }
 }

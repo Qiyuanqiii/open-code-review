@@ -8,10 +8,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -99,6 +103,133 @@ func TestZIPExtractionRejectsDestinationSymlink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "escaped.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("outside file exists or cannot be inspected: %v", err)
+	}
+}
+
+func packageDirectoryLink(t *testing.T, target, link string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	// Junctions exercise Windows traversal without requiring symlink privileges.
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+		"$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:OCR_TEST_LINK -Target $env:OCR_TEST_TARGET | Out-Null")
+	cmd.Env = append(os.Environ(), "OCR_TEST_LINK="+link, "OCR_TEST_TARGET="+target)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create directory junction: %v: %s", err, output)
+	}
+}
+
+type packageMutationContext struct {
+	context.Context
+	calls  int
+	at     int
+	mutate func()
+}
+
+func (c *packageMutationContext) Err() error {
+	c.calls++
+	if c.calls == c.at {
+		c.mutate()
+	}
+	return c.Context.Err()
+}
+
+func renamePackageDirectory(t *testing.T, source, destination string) bool {
+	t.Helper()
+	if err := os.Rename(source, destination); err != nil {
+		// An open root handle prevents directory replacement on Windows.
+		if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(32)) {
+			return false
+		}
+		t.Fatal(err)
+	}
+	return true
+}
+
+func TestCopyPackageRejectsDestinationDirectoryLink(t *testing.T) {
+	source, destination, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(source, "nested"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "nested", "created.txt"), []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	packageDirectoryLink(t, outside, filepath.Join(destination, "nested"))
+	if err := copyPackage(context.Background(), source, destination); err == nil {
+		t.Fatal("copy followed a directory link outside its destination")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "created.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside destination was written: %v", err)
+	}
+}
+
+func TestCopyPackageConfinesChangingSource(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			parent, destination, outside := t.TempDir(), t.TempDir(), t.TempDir()
+			source := filepath.Join(parent, "source")
+			replace, relative, at := source, "data.txt", 1
+			if nested {
+				replace, relative, at = filepath.Join(source, "nested"), "nested/data.txt", 3
+			}
+			if err := os.MkdirAll(replace, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(source, relative), []byte("public"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "data.txt"), []byte("private sentinel"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			blocked := false
+			ctx := &packageMutationContext{Context: context.Background(), at: at, mutate: func() {
+				if !renamePackageDirectory(t, replace, filepath.Join(parent, "original")) {
+					blocked = true
+					return
+				}
+				packageDirectoryLink(t, outside, replace)
+			}}
+			copyErr := copyPackage(ctx, source, destination)
+			if ctx.calls < ctx.at {
+				t.Fatal("source replacement was not attempted")
+			}
+			if blocked && copyErr != nil {
+				t.Fatalf("copy failed after the OS blocked source replacement: %v", copyErr)
+			}
+			data, readErr := os.ReadFile(filepath.Join(destination, relative))
+			if string(data) == "private sentinel" {
+				t.Fatal("copy read outside the selected source")
+			}
+			if copyErr == nil && (readErr != nil || string(data) != "public") {
+				t.Fatalf("successful copy did not retain selected contents: %q, %v", data, readErr)
+			}
+		})
+	}
+}
+
+func TestPrepareInstallKeepsInspectedSourceRoot(t *testing.T) {
+	source, outside := testPackage(t, "example", "1"), testPackage(t, "outside", "1")
+	original := filepath.Join(t.TempDir(), "original")
+	store := NewStore(t.TempDir())
+	// The first copy callback follows the initial check and three inspection
+	// callbacks (root, manifest, rules), before copying any file.
+	ctx := &packageMutationContext{Context: context.Background(), at: 5, mutate: func() {
+		if !renamePackageDirectory(t, source, original) {
+			return
+		}
+		packageDirectoryLink(t, outside, source)
+	}}
+	prepared, err := store.PrepareInstall(ctx, source, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Close()
+	if ctx.calls < ctx.at || prepared.Manifest.ID != "example" {
+		t.Fatalf("preparation switched away from its inspected root: %s, %d callbacks", prepared.Manifest.ID, ctx.calls)
 	}
 }
 

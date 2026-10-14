@@ -427,10 +427,15 @@ func (s *Store) preparePackage(ctx context.Context, source, digest, stage string
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
 			return "", fmt.Errorf("plugin source directory cannot contain the staging directory")
 		}
-		if _, err := inspectPackage(ctx, source); err != nil {
+		root, err := openPackageRoot(source)
+		if err != nil {
 			return "", err
 		}
-		return "", copyPackage(ctx, source, stage)
+		defer root.Close()
+		if _, err := inspectPackageRoot(ctx, root); err != nil {
+			return "", err
+		}
+		return "", copyPackageRoot(ctx, root, stage)
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("plugin source is a symlink or special file")

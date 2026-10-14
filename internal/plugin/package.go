@@ -43,35 +43,57 @@ func readFileBounded(name string, limit int64) ([]byte, error) {
 	return readBounded(file, limit)
 }
 
-// inspectPackage rejects symlinks throughout the package, not only in declared
-// contributions. It also bounds the snapshot and prevents ambiguous filenames.
-func inspectPackage(ctx context.Context, root string) (Manifest, error) {
-	var m Manifest
-	info, err := os.Lstat(root)
+func openPackageRoot(name string) (*os.Root, error) {
+	info, err := os.Lstat(name)
 	if err != nil {
-		return m, err
+		return nil, err
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return m, fmt.Errorf("plugin source must be a directory, without symlinks")
+		return nil, fmt.Errorf("plugin source must be a directory, without symlinks")
 	}
+	root, err := os.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	if !os.SameFile(info, opened) {
+		root.Close()
+		return nil, fmt.Errorf("plugin source changed while opening its directory")
+	}
+	return root, nil
+}
+
+// inspectPackage rejects symlinks throughout the package, not only in declared
+// contributions. It also bounds the snapshot and prevents ambiguous filenames.
+func inspectPackage(ctx context.Context, directory string) (Manifest, error) {
+	root, err := openPackageRoot(directory)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer root.Close()
+	return inspectPackageRoot(ctx, root)
+}
+
+func inspectPackageRoot(ctx context.Context, root *os.Root) (Manifest, error) {
+	var m Manifest
 	count := 0
 	var total int64
 	seen := make(map[string]bool)
-	err = filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
+	err := fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if name == root {
+		if name == "." {
 			return nil
 		}
-		rel, err := filepath.Rel(root, name)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
+		rel := name
 		if err := safeRelativePath(rel); err != nil {
 			return fmt.Errorf("package file %q: %w", rel, err)
 		}
@@ -102,7 +124,12 @@ func inspectPackage(ctx context.Context, root string) (Manifest, error) {
 	if err != nil {
 		return m, err
 	}
-	data, err := readFileBounded(filepath.Join(root, ManifestFilename), maxManifestBytes)
+	file, err := root.Open(ManifestFilename)
+	if err != nil {
+		return m, fmt.Errorf("read %s: %w", ManifestFilename, err)
+	}
+	defer file.Close()
+	data, err := readBounded(file, maxManifestBytes)
 	if err != nil {
 		return m, fmt.Errorf("read %s: %w", ManifestFilename, err)
 	}
@@ -111,7 +138,7 @@ func inspectPackage(ctx context.Context, root string) (Manifest, error) {
 		return m, err
 	}
 	for _, rule := range m.Rules {
-		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rule)))
+		info, err := root.Lstat(filepath.FromSlash(rule))
 		if err != nil || !info.Mode().IsRegular() {
 			return m, fmt.Errorf("rule %q must be an existing regular file", rule)
 		}
@@ -120,36 +147,47 @@ func inspectPackage(ctx context.Context, root string) (Manifest, error) {
 }
 
 func copyPackage(ctx context.Context, source, destination string) error {
-	// Walk again while copying and enforce limits on bytes actually read. A
-	// changing source cannot bypass validation by replacing a regular file with a
-	// symlink between the directory inspection and the snapshot operation.
+	sourceRoot, err := openPackageRoot(source)
+	if err != nil {
+		return err
+	}
+	defer sourceRoot.Close()
+	return copyPackageRoot(ctx, sourceRoot, destination)
+}
+
+func copyPackageRoot(ctx context.Context, source *os.Root, destination string) error {
+	targetRoot, err := os.OpenRoot(destination)
+	if err != nil {
+		return err
+	}
+	defer targetRoot.Close()
+	// Directory handles prevent ancestor replacements from escaping either tree.
 	var total int64
-	return filepath.WalkDir(source, func(name string, entry fs.DirEntry, walkErr error) error {
+	return fs.WalkDir(source.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if name == source {
+		if name == "." {
 			return nil
 		}
-		rel, err := filepath.Rel(source, name)
-		if err != nil {
+		if err := safeRelativePath(name); err != nil {
 			return err
 		}
+		rel := filepath.FromSlash(name)
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(destination, rel)
 		if info.IsDir() {
-			return os.MkdirAll(target, 0700)
+			return targetRoot.MkdirAll(rel, 0700)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("package file %q is a symlink or special file", rel)
 		}
-		input, err := os.Open(name)
+		input, err := source.Open(rel)
 		if err != nil {
 			return err
 		}
@@ -161,7 +199,7 @@ func copyPackage(ctx context.Context, source, destination string) error {
 		if !os.SameFile(info, opened) || !opened.Mode().IsRegular() {
 			return fmt.Errorf("package source changed while copying %q", rel)
 		}
-		output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600|info.Mode().Perm()&0111)
+		output, err := targetRoot.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600|info.Mode().Perm()&0111)
 		if err != nil {
 			return err
 		}

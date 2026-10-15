@@ -1,0 +1,32 @@
+name: Verify tar.gz plugin packages on Linux
+on:
+  push:
+    branches: [Qiyuanqiii/validate-plugin-targz-20261015]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 0c1a8d5df0f57facd9219779f986330fa853ba4c
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.9'
+      - name: Test package installation and executable permissions
+        shell: bash
+        run: |
+          make test PACKAGES='./internal/plugin' 2>&1 | tee plugin-linux.log
+          grep -F -- '--- PASS: TestTARGZInstalledExecutablePermissions ' plugin-linux.log
+      - name: Test plugin CLI
+        shell: bash
+        run: make test PACKAGES='./cmd/opencodereview -run Plugin' 2>&1 | tee plugin-cli-linux.log
+      - name: Save test logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: plugin-targz-linux-test-logs
+          path: '*-linux.log'

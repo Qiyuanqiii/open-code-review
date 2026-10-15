@@ -12,23 +12,23 @@ invocation only.
 
 ## Install from a link
 
-Install a public GitHub plugin repository or an HTTPS ZIP directly. No
+Install a public GitHub plugin repository or an HTTPS tar.gz package directly. No
 marketplace registration is required:
 
 ```text
 ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review
-ocr plugin install https://example.com/team-review.zip --enable
+ocr plugin install https://example.com/team-review.tar.gz --enable
 ```
 
 For a GitHub repository, OCR discovers its plugin package or published catalog.
-A catalog can point to release ZIPs containing executable builds that are not
+A catalog can point to release archives containing executable builds that are not
 present in the source tree. Installation downloads and inspects the package; it
 does not execute plugin commands or install dependencies.
 
 Preview a source without installing or enabling anything:
 
 ```text
-ocr plugin install https://example.com/team-review.zip --dry-run
+ocr plugin install https://example.com/team-review.tar.gz --dry-run
 ocr plugin install https://example.com/ocr-marketplace.json --dry-run --json
 ```
 
@@ -42,7 +42,7 @@ ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review
 Direct installations remember their original source and selected plugin.
 `ocr plugin update ID` checks that source again and preserves the enabled state.
 The stored metadata includes the downloaded archive's SHA-256 and the resolved
-GitHub revision when available. A direct ZIP's recorded digest identifies its
+GitHub revision when available. A direct archive's recorded digest identifies its
 downloaded bytes; marketplace-provided digests are also checked against the
 download before installation.
 
@@ -84,10 +84,10 @@ including executing their server commands with your account's permissions.
 | --- | --- |
 | `ocr plugin list` | List installed packages and enabled state |
 | `ocr plugin show ID` | Show source, package location, and contributed capabilities |
-| `ocr plugin install URL` | Install an HTTPS ZIP, public GitHub plugin repository, or single-plugin catalog |
+| `ocr plugin install URL` | Install an HTTPS tar.gz/ZIP, public GitHub plugin repository, or single-plugin catalog |
 | `ocr plugin install URL --plugin ID` | Choose a plugin from a source containing multiple packages |
 | `ocr plugin install SOURCE --dry-run` | Inspect packages without installing or enabling them |
-| `ocr plugin install PATH` | Copy a local directory or ZIP package |
+| `ocr plugin install PATH` | Copy a local directory or tar.gz/ZIP package |
 | `ocr plugin install ID@MARKET` | Install the selected marketplace entry |
 | `ocr plugin enable ID` / `disable ID` | Change rule and MCP contributions for subsequent reviews |
 | `ocr plugin update ID` | Replace the snapshot from its original source; preserve enabled state |
@@ -118,7 +118,28 @@ ocr plugin update review-checklist
 
 ## Author a package
 
-Place `ocr-plugin.json` at the root of a directory or ZIP archive:
+Place `ocr-plugin.json` at the root of a directory or tar.gz archive. Existing ZIP
+packages remain supported. Archive formats are detected from their contents,
+so download URLs do not need a filename extension. GitHub repository sources
+use tar.gz archives.
+
+Package the bundled checklist example from the repository root:
+
+```sh
+tar -czf review-checklist.tar.gz -C examples/ocr-plugins/review-checklist .
+ocr plugin install ./review-checklist.tar.gz --dry-run
+ocr plugin install ./review-checklist.tar.gz
+```
+
+When publishing a program or script, set its executable bit before packaging
+on Linux/macOS (for example, `chmod +x bin/review`). OCR preserves executable
+bits from regular files through extraction and installation. Package files
+receive owner read/write permissions plus their archived executable bits;
+directories remain private (`0700`). Ownership, setuid/setgid bits, and other
+archived permissions are not restored. Windows uses its native permission
+model. Symlinks, hard links, sparse files and device files are rejected.
+
+Example manifest:
 
 ```json
 {
@@ -211,10 +232,10 @@ A local directory uses `ocr-marketplace.json`, or pass an explicit JSON path:
 ```
 
 Local sources are resolved relative to the catalog. They can be directories or
-ZIP archives. A ZIP must contain `ocr-plugin.json` directly at its root, rather
+tar.gz or ZIP archives. A catalog archive must contain `ocr-plugin.json` directly at its root, rather
 than wrapping the package in another directory.
 
-For an HTTPS catalog, each entry must reference an HTTPS ZIP (an HTTPS-relative
+For an HTTPS catalog, each entry must reference an HTTPS tar.gz or ZIP (an HTTPS-relative
 URL is allowed) and include `sha256`, the 64-character hexadecimal digest of
 the archive bytes. OCR verifies the digest and the manifest ID/version before
 committing installation. HTTPS redirects must remain HTTPS. Credentials in URL
@@ -227,8 +248,10 @@ ocr plugin market search
 ocr plugin install team-review@team
 ```
 
-Limits are 1 MiB for a manifest, 4 MiB for a catalog, 32 MiB for a ZIP download,
-64 MiB expanded package content, and 4096 package entries. Rule packs and their
+Limits are 1 MiB for a manifest, 4 MiB for a catalog, 32 MiB for an archive download,
+64 MiB expanded package content, and 4096 package entries. For tar.gz, the
+decompressed stream also has a 72 MiB limit including headers, padding and
+metadata. Gzip checksums are verified before installation. Rule packs and their
 referenced text have additional runtime limits. Failed downloads, malformed
 packages, or digest mismatches leave the previous registered installation in
 place. A store lock serializes modifications from separate CLI processes;

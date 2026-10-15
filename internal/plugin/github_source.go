@@ -48,7 +48,7 @@ func parseGitHubSource(source string) (githubSource, bool, error) {
 	}
 	result.ref, result.source = "HEAD", source
 	if len(parts) > 2 {
-		// Release assets and archive URLs are ordinary HTTPS ZIP sources.
+		// Release assets and archive URLs are ordinary HTTPS archive sources.
 		if parts[2] == "releases" || parts[2] == "archive" {
 			return githubSource{}, false, nil
 		}
@@ -94,11 +94,11 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 		}
 		ref, revision = strings.ToLower(commit.SHA), strings.ToLower(commit.SHA)
 	}
-	archive, _, err := s.download(ctx, "https://codeload.github.com/"+base+"/zip/"+url.PathEscape(ref), maxArchiveBytes)
+	archive, _, err := s.download(ctx, "https://codeload.github.com/"+base+"/tar.gz/"+url.PathEscape(ref), maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err
 	}
-	if err := extractZIP(ctx, archive, directory); err != nil {
+	if err := extractTARGZ(ctx, archive, directory); err != nil {
 		return "", "", "", "", err
 	}
 	entries, err := os.ReadDir(directory)

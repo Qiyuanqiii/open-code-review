@@ -185,7 +185,7 @@ func newPluginCmd() *cobra.Command {
 	var selectedPlugin string
 	install := &cobra.Command{
 		Use: "install <url|path|id@market>", Short: "Install from a plugin link, local package or marketplace",
-		Example: "  ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review\n  ocr plugin install https://example.com/plugin.zip --enable\n  ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review\n  ocr plugin install ./examples/ocr-plugins/review-checklist", Args: exactArgs(1),
+		Example: "  ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review\n  ocr plugin install https://example.com/plugin.tar.gz --enable\n  ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review\n  ocr plugin install ./examples/ocr-plugins/review-checklist", Args: exactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
 			prepared, err := store.PrepareInstall(cmd.Context(), args[0], selectedPlugin)
 			var choices *plugin.SelectionRequiredError

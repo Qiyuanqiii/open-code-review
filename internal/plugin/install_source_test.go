@@ -261,7 +261,7 @@ func TestHTTPSUnknownFormatsAndPinnedCatalogMismatch(t *testing.T) {
 	defer server.Close()
 	store := NewStore(t.TempDir())
 	store.client = server.Client()
-	for _, test := range []struct{ path, message string }{{"/html", "plugin ZIP"}, {"/malformed", "parse marketplace"}, {"/empty", "no plugins"}, {"/mismatch", "does not match catalog"}} {
+	for _, test := range []struct{ path, message string }{{"/html", "plugin tar.gz or ZIP"}, {"/malformed", "parse marketplace"}, {"/empty", "no plugins"}, {"/mismatch", "does not match catalog"}} {
 		_, err := store.PrepareInstall(ctx, server.URL+test.path, "")
 		requireError(t, err, test.message)
 	}
@@ -387,7 +387,7 @@ func githubStore(t *testing.T, handler func(*http.Request) (int, []byte)) *Store
 func TestGitHubNestedPackageAndTreeSource(t *testing.T) {
 	ctx := context.Background()
 	manifest, _ := json.Marshal(testManifest("example", "1"))
-	archive := zipEntries(t, map[string]string{"repository-commit/README.md": "Read me", "repository-commit/plugin/" + ManifestFilename: string(manifest), "repository-commit/plugin/rules.json": "{}"})
+	archive := tarEntries(t, map[string]string{"repository-commit/README.md": "Read me", "repository-commit/plugin/" + ManifestFilename: string(manifest), "repository-commit/plugin/rules.json": "{}"})
 	revision := strings.Repeat("b", 40)
 	for _, source := range []string{"https://github.com/owner/repository", "https://github.com/owner/repository.git/", "https://github.com/owner/repository/tree/v1/plugin"} {
 		t.Run(source, func(t *testing.T) {
@@ -402,7 +402,7 @@ func TestGitHubNestedPackageAndTreeSource(t *testing.T) {
 					}
 					return http.StatusOK, []byte(`{"sha":"` + revision + `","extra":"allowed"}`)
 				}
-				if request.URL.String() != "https://codeload.github.com/owner/repository/zip/"+revision {
+				if request.URL.String() != "https://codeload.github.com/owner/repository/tar.gz/"+revision {
 					t.Errorf("archive request = %s", request.URL)
 				}
 				return http.StatusOK, archive
@@ -423,13 +423,13 @@ func TestGitHubPublishedCatalogPreferredAndQuotaFallback(t *testing.T) {
 	manifest, _ := json.Marshal(testManifest("example", "source-version"))
 	packaged := testZIP(t, "example", "release-version")
 	catalogData, _ := json.Marshal(catalog{SchemaVersion: 1, Name: "Published", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "release-version", Source: "release.zip", SHA256: zipDigest(packaged)}}})
-	archive := zipEntries(t, map[string]string{"repository-HEAD/marketplace.json": string(catalogData), "repository-HEAD/plugin/" + ManifestFilename: string(manifest), "repository-HEAD/plugin/rules.json": "{}"})
+	archive := tarEntries(t, map[string]string{"repository-HEAD/marketplace.json": string(catalogData), "repository-HEAD/plugin/" + ManifestFilename: string(manifest), "repository-HEAD/plugin/rules.json": "{}"})
 	store := githubStore(t, func(request *http.Request) (int, []byte) {
 		switch request.URL.Host {
 		case "api.github.com":
 			return http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`)
 		case "codeload.github.com":
-			if request.URL.Path != "/owner/repository/zip/HEAD" {
+			if request.URL.Path != "/owner/repository/tar.gz/HEAD" {
 				t.Errorf("quota fallback archive request = %s", request.URL)
 			}
 			return http.StatusOK, archive
@@ -453,7 +453,7 @@ func TestGitHubMultiPackageSelectionAndSourceFailures(t *testing.T) {
 	ctx := context.Background()
 	first, _ := json.Marshal(testManifest("example", "1"))
 	second, _ := json.Marshal(testManifest("another", "1"))
-	archive := zipEntries(t, map[string]string{"repository-root/a/" + ManifestFilename: string(first), "repository-root/a/rules.json": "{}", "repository-root/b/" + ManifestFilename: string(second), "repository-root/b/rules.json": "{}"})
+	archive := tarEntries(t, map[string]string{"repository-root/a/" + ManifestFilename: string(first), "repository-root/a/rules.json": "{}", "repository-root/b/" + ManifestFilename: string(second), "repository-root/b/rules.json": "{}"})
 	store := githubStore(t, func(request *http.Request) (int, []byte) {
 		if request.URL.Host == "api.github.com" {
 			return http.StatusOK, []byte(`{"sha":"` + strings.Repeat("a", 40) + `"}`)

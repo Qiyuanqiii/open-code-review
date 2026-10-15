@@ -139,6 +139,15 @@ func TestScopedCompletionPublishesOnce(t *testing.T) {
 			if grace && stop != StopMaxRounds {
 				t.Fatalf("grace report hid the exhausted request budget: %v", stop)
 			}
+			warnings := graceLimitWarnings(r)
+			if grace {
+				if len(warnings) != 1 || warnings[0].File != "file.go" ||
+					warnings[0].Message != stop.Reason()+"; the grace round completed the task" {
+					t.Fatalf("scoped completion lost its budget warning: %+v", warnings)
+				}
+			} else if len(warnings) != 0 {
+				t.Fatalf("normal completion recorded a budget warning: %+v", warnings)
+			}
 		})
 	}
 }

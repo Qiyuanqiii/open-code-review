@@ -97,7 +97,7 @@ func TestClassicClosingIsUnchanged(t *testing.T) {
 	deps.MainToolDefs = completionTestTools()
 	r := NewRunner(deps)
 	completed, stop, err := r.RunMainTask(context.Background(), nil, "a.go")
-	if completed || err != nil || stop != StopMaxRounds || r.ToolCalls()["file_read"] != 1 || len(client.requests[0].Tools) != 2 {
+	if !completed || err != nil || stop != StopMaxRounds || r.ToolCalls()["file_read"] != 1 || len(client.requests[0].Tools) != 2 {
 		t.Fatalf("classic behavior changed: completed=%v stop=%v error=%v tools=%v", completed, stop, err, r.ToolCalls())
 	}
 }
@@ -115,6 +115,10 @@ func TestScopedGraceFailureIsReturned(t *testing.T) {
 	completed, _, err := r.RunMainTaskWithOptions(context.Background(), nil, "a.go", TaskOptions{Tools: completionTestTools()})
 	if completed || err == nil || !strings.Contains(err.Error(), "provider unavailable") || deps.Session.LLMFailures() != 1 {
 		t.Fatalf("completion=%v error=%v failures=%d", completed, err, deps.Session.LLMFailures())
+	}
+	if warnings := graceLimitWarnings(r); len(warnings) != 1 ||
+		!strings.Contains(warnings[0].Message, "the grace round did not complete the task") {
+		t.Fatalf("scoped grace failure lost its budget warning: %+v", warnings)
 	}
 }
 
@@ -144,6 +148,14 @@ func TestScopedClosingSurvivesEmptyResponseAndCorrection(t *testing.T) {
 			})
 			if err != nil || completed != repaired || stop != StopCompletionBudget || validations != 2 || len(client.requests) != 3 {
 				t.Fatalf("completed=%v stop=%v error=%v validations=%d requests=%d", completed, stop, err, validations, len(client.requests))
+			}
+			outcome := "the grace round did not complete the task"
+			if repaired {
+				outcome = "the grace round completed the task"
+			}
+			if warnings := graceLimitWarnings(r); len(warnings) != 1 || warnings[0].File != "a.go" ||
+				warnings[0].Message != stop.Reason()+"; "+outcome {
+				t.Fatalf("scoped closing verdict lost its budget warning: %+v", warnings)
 			}
 			for _, req := range client.requests {
 				if len(req.Tools) != 1 || req.Tools[0].Function.Name != "task_done" {

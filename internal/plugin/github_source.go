@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -73,15 +72,13 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 	base := url.PathEscape(repository.owner) + "/" + url.PathEscape(repository.repo)
 	ref := repository.ref
 	revision := ""
-	data, _, err := s.download(ctx, "https://api.github.com/repos/"+base+"/commits/"+url.PathEscape(ref), maxManifestBytes)
-	if err != nil {
-		var status httpStatusError
-		// Public API quotas can be exhausted independently of archive downloads.
-		// The exact archive bytes remain held and hashed for confirmation.
-		if !errors.As(err, &status) || status.status != http.StatusForbidden {
-			return "", "", "", "", err
-		}
+	if decoded, err := hex.DecodeString(ref); err == nil && len(decoded) == 20 {
+		revision = strings.ToLower(ref)
 	} else {
+		data, _, err := s.download(ctx, "https://api.github.com/repos/"+base+"/commits/"+url.PathEscape(ref), maxManifestBytes)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("resolve GitHub revision: %w; retry when the API is available or use a /tree/FULL_COMMIT_SHA URL", err)
+		}
 		var commit struct {
 			SHA string `json:"sha"`
 		}
@@ -92,8 +89,9 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 		if err != nil || len(decoded) != 20 {
 			return "", "", "", "", fmt.Errorf("GitHub returned an invalid commit revision")
 		}
-		ref, revision = strings.ToLower(commit.SHA), strings.ToLower(commit.SHA)
+		revision = strings.ToLower(commit.SHA)
 	}
+	ref = revision
 	archive, _, err := s.download(ctx, "https://codeload.github.com/"+base+"/tar.gz/"+url.PathEscape(ref), maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err

@@ -309,7 +309,7 @@ func TestPluginMCPRuntimeErrorsAreVisible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(installed.Source, plugin.ManifestFilename), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Update(context.Background(), "runtime"); err != nil {
+	if _, err := store.UpdateWithOptions(context.Background(), "runtime", plugin.UpdateOptions{AcceptPermissions: true}); err != nil {
 		t.Fatal(err)
 	}
 	r, _, err = rules.NewResolver(repo, "", rules.ResolverOptions{})

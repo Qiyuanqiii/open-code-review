@@ -15,7 +15,9 @@ ocr review --review-plugin PACKAGE_ID --format json --output review.json
 Installing or enabling a package does not select
 its review workflow. Preview loads the manifest without starting the executable
 or calling a model. A real selected review runs the package command with the
-user's local permissions, like a local MCP server.
+user's local permissions, like a local MCP server. Explicit selection also loads
+that package's rules and MCP servers for this invocation, even when it is globally
+disabled; the saved enabled state is unchanged.
 
 ## Manifest
 
@@ -37,6 +39,10 @@ user's local permissions, like a local MCP server.
 The command is an executable, without shell parsing. Commands and arguments
 expand `${plugin_dir}`, `${os}`, `${arch}` and `${exe}` (the last is `.exe` on
 Windows and empty elsewhere). A runtime on PATH, such as `python`, also works.
+The bundled Python example expects the command `python`. On a machine where only
+`python3` exists, change the manifest command to `python3` before packaging or
+installation. OCR does not select an interpreter, invoke a shell or install a
+runtime automatically.
 Packages may combine review, rules and MCP contributions. Stage IDs are unique
 portable identifiers; the manifest declares an ordered plan of one to 64 stages.
 Other plugins can use different stage counts, names, schemas and decisions.
@@ -46,6 +52,17 @@ Updating the package does not change an active run's snapshot. Hosts supporting
 only the earlier `engine`/`prompt` experiment require an upgrade for this protocol.
 The host reads retired `engine`/`prompt` installation metadata so those packages
 can still be listed, removed or updated. Attempting to run one asks for an update.
+
+## Compatibility
+
+Workflow plugins may declare the manifest's optional `requires.ocr_min_version`
+and `requires.features` fields described in [native plugins](native-plugins.md#compatibility-and-host-requirements).
+Unsupported requirements are rejected before launching the process. The workflow
+API is experimental. Existing `stdio-v1` plugins continue to use the same
+`begin`/`submit` messages; there is no mandatory handshake or JSON-RPC migration.
+Unknown response envelope fields remain errors. Opaque `report` and completion
+arguments retain their plugin-defined shapes. An incompatible envelope change
+must use a new protocol/message version, rather than silently reinterpret v1.
 
 ## stdio-v1
 
@@ -71,7 +88,10 @@ OCR appends the instructions and input to its normal diff/rule context and keeps
 them through context compression. The model retains OCR's context tools. Its
 `task_done` definition comes from `completion`; direct `code_comment` is withheld
 so publication passes through the plugin's validator. No model credentials are
-sent in protocol requests. The executable inherits the normal process environment.
+sent in protocol requests. The executable inherits the normal process environment,
+which may include provider tokens or proxy settings. Like other programs running
+as the user, it can also read accessible configuration files. Install and select
+workflows only from authors you trust; this release provides no runtime sandbox.
 
 When the model calls `task_done`, OCR forwards the arguments unchanged:
 

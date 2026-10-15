@@ -18,13 +18,16 @@ import (
 
 // Installed describes an installed snapshot. Dir is an absolute path.
 type Installed struct {
-	Manifest Manifest `json:"manifest"`
-	Enabled  bool     `json:"enabled"`
-	Source   string   `json:"source"`
-	Dir      string   `json:"dir"`
-	SHA256   string   `json:"sha256,omitempty"`
-	Revision string   `json:"revision,omitempty"`
-	PluginID string   `json:"plugin_id,omitempty"`
+	Manifest            Manifest `json:"manifest"`
+	Enabled             bool     `json:"enabled"`
+	Source              string   `json:"source"`
+	Dir                 string   `json:"dir"`
+	SHA256              string   `json:"sha256,omitempty"`
+	ArchiveSHA256       string   `json:"archive_sha256,omitempty"`
+	ContentSHA256       string   `json:"content_sha256,omitempty"`
+	ContentDigestFormat string   `json:"content_digest_format,omitempty"`
+	Revision            string   `json:"revision,omitempty"`
+	PluginID            string   `json:"plugin_id,omitempty"`
 }
 
 // Store owns an independent plugin registry. Constructing or reading an empty
@@ -223,6 +226,10 @@ func (s *Store) Install(ctx context.Context, source string, enable bool) (Instal
 }
 
 func (s *Store) Update(ctx context.Context, id string) (Installed, error) {
+	return s.UpdateWithOptions(ctx, id, UpdateOptions{})
+}
+
+func (s *Store) UpdateWithOptions(ctx context.Context, id string, options UpdateOptions) (Installed, error) {
 	unlock, err := s.lock(ctx)
 	if err != nil {
 		return Installed{}, err
@@ -241,6 +248,12 @@ func (s *Store) Update(ctx context.Context, id string) (Installed, error) {
 		return Installed{}, err
 	}
 	defer prepared.Close()
+	if prepared.item.Manifest.ID != id {
+		return Installed{}, fmt.Errorf("updated package id %q does not match installed id %q", prepared.item.Manifest.ID, id)
+	}
+	if changes := executionChanges(old.Manifest, prepared.item.Manifest); len(changes) > 0 && !options.AcceptPermissions {
+		return Installed{}, &ExecutionChangesError{PluginID: id, Changes: changes}
+	}
 	return s.installPrepared(ctx, &value, prepared, old.Enabled, id)
 }
 
@@ -328,6 +341,9 @@ func (s *Store) SetEnabled(id string, enabled bool) error {
 		return fmt.Errorf("plugin %q is not installed", id)
 	}
 	if enabled {
+		if err := item.Manifest.CheckCompatibility(HostVersion); err != nil {
+			return err
+		}
 		if _, err := s.validateSnapshot(item); err != nil {
 			return fmt.Errorf("enable plugin %q: %w", id, err)
 		}

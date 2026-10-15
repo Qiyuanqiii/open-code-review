@@ -41,10 +41,61 @@ ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review
 
 Direct installations remember their original source and selected plugin.
 `ocr plugin update ID` checks that source again and preserves the enabled state.
-The stored metadata includes the downloaded archive's SHA-256 and the resolved
-GitHub revision when available. A direct archive's recorded digest identifies its
-downloaded bytes; marketplace-provided digests are also checked against the
-download before installation.
+GitHub branch/tag sources are resolved to a commit before download. If resolution
+fails, including API quota errors, installation/update fails without changing the
+registered package. Retry later or supply a `/tree/FULL_COMMIT_SHA` URL; a full
+40-character commit ID can be downloaded directly without the API.
+
+### Accept execution changes during updates
+
+When an update adds or changes an MCP server configuration or a workflow's
+protocol, command, arguments or stages, OCR reports the changed declaration and
+field names and leaves the previous installation unchanged. Values such as
+arguments, environment variables and authentication headers are omitted from the
+change report. Inspect the new package source before accepting:
+
+```text
+ocr plugin update team-review
+ocr plugin update team-review --accept-permissions
+```
+
+This also applies to disabled packages. Removing an execution contribution or
+changing only rules/metadata does not require this flag. An unchanged executable
+entrypoint can still contain updated code: acceptance checks declared execution
+changes, and does not sandbox or establish the trustworthiness of new code.
+Installation and update never run plugin commands.
+
+With `--json`, this refusal writes an `error` object with code
+`PLUGIN_EXECUTION_CHANGED`, `plugin_id`, and `changes` to stdout and exits nonzero.
+Other command errors retain the existing stderr text contract.
+
+### Recorded digests
+
+New installations expose these fields in `show --json` and installation results:
+
+| Field | Meaning |
+| --- | --- |
+| `archive_sha256` | SHA-256 of the exact downloaded/local archive bytes; absent for directory sources |
+| `content_sha256` | SHA-256 of the prepared package's files, also checked after copying into the installed snapshot |
+| `content_digest_format` | `ocr-package-tree-v1`, identifying the content-digest algorithm |
+| `revision` | GitHub commit used to discover the package or published catalog |
+
+The content digest walks files in lexical directory order, using forward-slash
+relative paths. For each file it hashes `PATH_BYTE_LENGTH:PATH:EXEC_BITS:SIZE:`
+(all numbers decimal), then the raw content bytes. `EXEC_BITS` is the permission
+mask `mode & 0111`; directories do not contribute records. It describes the
+prepared filesystem on that platform, not a portable cross-platform lock format.
+Windows and Unix can expose different executable bits.
+
+The legacy `sha256` field remains for existing consumers: archive digest for
+archives, content digest for directories. Older state records remain readable;
+OCR does not guess their digest kind or silently fill new fields. Updating such a
+package records the explicit fields. Old OCR builds that reject the new state
+fields cannot read the updated state; retain a backup before downgrading.
+
+A direct archive digest records downloaded bytes. Marketplace-provided archive
+digests are checked before installation. Neither is a publisher signature, and
+these records do not provide project declarations or frozen installation.
 
 ## Browse the bundled marketplace
 
@@ -90,7 +141,8 @@ including executing their server commands with your account's permissions.
 | `ocr plugin install PATH` | Copy a local directory or tar.gz/ZIP package |
 | `ocr plugin install ID@MARKET` | Install the selected marketplace entry |
 | `ocr plugin enable ID` / `disable ID` | Change rule and MCP contributions for subsequent reviews |
-| `ocr plugin update ID` | Replace the snapshot from its original source; preserve enabled state |
+| `ocr plugin update ID` | Replace from the original source; preserve enabled state; reject changed execution declarations |
+| `ocr plugin update ID --accept-permissions` | Explicitly accept added/changed execution declarations |
 | `ocr plugin remove ID` | Unregister a package |
 | `ocr plugin market add NAME SOURCE` | Register a local or HTTPS catalog and cache it |
 | `ocr plugin market list` | List configured catalogs |
@@ -108,6 +160,12 @@ configuration in `config.json`. Each installation creates a copied package
 snapshot. Editing the source directory takes effect only after `update`.
 Older snapshots remain on disk after update/removal so an active review can
 finish using its original files. This version has no automatic cache cleanup.
+
+Enabled rules and MCP contributions apply to every repository for that user.
+`disable` stops automatic loading; an explicit `--review-plugin ID` selects the
+workflow and its accompanying rules/MCP servers for that invocation, even when
+the package is disabled. It does not change the saved enabled state. There is no
+project lock mode in this version.
 
 Marketplace updates are explicit:
 
@@ -137,7 +195,9 @@ bits from regular files through extraction and installation. Package files
 receive owner read/write permissions plus their archived executable bits;
 directories remain private (`0700`). Ownership, setuid/setgid bits, and other
 archived permissions are not restored. Windows uses its native permission
-model. Symlinks, hard links, sparse files and device files are rejected.
+model. ZIPs produced without Unix permission attributes may install scripts or
+binaries without executable bits on Unix; prefer tar.gz produced on Unix for such
+packages. Symlinks, hard links, sparse files and device files are rejected.
 
 Example manifest:
 
@@ -160,8 +220,9 @@ Example manifest:
 }
 ```
 
-- `schema_version` must be `1`. Unknown fields and duplicate JSON keys fail
-  validation, including executable setup/install hooks.
+- `schema_version` must be `1`. Unknown operational fields and duplicate JSON
+  keys fail validation, including executable setup/install hooks. See the
+  compatibility rules below for descriptive metadata.
 - `id` is a portable lowercase identifier containing letters, digits, dots,
   underscores, or hyphens, with an alphanumeric first and last character, at
   most 64 characters. Windows reserved filenames are rejected.
@@ -183,6 +244,45 @@ are registered before plugin tools; conflicts with built-in or already
 registered tools are skipped with a warning. Server labels are namespaced as
 `plugin/PLUGIN_ID/SERVER_NAME`. Startup failures follow the existing MCP policy:
 OCR reports the failure and continues without that server's tools.
+
+### Compatibility and host requirements
+
+The package version is the author's release label. It is separate from manifest
+`schema_version: 1` and workflow `stdio-v1` / message `version: 1`.
+
+A manifest can optionally declare:
+
+```json
+"requires": {
+  "ocr_min_version": "1.2.3",
+  "features": ["rules", "mcp", "stdio-v1"]
+},
+"metadata": {
+  "homepage": "https://example.com/team-review",
+  "publisher_note": "Descriptive information only"
+}
+```
+
+`ocr_min_version` is a minimum full semantic version, with optional `v` prefix,
+prerelease and build metadata; it is not a version range. The number above is an
+illustration, not the release that introduced plugins. Feature names currently
+supported are `rules`, `mcp`, and `stdio-v1`. Unknown required features fail before
+installation, activation or runtime loading. A `dev` or otherwise non-semantic
+host version cannot satisfy a minimum-version declaration; build with an accurate
+semantic version or use a versioned release. Manifests without requirements remain
+supported. Installed incompatible packages can still be inspected or removed.
+
+Only `metadata` is an open-ended descriptive object. Its contents never authorize
+execution or change behavior. Other manifest objects, including `requires`, MCP
+and workflow declarations, remain strict. Duplicate keys are rejected everywhere.
+Old hosts may reject these new optional fields; omitting them retains the old
+manifest shape. Older hosts must not silently ignore requirements they cannot
+enforce.
+
+Breaking manifest semantics require a new schema version. Incompatible workflow
+messages require a new protocol identifier/message version. The current workflow
+protocol remains experimental, with no new mandatory handshake in this release;
+its v1 message shape remains unchanged. See the [workflow protocol](review-workflow-plugins.md).
 
 ### Rule packs
 

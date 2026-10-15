@@ -38,11 +38,14 @@ func (e *SelectionRequiredError) Error() string {
 // Close and InstallPrepared are serialized. A successful install consumes the
 // preparation, and Close is idempotent.
 type PreparedInstall struct {
-	Manifest Manifest
-	Source   string
-	SHA256   string
-	Revision string
-	PluginID string
+	Manifest            Manifest
+	Source              string
+	SHA256              string
+	ArchiveSHA256       string
+	ContentSHA256       string
+	ContentDigestFormat string
+	Revision            string
+	PluginID            string
 
 	mu          sync.Mutex
 	storeRoot   string
@@ -119,6 +122,9 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 	if err != nil {
 		return nil, err
 	}
+	if err := manifest.CheckCompatibility(HostVersion); err != nil {
+		return nil, err
+	}
 	if expected.ID != "" && (manifest.ID != expected.ID || manifest.Version != expected.Version) {
 		return nil, fmt.Errorf("package id/version %s@%s does not match catalog %s@%s", manifest.ID, manifest.Version, expected.ID, expected.Version)
 	}
@@ -132,6 +138,8 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 	if err != nil {
 		return nil, err
 	}
+	item.ArchiveSHA256 = item.SHA256
+	item.ContentSHA256, item.ContentDigestFormat = p.packageHash, "ocr-package-tree-v1"
 	if item.SHA256 == "" {
 		item.SHA256 = p.packageHash
 	}
@@ -140,6 +148,7 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 	item.Manifest, _ = ParseManifest(data)
 	p.item = item
 	p.Manifest, p.Source, p.SHA256 = manifest, item.Source, item.SHA256
+	p.ArchiveSHA256, p.ContentSHA256, p.ContentDigestFormat = item.ArchiveSHA256, item.ContentSHA256, item.ContentDigestFormat
 	p.Revision, p.PluginID = item.Revision, item.PluginID
 	success = true
 	return p, nil

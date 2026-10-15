@@ -85,7 +85,7 @@ func TestRetiredReviewCanBeListedAndUpdated(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, ManifestFilename), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := s.Update(context.Background(), "example")
+	updated, err := s.UpdateWithOptions(context.Background(), "example", UpdateOptions{AcceptPermissions: true})
 	if err != nil || updated.Manifest.Version != "0.2" || updated.Enabled {
 		t.Fatalf("update=%+v error=%v", updated, err)
 	}

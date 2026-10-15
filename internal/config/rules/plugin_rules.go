@@ -66,6 +66,9 @@ func loadPluginRules(base *composedResolver, reviewID string) (Resolver, error) 
 			selected = &p
 		}
 		if p.Enabled {
+			if err := p.Manifest.CheckCompatibility(plugin.HostVersion); err != nil {
+				return nil, err
+			}
 			installed = append(installed, p)
 		}
 	}

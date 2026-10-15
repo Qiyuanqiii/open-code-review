@@ -19,14 +19,16 @@ const ManifestFilename = "ocr-plugin.json"
 
 // Manifest declares the contributions understood by version 1 of the plugin host.
 type Manifest struct {
-	SchemaVersion int                  `json:"schema_version"`
-	ID            string               `json:"id"`
-	Name          string               `json:"name"`
-	Version       string               `json:"version"`
-	Description   string               `json:"description,omitempty"`
-	Rules         []string             `json:"rules,omitempty"`
-	MCPServers    map[string]MCPServer `json:"mcp_servers,omitempty"`
-	Review        *ReviewContribution  `json:"review,omitempty"`
+	SchemaVersion int                        `json:"schema_version"`
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	Version       string                     `json:"version"`
+	Description   string                     `json:"description,omitempty"`
+	Rules         []string                   `json:"rules,omitempty"`
+	MCPServers    map[string]MCPServer       `json:"mcp_servers,omitempty"`
+	Review        *ReviewContribution        `json:"review,omitempty"`
+	Requires      *Requirements              `json:"requires,omitempty"`
+	Metadata      map[string]json.RawMessage `json:"metadata,omitempty"`
 }
 
 // ReviewContribution runs a package's workflow only when explicitly selected.
@@ -75,6 +77,11 @@ func reservedName(name string) bool {
 func (m Manifest) Validate() error {
 	if m.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported plugin schema_version %d (expected 1)", m.SchemaVersion)
+	}
+	if m.Requires != nil {
+		if err := m.Requires.validate(); err != nil {
+			return err
+		}
 	}
 	if !validID(m.ID) {
 		return fmt.Errorf("invalid plugin id %q: use a portable lowercase name of at most 64 characters", m.ID)

@@ -22,18 +22,22 @@ import (
 // pluginInfo is the public management view. It omits MCP arguments, environment
 // variables and authentication headers, which can contain credentials.
 type pluginInfo struct {
-	ID          string                     `json:"id"`
-	Name        string                     `json:"name"`
-	Version     string                     `json:"version"`
-	Description string                     `json:"description"`
-	Enabled     bool                       `json:"enabled"`
-	Source      string                     `json:"source"`
-	Directory   string                     `json:"directory"`
-	Rules       []string                   `json:"rules"`
-	MCPServers  []string                   `json:"mcp_servers"`
-	Review      *plugin.ReviewContribution `json:"review,omitempty"`
-	SHA256      string                     `json:"sha256,omitempty"`
-	Revision    string                     `json:"revision,omitempty"`
+	ID                  string                     `json:"id"`
+	Name                string                     `json:"name"`
+	Version             string                     `json:"version"`
+	Description         string                     `json:"description"`
+	Enabled             bool                       `json:"enabled"`
+	Source              string                     `json:"source"`
+	Directory           string                     `json:"directory"`
+	Rules               []string                   `json:"rules"`
+	MCPServers          []string                   `json:"mcp_servers"`
+	Review              *plugin.ReviewContribution `json:"review,omitempty"`
+	SHA256              string                     `json:"sha256,omitempty"`
+	ArchiveSHA256       string                     `json:"archive_sha256,omitempty"`
+	ContentSHA256       string                     `json:"content_sha256,omitempty"`
+	ContentDigestFormat string                     `json:"content_digest_format,omitempty"`
+	Requires            *plugin.Requirements       `json:"requires,omitempty"`
+	Revision            string                     `json:"revision,omitempty"`
 }
 
 func pluginManagementInfo(installed plugin.Installed) pluginInfo {
@@ -48,6 +52,7 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 		Enabled: installed.Enabled, Source: plugin.DisplaySource(installed.Source), Directory: installed.Dir,
 		Rules: append([]string{}, m.Rules...), MCPServers: names, Review: m.Review,
 		SHA256: installed.SHA256, Revision: installed.Revision,
+		ArchiveSHA256: installed.ArchiveSHA256, ContentSHA256: installed.ContentSHA256, ContentDigestFormat: installed.ContentDigestFormat, Requires: m.Requires,
 	}
 }
 
@@ -132,8 +137,13 @@ func newPluginCmd() *cobra.Command {
 		if err == nil && info.Revision != "" {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revision: %s\n", pluginText(info.Revision))
 		}
-		if err == nil && info.SHA256 != "" {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "SHA-256: %s\n", pluginText(info.SHA256))
+		if err == nil && info.ArchiveSHA256 != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Archive SHA-256: %s\n", pluginText(info.ArchiveSHA256))
+		}
+		if err == nil && info.ContentSHA256 != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Content SHA-256 (%s): %s\n", pluginText(info.ContentDigestFormat), pluginText(info.ContentSHA256))
+		} else if err == nil && info.SHA256 != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Legacy SHA-256 (kind not recorded): %s\n", pluginText(info.SHA256))
 		}
 		return err
 	}
@@ -207,7 +217,7 @@ func newPluginCmd() *cobra.Command {
 			}
 			defer prepared.Close()
 			if dryRun {
-				info := pluginManagementInfo(plugin.Installed{Manifest: prepared.Manifest, Source: prepared.Source, SHA256: prepared.SHA256, Revision: prepared.Revision})
+				info := pluginManagementInfo(plugin.Installed{Manifest: prepared.Manifest, Source: prepared.Source, SHA256: prepared.SHA256, Revision: prepared.Revision, ArchiveSHA256: prepared.ArchiveSHA256, ContentSHA256: prepared.ContentSHA256, ContentDigestFormat: prepared.ContentDigestFormat})
 				return printPluginInstallPreview(cmd.OutOrStdout(), pluginInstallPreview{Source: info.Source, Plugins: []pluginInfo{info}}, jsonOutput)
 			}
 			installed, err := store.InstallPrepared(cmd.Context(), prepared, enable)
@@ -227,16 +237,25 @@ func newPluginCmd() *cobra.Command {
 	install.Flags().StringVar(&selectedPlugin, "plugin", "", "select a plugin ID when a link contains multiple plugins")
 	install.Flags().BoolVar(&dryRun, "dry-run", false, "download and inspect the source without installing or enabling plugins")
 	command.AddCommand(install)
-	command.AddCommand(&cobra.Command{
-		Use: "update <id>", Short: "Refresh a plugin from its original source, preserving enabled state", Args: exactArgs(1),
+	var acceptPermissions bool
+	update := &cobra.Command{
+		Use: "update <id>", Short: "Refresh a plugin; changed execution declarations require explicit acceptance", Args: exactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
-			installed, err := store.Update(cmd.Context(), args[0])
+			installed, err := store.UpdateWithOptions(cmd.Context(), args[0], plugin.UpdateOptions{AcceptPermissions: acceptPermissions})
 			if err != nil {
+				var changed *plugin.ExecutionChangesError
+				if jsonOutput && errors.As(err, &changed) {
+					if printErr := pluginJSON(cmd.OutOrStdout(), map[string]any{"error": map[string]any{"code": "PLUGIN_EXECUTION_CHANGED", "plugin_id": changed.PluginID, "changes": changed.Changes}}); printErr != nil {
+						return printErr
+					}
+				}
 				return err
 			}
 			return printInstalled(cmd, installed)
 		}),
-	})
+	}
+	update.Flags().BoolVar(&acceptPermissions, "accept-permissions", false, "accept added or changed MCP and workflow execution declarations")
+	command.AddCommand(update)
 	for _, action := range []string{"enable", "disable", "remove"} {
 		command.AddCommand(&cobra.Command{
 			Use: action + " <id>", Short: strings.ToUpper(action[:1]) + action[1:] + " an installed plugin", Args: exactArgs(1),

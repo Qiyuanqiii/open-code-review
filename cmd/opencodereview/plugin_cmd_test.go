@@ -206,3 +206,53 @@ func TestPluginMarketplaceOutputRedactsSourceQueries(t *testing.T) {
 		t.Fatalf("installed plugin source leaked query: %s", info.Source)
 	}
 }
+
+func TestPluginUpdateExecutionConfirmation(t *testing.T) {
+	freshOCRHome(t)
+	t.Setenv("PATH", "")
+	source := t.TempDir()
+	writePluginCommandFixture(t, source, "1")
+	pluginCommandOK(t, "install", source, "--enable")
+	manifestPath := filepath.Join(source, plugin.ManifestFilename)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest plugin.Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	server := manifest.MCPServers["notes"]
+	server.Args = []string{"new-secret-argument"}
+	manifest.MCPServers["notes"] = server
+	manifest.Version = "2"
+	data, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"update", "test-review"}, {"update", "test-review", "--json"}} {
+		out, err := runPluginCommand(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "--accept-permissions") {
+			t.Fatalf("update = %s, %v", out, err)
+		}
+		if strings.Contains(out+err.Error(), "secret-argument") || strings.Contains(out+err.Error(), "secret-token") {
+			t.Fatalf("changed values leaked: %s, %v", out, err)
+		}
+		if len(args) == 3 {
+			var response map[string]any
+			if json.Unmarshal([]byte(out), &response) != nil || !strings.Contains(out, "PLUGIN_EXECUTION_CHANGED") {
+				t.Fatalf("change response = %s", out)
+			}
+		}
+	}
+	var info pluginInfo
+	if err := json.Unmarshal([]byte(pluginCommandOK(t, "show", "test-review", "--json")), &info); err != nil || info.Version != "1" || !info.Enabled {
+		t.Fatalf("rejected update = %+v, %v", info, err)
+	}
+	if err := json.Unmarshal([]byte(pluginCommandOK(t, "update", "test-review", "--accept-permissions", "--json")), &info); err != nil || info.Version != "2" || !info.Enabled || info.ContentSHA256 == "" || info.ArchiveSHA256 != "" {
+		t.Fatalf("accepted update = %+v, %v", info, err)
+	}
+}

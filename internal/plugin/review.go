@@ -84,6 +84,9 @@ type ReviewClient struct {
 // StartReview launches a separate workflow process for each file group. Requests
 // carry task metadata and results; OCR does not send its configured credentials.
 func StartReview(ctx context.Context, p Installed, repoDir string) (*ReviewClient, error) {
+	if err := p.Manifest.CheckCompatibility(HostVersion); err != nil {
+		return nil, err
+	}
 	command, args, err := ReviewCommand(p)
 	if err != nil {
 		return nil, err

@@ -418,8 +418,9 @@ func TestGitHubNestedPackageAndTreeSource(t *testing.T) {
 	}
 }
 
-func TestGitHubPublishedCatalogPreferredAndQuotaFallback(t *testing.T) {
+func TestGitHubPublishedCatalogPreferred(t *testing.T) {
 	ctx := context.Background()
+	revision := strings.Repeat("a", 40)
 	manifest, _ := json.Marshal(testManifest("example", "source-version"))
 	packaged := testZIP(t, "example", "release-version")
 	catalogData, _ := json.Marshal(catalog{SchemaVersion: 1, Name: "Published", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "release-version", Source: "release.zip", SHA256: zipDigest(packaged)}}})
@@ -427,14 +428,14 @@ func TestGitHubPublishedCatalogPreferredAndQuotaFallback(t *testing.T) {
 	store := githubStore(t, func(request *http.Request) (int, []byte) {
 		switch request.URL.Host {
 		case "api.github.com":
-			return http.StatusForbidden, []byte(`{"message":"API rate limit exceeded"}`)
+			return http.StatusOK, []byte(`{"sha":"` + revision + `"}`)
 		case "codeload.github.com":
-			if request.URL.Path != "/owner/repository/tar.gz/HEAD" {
-				t.Errorf("quota fallback archive request = %s", request.URL)
+			if request.URL.Path != "/owner/repository/tar.gz/"+revision {
+				t.Errorf("pinned archive request = %s", request.URL)
 			}
 			return http.StatusOK, archive
 		case "raw.githubusercontent.com":
-			if request.URL.Path != "/owner/repository/HEAD/release.zip" {
+			if request.URL.Path != "/owner/repository/"+revision+"/release.zip" {
 				t.Errorf("relative repository catalog source = %s", request.URL)
 			}
 			return http.StatusOK, packaged
@@ -444,7 +445,7 @@ func TestGitHubPublishedCatalogPreferredAndQuotaFallback(t *testing.T) {
 		}
 	})
 	installed, err := store.Install(ctx, "https://github.com/owner/repository", false)
-	if err != nil || installed.Manifest.Version != "release-version" || installed.SHA256 != zipDigest(packaged) || installed.Revision != "" || installed.PluginID != "example" {
+	if err != nil || installed.Manifest.Version != "release-version" || installed.SHA256 != zipDigest(packaged) || installed.Revision != revision || installed.PluginID != "example" {
 		t.Fatalf("repository published package = %+v, %v", installed, err)
 	}
 }
@@ -503,5 +504,114 @@ func TestGitHubSourceParsing(t *testing.T) {
 		if repository != test.repository || (err != nil) != test.fails {
 			t.Errorf("parseGitHubSource(%q) = %v, %v", test.source, repository, err)
 		}
+	}
+}
+
+func TestGitHubRevisionFailureDoesNotDownloadOrUpdate(t *testing.T) {
+	ctx := context.Background()
+	revision := strings.Repeat("a", 40)
+	manifest, _ := json.Marshal(testManifest("example", "1"))
+	archive := tarEntries(t, map[string]string{"repo/" + ManifestFilename: string(manifest), "repo/rules.json": "{}"})
+	for _, source := range []string{"https://github.com/owner/repository", "https://github.com/owner/repository/tree/main"} {
+		failed := false
+		downloads := 0
+		store := githubStore(t, func(request *http.Request) (int, []byte) {
+			if request.URL.Host == "api.github.com" {
+				if failed {
+					return http.StatusForbidden, []byte("rate limited")
+				}
+				return http.StatusOK, []byte(`{"sha":"` + revision + `"}`)
+			}
+			downloads++
+			return http.StatusOK, archive
+		})
+		installed, err := store.Install(ctx, source, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed = true
+		statePath := filepath.Join(store.root, "state.json")
+		before, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = store.Update(ctx, "example")
+		requireError(t, err, "resolve GitHub revision")
+		after, err := os.ReadFile(statePath)
+		if err != nil || string(before) != string(after) || downloads != 1 {
+			t.Fatalf("failed resolution changed installation: %v, downloads=%d", err, downloads)
+		}
+		items, err := store.List()
+		if err != nil || len(items) != 1 || items[0].Dir != installed.Dir {
+			t.Fatalf("old installation = %v, %v", items, err)
+		}
+	}
+}
+
+func TestGitHubFullCommitDoesNotRequireAPI(t *testing.T) {
+	revision := strings.Repeat("B", 40)
+	manifest, _ := json.Marshal(testManifest("example", "1"))
+	archive := tarEntries(t, map[string]string{"repo/" + ManifestFilename: string(manifest), "repo/rules.json": "{}"})
+	store := githubStore(t, func(request *http.Request) (int, []byte) {
+		if request.URL.String() != "https://codeload.github.com/owner/repository/tar.gz/"+strings.ToLower(revision) {
+			t.Fatalf("unexpected request for pinned source: %s", request.URL)
+		}
+		return http.StatusOK, archive
+	})
+	item, err := store.Install(context.Background(), "https://github.com/owner/repository/tree/"+revision, false)
+	if err != nil || item.Revision != strings.ToLower(revision) {
+		t.Fatalf("pinned installation = %+v, %v", item, err)
+	}
+}
+
+func TestExplicitPackageDigestsAndLegacyState(t *testing.T) {
+	ctx := context.Background()
+	store := NewStore(t.TempDir())
+	source := testPackage(t, "example", "1")
+	local, err := store.Install(ctx, source, false)
+	if err != nil || local.ArchiveSHA256 != "" || local.ContentSHA256 == "" || local.ContentDigestFormat != "ocr-package-tree-v1" || local.SHA256 != local.ContentSHA256 {
+		t.Fatalf("local digests = %+v, %v", local, err)
+	}
+	digest, err := packageDigest(ctx, local.Dir)
+	if err != nil || digest != local.ContentSHA256 {
+		t.Fatalf("installed content digest = %s, %v", digest, err)
+	}
+	statePath := filepath.Join(store.root, "state.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	record := legacy["installed"].(map[string]any)["example"].(map[string]any)
+	delete(record, "archive_sha256")
+	delete(record, "content_sha256")
+	delete(record, "content_digest_format")
+	writeTestJSON(t, statePath, legacy)
+	list, err := store.List()
+	if err != nil || len(list) != 1 || list[0].SHA256 != local.SHA256 || list[0].ContentSHA256 != "" {
+		t.Fatalf("legacy record = %+v, %v", list, err)
+	}
+	updated, err := store.Update(ctx, "example")
+	if err != nil || updated.ContentSHA256 != digest {
+		t.Fatalf("updated legacy record = %+v, %v", updated, err)
+	}
+	if err := store.Remove("example"); err != nil {
+		t.Fatal(err)
+	}
+	archive := testZIP(t, "example", "1")
+	archivePath := filepath.Join(t.TempDir(), "plugin.zip")
+	if err := os.WriteFile(archivePath, archive, 0600); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Install(ctx, archivePath, false)
+	if err != nil || item.ArchiveSHA256 != archiveDigest(archive) || item.SHA256 != item.ArchiveSHA256 || item.ContentSHA256 == "" {
+		t.Fatalf("archive digests = %+v, %v", item, err)
+	}
+	digest, err = packageDigest(ctx, item.Dir)
+	if err != nil || digest != item.ContentSHA256 {
+		t.Fatalf("archive content digest = %s, %v", digest, err)
 	}
 }

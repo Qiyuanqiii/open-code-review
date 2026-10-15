@@ -243,7 +243,7 @@ func parseMarket(name, resolved string, data []byte, remote bool) (Market, error
 				return result, fmt.Errorf("plugin %q: %w", item.ID, err)
 			}
 			if item.SHA256 == "" {
-				return result, fmt.Errorf("plugin %q: remote ZIP source requires sha256", item.ID)
+				return result, fmt.Errorf("plugin %q: remote archive source requires sha256", item.ID)
 			}
 		} else {
 			if strings.Contains(item.Source, "://") {
@@ -401,7 +401,7 @@ func (s *Store) preparePackage(ctx context.Context, source, digest, stage string
 				return "", err
 			}
 		}
-		return archiveDigest(data), extractZIP(ctx, data, stage)
+		return archiveDigest(data), extractArchive(ctx, data, stage)
 	}
 	info, err := os.Lstat(source)
 	if err != nil {
@@ -409,7 +409,7 @@ func (s *Store) preparePackage(ctx context.Context, source, digest, stage string
 	}
 	if info.IsDir() {
 		if digest != "" {
-			return "", fmt.Errorf("sha256 applies to ZIP archives, not directory sources")
+			return "", fmt.Errorf("sha256 applies to archives, not directory sources")
 		}
 		absoluteStore, err := filepath.Abs(s.root)
 		if err != nil {
@@ -449,7 +449,7 @@ func (s *Store) preparePackage(ctx context.Context, source, digest, stage string
 			return "", err
 		}
 	}
-	return archiveDigest(data), extractZIP(ctx, data, stage)
+	return archiveDigest(data), extractArchive(ctx, data, stage)
 }
 
 func archiveDigest(data []byte) string {

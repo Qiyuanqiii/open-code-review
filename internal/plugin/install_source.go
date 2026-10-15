@@ -164,10 +164,10 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 		packageDir, digest, selection, err = s.prepareCatalog(ctx, catalogSource, data, pluginID, directory)
 		return packageDir, digest, "", selection, err
 	}
-	if !bytes.HasPrefix(data, []byte("PK")) {
-		return "", "", "", "", fmt.Errorf("source must contain a plugin ZIP or an OCR marketplace JSON document")
+	if !bytes.HasPrefix(data, []byte("PK")) && !bytes.HasPrefix(data, []byte{0x1f, 0x8b}) {
+		return "", "", "", "", fmt.Errorf("source must contain a plugin tar.gz or ZIP archive, or an OCR marketplace JSON document")
 	}
-	if err := extractZIP(ctx, data, directory); err != nil {
+	if err := extractArchive(ctx, data, directory); err != nil {
 		return "", "", "", "", err
 	}
 	packageDir, err = selectPackage(ctx, directory, source, pluginID)

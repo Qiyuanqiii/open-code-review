@@ -7,9 +7,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,52 +100,73 @@ func TestPluginURLCommandPreviewInstallAndUpdate(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &installed); err != nil || !installed.Enabled || installed.Version != "2.0" || installed.SHA256 == preview.Plugins[0].SHA256 {
 		t.Fatalf("update = %s, error = %v", output, err)
 	}
-	if output := pluginCommandOK(t, "market", "list", "--json"); strings.TrimSpace(output) != "[]" {
-		t.Fatalf("direct URL installation created a marketplace: %s", output)
+}
+
+func TestPluginArchiveURLCommandSelectsPackage(t *testing.T) {
+	freshOCRHome(t)
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for _, id := range []string{"first", "second"} {
+		data := pluginURLArchive(t, id, "1")
+		reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range reader.File {
+			in, err := file.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := writer.Create(id + "/" + file.Name)
+			if err != nil {
+				in.Close()
+				t.Fatal(err)
+			}
+			_, err = io.Copy(out, in)
+			in.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := usePluginURLServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(archive.Bytes()) }))
+	source := server.URL + "/packages.zip"
+	var preview pluginInstallPreview
+	output := pluginCommandOK(t, "install", source, "--dry-run", "--json")
+	if err := json.Unmarshal([]byte(output), &preview); err != nil || len(preview.Plugins) != 2 {
+		t.Fatalf("archive selection = %s, %v", output, err)
+	}
+	if _, err := runPluginCommand(context.Background(), []string{"install", source}); err == nil || !strings.Contains(err.Error(), "--plugin") {
+		t.Fatalf("ambiguous install = %v", err)
+	}
+	if output := pluginCommandOK(t, "list", "--json"); strings.TrimSpace(output) != "[]" {
+		t.Fatalf("preview installed packages: %s", output)
+	}
+	pluginCommandOK(t, "install", source, "--plugin", "second", "--enable")
+	var installed []pluginInfo
+	output = pluginCommandOK(t, "list", "--json")
+	if err := json.Unmarshal([]byte(output), &installed); err != nil || len(installed) != 1 || installed[0].ID != "second" || !installed[0].Enabled {
+		t.Fatalf("selected archive install = %s, %v", output, err)
 	}
 }
 
-func TestPluginCatalogURLCommandSelectsWithoutRegistration(t *testing.T) {
+func TestPluginCLIRejectsRemovedMarketplaceInputs(t *testing.T) {
 	freshOCRHome(t)
-	first, second := pluginURLArchive(t, "first", "1"), pluginURLArchive(t, "second", "1")
-	digest := func(data []byte) string {
-		sum := sha256.Sum256(data)
-		return hex.EncodeToString(sum[:])
+	if help := pluginCommandOK(t, "--help"); strings.Contains(strings.ToLower(help), "market") {
+		t.Fatalf("help still advertises marketplace: %s", help)
 	}
-	server := usePluginURLServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/first.zip":
-			_, _ = w.Write(first)
-		case "/second.zip":
-			_, _ = w.Write(second)
-		default:
-			entries := []map[string]string{{"id": "first", "name": "First", "version": "1", "source": "first.zip", "sha256": digest(first)}}
-			if r.URL.Path == "/many.json" {
-				entries = append(entries, map[string]string{"id": "second", "name": "Second", "version": "1", "source": "second.zip", "sha256": digest(second)})
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"schema_version": 1, "name": "Test catalog", "plugins": entries})
-		}
+	server := usePluginURLServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"schema_version":1,"name":"Old market","plugins":[]}`))
 	}))
-	source := server.URL + "/many.json"
-	output := pluginCommandOK(t, "install", source, "--dry-run", "--json")
-	var preview pluginInstallPreview
-	if err := json.Unmarshal([]byte(output), &preview); err != nil || len(preview.Plugins) != 2 {
-		t.Fatalf("catalog preview = %s, error = %v", output, err)
+	for _, args := range [][]string{{"market", "list"}, {"install", "example@team"}, {"install", server.URL + "/index.json"}} {
+		if _, err := runPluginCommand(context.Background(), args); err == nil {
+			t.Errorf("removed input accepted: %v", args)
+		}
 	}
-	if _, err := runPluginCommand(context.Background(), []string{"install", source}); err == nil || !strings.Contains(err.Error(), "--plugin") {
-		t.Fatalf("ambiguous install did not explain selection: %v", err)
-	}
-	if out := pluginCommandOK(t, "list", "--json"); strings.TrimSpace(out) != "[]" {
-		t.Fatalf("ambiguous install changed plugins: %s", out)
-	}
-	pluginCommandOK(t, "install", source, "--plugin", "second", "--enable")
-	pluginCommandOK(t, "install", server.URL+"/single.json")
-	var installed []pluginInfo
-	output = pluginCommandOK(t, "list", "--json")
-	if err := json.Unmarshal([]byte(output), &installed); err != nil || len(installed) != 2 || installed[0].ID != "first" || installed[0].Enabled || installed[1].ID != "second" || !installed[1].Enabled {
-		t.Fatalf("selection/enable state = %s, error = %v", output, err)
-	}
-	if out := pluginCommandOK(t, "market", "list", "--json"); strings.TrimSpace(out) != "[]" {
-		t.Fatalf("catalog URL installation required registration: %s", out)
+	if output := pluginCommandOK(t, "list", "--json"); strings.TrimSpace(output) != "[]" {
+		t.Fatalf("rejected input installed packages: %s", output)
 	}
 }

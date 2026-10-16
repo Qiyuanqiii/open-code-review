@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -111,33 +110,6 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 	packageRoot := filepath.Join(repoRoot, filepath.FromSlash(repository.directory))
 	if info, err := os.Stat(packageRoot); err != nil || !info.IsDir() {
 		return "", "", "", "", fmt.Errorf("GitHub plugin directory %q does not exist", repository.directory)
-	}
-	if _, err := os.Stat(filepath.Join(packageRoot, ManifestFilename)); errors.Is(err, os.ErrNotExist) {
-		// Published packages may include built executables absent from the source
-		// tree. Prefer a catalog at the selected root to its nested source package.
-		for _, filename := range []string{MarketplaceFilename, "marketplace.json"} {
-			catalogData, err := readFileBounded(filepath.Join(packageRoot, filename), maxCatalogBytes)
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return "", "", "", "", err
-			}
-			packageDir, err := os.MkdirTemp(directory, ".package-*")
-			if err != nil {
-				return "", "", "", "", err
-			}
-			catalogPath := filename
-			if repository.directory != "" {
-				catalogPath = repository.directory + "/" + filename
-			}
-			catalogURL := "https://raw.githubusercontent.com/" + base + "/" + url.PathEscape(ref) + "/" + catalogPath
-			prepared, digest, selection, err := s.prepareCatalog(ctx, catalogURL, catalogData, pluginID, packageDir, artifact)
-			if err == nil {
-				artifact.Directory = "."
-			}
-			return prepared, digest, revision, selection, err
-		}
 	}
 	selected, err := selectPackage(ctx, packageRoot, repository.source, pluginID)
 	if err != nil {

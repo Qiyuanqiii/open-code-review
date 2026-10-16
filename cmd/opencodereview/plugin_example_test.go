@@ -91,18 +91,17 @@ func TestSinglePassExampleRecoversFromInvalidRequests(t *testing.T) {
 	}
 }
 
-func TestNativePluginExampleMarketThroughRuntime(t *testing.T) {
+func TestNativePluginExamplePackagesThroughRuntime(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node.js is required to exercise the bundled MCP example")
 	}
 	freshOCRHome(t)
-	marketDir, err := filepath.Abs(filepath.Join("..", "..", "examples", "ocr-plugins"))
+	packageDir, err := filepath.Abs(filepath.Join("..", "..", "examples", "ocr-plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pluginCommandOK(t, "market", "add", "examples", marketDir)
-	pluginCommandOK(t, "install", "review-checklist@examples", "--enable")
-	pluginCommandOK(t, "install", "project-notes@examples")
+	pluginCommandOK(t, "install", filepath.Join(packageDir, "review-checklist"), "--enable")
+	pluginCommandOK(t, "install", filepath.Join(packageDir, "project-notes"))
 	repo := t.TempDir()
 	resolver, _, err := rules.NewResolver(repo, "", rules.ResolverOptions{})
 	if err != nil {

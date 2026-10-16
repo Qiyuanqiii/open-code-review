@@ -40,7 +40,6 @@ type Store struct {
 type state struct {
 	SchemaVersion int                  `json:"schema_version"`
 	Installed     map[string]Installed `json:"installed"`
-	Markets       map[string]Market    `json:"markets"`
 }
 
 const maxStateBytes = 16 << 20
@@ -58,7 +57,7 @@ func DefaultStore() (*Store, error) {
 }
 
 func (s *Store) readState() (state, error) {
-	result := state{SchemaVersion: 1, Installed: make(map[string]Installed), Markets: make(map[string]Market)}
+	result := state{SchemaVersion: 1, Installed: make(map[string]Installed)}
 	data, err := readFileBounded(filepath.Join(s.root, "state.json"), maxStateBytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return result, nil
@@ -66,17 +65,20 @@ func (s *Store) readState() (state, error) {
 	if err != nil {
 		return result, fmt.Errorf("read plugin state: %w", err)
 	}
-	if err := decodeStrict(data, &result); err != nil {
+	var stored struct {
+		SchemaVersion int                  `json:"schema_version"`
+		Installed     map[string]Installed `json:"installed"`
+		Markets       json.RawMessage      `json:"markets"`
+	}
+	if err := decodeStrict(data, &stored); err != nil {
 		return result, fmt.Errorf("parse plugin state: %w", err)
 	}
+	result.SchemaVersion, result.Installed = stored.SchemaVersion, stored.Installed
 	if result.SchemaVersion != 1 {
 		return result, fmt.Errorf("unsupported plugin state schema_version %d", result.SchemaVersion)
 	}
 	if result.Installed == nil {
 		result.Installed = make(map[string]Installed)
-	}
-	if result.Markets == nil {
-		result.Markets = make(map[string]Market)
 	}
 	for id, item := range result.Installed {
 		if id != item.Manifest.ID {
@@ -89,11 +91,7 @@ func (s *Store) readState() (state, error) {
 			return result, fmt.Errorf("plugin state %q has invalid snapshot directory", id)
 		}
 	}
-	for name, market := range result.Markets {
-		if !validID(name) || market.Name != name || market.SchemaVersion != 1 {
-			return result, fmt.Errorf("plugin state has invalid marketplace %q", name)
-		}
-	}
+	migrateLegacySources(result.Installed, stored.Markets)
 	return result, nil
 }
 
@@ -243,7 +241,7 @@ func (s *Store) UpdateWithOptions(ctx context.Context, id string, options Update
 	if !ok {
 		return Installed{}, fmt.Errorf("plugin %q is not installed", id)
 	}
-	prepared, err := s.prepareInstall(ctx, old.Source, old.PluginID, value.Markets)
+	prepared, err := s.prepareInstall(ctx, old.Source, old.PluginID)
 	if err != nil {
 		return Installed{}, err
 	}

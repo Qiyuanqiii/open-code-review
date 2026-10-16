@@ -19,10 +19,19 @@ import (
 	"sync"
 )
 
+// PackageCandidate describes a plugin found inside an archive or repository.
+type PackageCandidate struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"`
+}
+
 // SelectionRequiredError reports the plugins available from a multi-plugin
 // source. Select a candidate's ID in the next PrepareInstall call.
 type SelectionRequiredError struct {
-	Candidates []CatalogEntry
+	Candidates []PackageCandidate
 }
 
 func (e *SelectionRequiredError) Error() string {
@@ -73,21 +82,21 @@ func (p *PreparedInstall) Close() error {
 }
 
 // PrepareInstall downloads and validates a source without changing the registry.
-// A single plugin is selected automatically. pluginID selects an entry from a
-// catalog or repository containing several plugins.
+// A single plugin is selected automatically. pluginID selects an entry from an
+// archive or repository containing several plugins.
 func (s *Store) PrepareInstall(ctx context.Context, source, pluginID string) (*PreparedInstall, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	value, err := s.readState()
+	_, err := s.readState()
 	if err != nil {
 		return nil, err
 	}
-	return s.prepareInstall(ctx, source, pluginID, value.Markets)
+	return s.prepareInstall(ctx, source, pluginID)
 }
 
-func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, markets map[string]Market) (*PreparedInstall, error) {
-	resolved, origin, expected, err := resolveInstallSource(source, markets)
+func (s *Store) prepareInstall(ctx context.Context, source, pluginID string) (*PreparedInstall, error) {
+	resolved, err := canonicalSource(source)
 	if err != nil {
 		return nil, err
 	}
@@ -109,15 +118,9 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 			p.Close()
 		}
 	}()
-	item := Installed{Source: origin}
+	item := Installed{Source: resolved, PluginID: pluginID}
 	p.artifact.Source = resolved
-	if expected.ID != "" {
-		if pluginID != "" && pluginID != expected.ID {
-			return nil, fmt.Errorf("plugin selection %q does not match catalog id %q", pluginID, expected.ID)
-		}
-		item.SHA256, err = s.preparePackage(ctx, resolved, expected.SHA256, directory)
-	} else if strings.HasPrefix(strings.ToLower(resolved), "https:") {
-		item.PluginID = pluginID
+	if strings.HasPrefix(strings.ToLower(resolved), "https:") {
 		p.packageDir, item.SHA256, item.Revision, item.PluginID, err = s.prepareURL(ctx, resolved, pluginID, directory, &p.artifact)
 	} else {
 		item.SHA256, err = s.preparePackage(ctx, resolved, "", directory)
@@ -139,13 +142,10 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 	if err := manifest.CheckCompatibility(HostVersion); err != nil {
 		return nil, err
 	}
-	if expected.ID != "" && (manifest.ID != expected.ID || manifest.Version != expected.Version) {
-		return nil, fmt.Errorf("package id/version %s@%s does not match catalog %s@%s", manifest.ID, manifest.Version, expected.ID, expected.Version)
-	}
 	if pluginID != "" && manifest.ID != pluginID {
 		return nil, fmt.Errorf("package id %q does not match selected plugin %q", manifest.ID, pluginID)
 	}
-	if expected.ID == "" && strings.HasPrefix(strings.ToLower(resolved), "https:") {
+	if strings.HasPrefix(strings.ToLower(resolved), "https:") {
 		item.PluginID = manifest.ID
 	}
 	p.packageHash, err = packageDigest(ctx, p.packageDir)
@@ -175,20 +175,12 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 		}
 		return s.prepareGitHub(ctx, repository, pluginID, directory, artifact)
 	}
-	data, catalogSource, err := s.download(ctx, source, maxArchiveBytes)
+	data, _, err := s.download(ctx, source, maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err
 	}
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) > 0 && trimmed[0] == '{' {
-		if len(data) > maxCatalogBytes {
-			return "", "", "", "", fmt.Errorf("marketplace exceeds %d byte limit", maxCatalogBytes)
-		}
-		packageDir, digest, selection, err = s.prepareCatalog(ctx, catalogSource, data, pluginID, directory, artifact)
-		return packageDir, digest, "", selection, err
-	}
 	if !bytes.HasPrefix(data, []byte("PK")) && !bytes.HasPrefix(data, []byte{0x1f, 0x8b}) {
-		return "", "", "", "", fmt.Errorf("source must contain a plugin tar.gz or ZIP archive, or an OCR marketplace JSON document")
+		return "", "", "", "", fmt.Errorf("source must contain a plugin tar.gz or ZIP archive; JSON indexes are not supported")
 	}
 	if err := extractArchive(ctx, data, directory); err != nil {
 		return "", "", "", "", err
@@ -197,50 +189,26 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 	return packageDir, archiveDigest(data), "", pluginID, err
 }
 
-func (s *Store) prepareCatalog(ctx context.Context, source string, data []byte, pluginID, directory string, artifact *packageArtifact) (string, string, string, error) {
-	market, err := parseMarket("", source, data, true)
-	if err != nil {
-		return "", "", "", err
-	}
-	entry, err := selectCatalogEntry(market.Plugins, pluginID)
-	if err != nil {
-		return "", "", "", err
-	}
-	artifact.Source = entry.Source
-	digest, err := s.preparePackage(ctx, entry.Source, entry.SHA256, directory)
-	if err != nil {
-		return "", "", "", err
-	}
-	manifest, err := inspectPackage(ctx, directory)
-	if err != nil {
-		return "", "", "", err
-	}
-	if manifest.ID != entry.ID || manifest.Version != entry.Version {
-		return "", "", "", fmt.Errorf("package id/version %s@%s does not match catalog %s@%s", manifest.ID, manifest.Version, entry.ID, entry.Version)
-	}
-	return directory, digest, entry.ID, nil
-}
-
-func selectCatalogEntry(entries []CatalogEntry, pluginID string) (CatalogEntry, error) {
+func selectPackageCandidate(entries []PackageCandidate, pluginID string) (PackageCandidate, error) {
 	if len(entries) == 0 {
-		return CatalogEntry{}, fmt.Errorf("source contains no plugins")
+		return PackageCandidate{}, fmt.Errorf("source contains no plugins")
 	}
 	if pluginID == "" {
 		if len(entries) == 1 {
 			return entries[0], nil
 		}
-		return CatalogEntry{}, &SelectionRequiredError{Candidates: entries}
+		return PackageCandidate{}, &SelectionRequiredError{Candidates: entries}
 	}
 	for _, entry := range entries {
 		if entry.ID == pluginID {
 			return entry, nil
 		}
 	}
-	return CatalogEntry{}, fmt.Errorf("plugin %q is absent from source", pluginID)
+	return PackageCandidate{}, fmt.Errorf("plugin %q is absent from source", pluginID)
 }
 
 func selectPackage(ctx context.Context, directory, source, pluginID string) (string, error) {
-	var entries []CatalogEntry
+	var entries []PackageCandidate
 	paths := make(map[string]string)
 	// A root manifest defines the package, including any nested manifests used as
 	// data. Otherwise discover packages beneath a repository/archive wrapper.
@@ -278,14 +246,14 @@ func selectPackage(ctx context.Context, directory, source, pluginID string) (str
 			return fmt.Errorf("source contains duplicate plugin id %q", manifest.ID)
 		}
 		paths[manifest.ID] = name
-		entries = append(entries, CatalogEntry{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Description: manifest.Description, Source: source})
+		entries = append(entries, PackageCandidate{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Description: manifest.Description, Source: source})
 		return filepath.SkipDir
 	})
 	if err != nil {
 		return "", err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
-	selected, err := selectCatalogEntry(entries, pluginID)
+	selected, err := selectPackageCandidate(entries, pluginID)
 	return paths[selected.ID], err
 }
 

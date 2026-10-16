@@ -113,7 +113,7 @@ func pluginJSON(out io.Writer, value any) error {
 func newPluginCmd() *cobra.Command {
 	var jsonOutput bool
 	command := &cobra.Command{
-		Use: "plugin", Aliases: []string{"plugins"}, Short: "Manage OCR plugins and marketplaces",
+		Use: "plugin", Aliases: []string{"plugins"}, Short: "Manage OCR plugins",
 		Long: "Install rule packs and MCP tools for OCR. Installation copies the package without executing it. Enable a plugin to use its rules and tools in subsequent reviews.",
 		Args: cobra.NoArgs, SilenceUsage: true, SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
@@ -172,7 +172,7 @@ func newPluginCmd() *cobra.Command {
 				return pluginJSON(cmd.OutOrStdout(), infos)
 			}
 			if len(infos) == 0 {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No plugins installed. Use 'ocr plugin install URL_OR_PATH' or browse 'ocr plugin market search'.")
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No plugins installed. Use 'ocr plugin install URL_OR_PATH'.")
 				return err
 			}
 			out := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
@@ -204,15 +204,15 @@ func newPluginCmd() *cobra.Command {
 	var enable, dryRun bool
 	var selectedPlugin string
 	install := &cobra.Command{
-		Use: "install <url|path|id@market>", Short: "Install from a plugin link, local package or marketplace",
-		Example: "  ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review\n  ocr plugin install https://example.com/plugin.tar.gz --enable\n  ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review\n  ocr plugin install ./examples/ocr-plugins/review-checklist", Args: exactArgs(1),
+		Use: "install <url|path>", Short: "Install from a plugin URL or local package",
+		Example: "  ocr plugin install https://github.com/OWNER/PLUGIN\n  ocr plugin install https://example.com/plugin.tar.gz --enable\n  ocr plugin install ./examples/ocr-plugins/review-checklist", Args: exactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
 			prepared, err := store.PrepareInstall(cmd.Context(), args[0], selectedPlugin)
 			var choices *plugin.SelectionRequiredError
 			if errors.As(err, &choices) {
 				preview := pluginInstallPreview{Source: plugin.DisplaySource(args[0]), Plugins: make([]pluginInfo, 0, len(choices.Candidates))}
 				for _, item := range choices.Candidates {
-					preview.Plugins = append(preview.Plugins, pluginInfo{ID: item.ID, Name: item.Name, Version: item.Version, Description: item.Description, Source: plugin.DisplaySource(item.Source), SHA256: item.SHA256})
+					preview.Plugins = append(preview.Plugins, pluginInfo{ID: item.ID, Name: item.Name, Version: item.Version, Description: item.Description, Source: plugin.DisplaySource(item.Source)})
 				}
 				if printErr := printPluginInstallPreview(cmd.OutOrStdout(), preview, jsonOutput); printErr != nil {
 					return printErr
@@ -287,89 +287,6 @@ func newPluginCmd() *cobra.Command {
 			}),
 		})
 	}
-	market := &cobra.Command{Use: "market", Short: "Browse and manage marketplace catalogs", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	market.AddCommand(&cobra.Command{
-		Use: "list", Short: "List configured marketplaces", Args: cobra.NoArgs,
-		RunE: withStore(func(cmd *cobra.Command, _ []string, store *plugin.Store) error {
-			markets, err := store.ListMarkets()
-			if err != nil {
-				return err
-			}
-			for i := range markets {
-				markets[i].Source = plugin.DisplaySource(markets[i].Source)
-				for j := range markets[i].Plugins {
-					markets[i].Plugins[j].Source = plugin.DisplaySource(markets[i].Plugins[j].Source)
-				}
-			}
-			if jsonOutput {
-				return pluginJSON(cmd.OutOrStdout(), markets)
-			}
-			if len(markets) == 0 {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No marketplaces configured. Use 'ocr plugin market add NAME PATH_OR_HTTPS_URL'.")
-				return err
-			}
-			for _, item := range markets {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", pluginText(item.Name), pluginText(item.Source)); err != nil {
-					return err
-				}
-			}
-			return nil
-		}),
-	})
-	for _, action := range []string{"add", "refresh", "remove"} {
-		use, count := action+" <name>", 1
-		if action == "add" {
-			use, count = "add <name> <path|https-url>", 2
-		}
-		market.AddCommand(&cobra.Command{
-			Use: use, Short: strings.ToUpper(action[:1]) + action[1:] + " a marketplace", Args: exactArgs(count),
-			RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
-				var err error
-				switch action {
-				case "add":
-					_, err = store.AddMarket(cmd.Context(), args[0], args[1])
-				case "refresh":
-					_, err = store.RefreshMarket(cmd.Context(), args[0])
-				case "remove":
-					err = store.RemoveMarket(args[0])
-				}
-				if err != nil {
-					return err
-				}
-				if jsonOutput {
-					return pluginJSON(cmd.OutOrStdout(), map[string]string{"market": args[0], "action": action, "status": "ok"})
-				}
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Marketplace %s: %s complete.\n", pluginText(args[0]), action)
-				return err
-			}),
-		})
-	}
-	market.AddCommand(&cobra.Command{
-		Use: "search [query...]", Short: "Search cached catalogs; refresh a marketplace to fetch changes", Args: cobra.ArbitraryArgs,
-		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
-			entries, err := store.Search(strings.Join(args, " "))
-			if err != nil {
-				return err
-			}
-			for i := range entries {
-				entries[i].Source = plugin.DisplaySource(entries[i].Source)
-			}
-			if jsonOutput {
-				return pluginJSON(cmd.OutOrStdout(), entries)
-			}
-			if len(entries) == 0 {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No matching plugins. Add a marketplace or refresh its catalog.")
-				return err
-			}
-			out := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(out, "PLUGIN\tVERSION\tDESCRIPTION")
-			for _, item := range entries {
-				fmt.Fprintf(out, "%s@%s\t%s\t%s\n", pluginText(item.ID), pluginText(item.Market), pluginText(item.Version), pluginText(item.Description))
-			}
-			return out.Flush()
-		}),
-	})
-	command.AddCommand(market)
 	return command
 }
 

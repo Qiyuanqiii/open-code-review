@@ -166,107 +166,21 @@ func TestDirectHTTPSZIPPreviewCommitAndUpdate(t *testing.T) {
 	}
 }
 
-func TestHTTPSCatalogSelectionIntegrityAndUpdate(t *testing.T) {
-	ctx := context.Background()
-	firstArchive, secondArchive := testZIP(t, "example", "1"), testZIP(t, "example", "2")
-	another := testZIP(t, "another", "1")
-	var selectedVersion atomic.Int32
-	selectedVersion.Store(1)
-	var badDigest atomic.Bool
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		version := fmt.Sprint(selectedVersion.Load())
-		example := firstArchive
-		if selectedVersion.Load() == 2 {
-			example = secondArchive
-		}
-		switch request.URL.Path {
-		case "/example.zip":
-			writer.Write(example)
-		case "/another.zip":
-			writer.Write(another)
-		default:
-			digest := zipDigest(example)
-			if badDigest.Load() {
-				digest = strings.Repeat("a", 64)
+func TestHTTPSRejectsIndexesAndUnknownFormats(t *testing.T) {
+	for _, body := range []string{`{"schema_version":1,"name":"Market","plugins":[{"id":"example","source":"https://example.com/plugin.zip"}]}`, `{"broken":`, "<html>download page</html>"} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
+			defer server.Close()
+			store := NewStore(t.TempDir())
+			store.client = server.Client()
+			_, err := store.PrepareInstall(context.Background(), server.URL+"/download", "")
+			requireError(t, err, "JSON indexes are not supported")
+			items, err := store.List()
+			if err != nil || len(items) != 0 {
+				t.Fatalf("rejected source changed registry: %v, %v", items, err)
 			}
-			plugins := []catalogPlugin{{ID: "example", Name: "Example", Version: version, Source: "example.zip", SHA256: digest}}
-			if request.URL.Path == "/multiple" {
-				plugins = append(plugins, catalogPlugin{ID: "another", Name: "Another", Version: "1", Source: "another.zip", SHA256: zipDigest(another)})
-			}
-			json.NewEncoder(writer).Encode(catalog{SchemaVersion: 1, Name: "Human readable catalog name", Plugins: plugins})
-		}
-	}))
-	defer server.Close()
-	store := NewStore(t.TempDir())
-	store.client = server.Client()
-	source := server.URL + "/multiple"
-	_, err := store.PrepareInstall(ctx, source, "")
-	var selection *SelectionRequiredError
-	if !errors.As(err, &selection) || len(selection.Candidates) != 2 || !strings.Contains(err.Error(), "--plugin") {
-		t.Fatalf("multi catalog selection = %v", err)
+		})
 	}
-	_, err = store.PrepareInstall(ctx, source, "missing")
-	requireError(t, err, "absent")
-	prepared, err := store.PrepareInstall(ctx, source, "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer prepared.Close()
-	installed, err := store.InstallPrepared(ctx, prepared, true)
-	if err != nil || installed.Source != source || installed.PluginID != "example" || installed.Manifest.Version != "1" {
-		t.Fatalf("selected catalog install = %+v, %v", installed, err)
-	}
-	selectedVersion.Store(2)
-	updated, err := store.Update(ctx, "example")
-	if err != nil || updated.Manifest.Version != "2" || !updated.Enabled || updated.PluginID != "example" {
-		t.Fatalf("selected catalog update = %+v, %v", updated, err)
-	}
-	markets, err := store.ListMarkets()
-	if err != nil || len(markets) != 0 {
-		t.Fatalf("direct catalog registered marketplace: %+v, %v", markets, err)
-	}
-	badDigest.Store(true)
-	_, err = store.Update(ctx, "example")
-	requireError(t, err, "sha256 does not match")
-	items, err := store.List()
-	if err != nil || len(items) != 1 || items[0].Dir != updated.Dir {
-		t.Fatalf("bad catalog update changed snapshot = %v, %v", items, err)
-	}
-	badDigest.Store(false)
-	singleStore := NewStore(t.TempDir())
-	singleStore.client = server.Client()
-	single, err := singleStore.Install(ctx, server.URL+"/single", false)
-	if err != nil || single.PluginID != "example" {
-		t.Fatalf("single catalog auto-select = %+v, %v", single, err)
-	}
-}
-
-func TestHTTPSUnknownFormatsAndPinnedCatalogMismatch(t *testing.T) {
-	ctx := context.Background()
-	archive := testZIP(t, "example", "1")
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/html":
-			writer.Write([]byte("<html>download page</html>"))
-		case "/zip":
-			writer.Write(archive)
-		case "/malformed":
-			writer.Write([]byte(`{"not":"a catalog"}`))
-		case "/empty":
-			json.NewEncoder(writer).Encode(catalog{SchemaVersion: 1, Name: "Empty"})
-		default:
-			json.NewEncoder(writer).Encode(catalog{SchemaVersion: 1, Name: "Wrong version", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "2", Source: "zip", SHA256: zipDigest(archive)}}})
-		}
-	}))
-	defer server.Close()
-	store := NewStore(t.TempDir())
-	store.client = server.Client()
-	for _, test := range []struct{ path, message string }{{"/html", "plugin tar.gz or ZIP"}, {"/malformed", "parse marketplace"}, {"/empty", "no plugins"}, {"/mismatch", "does not match catalog"}} {
-		_, err := store.PrepareInstall(ctx, server.URL+test.path, "")
-		requireError(t, err, test.message)
-	}
-	_, err := store.PrepareInstall(ctx, "http://example.com/plugin.zip", "")
-	requireError(t, err, "HTTPS")
 }
 
 func TestDirectHTTPSZIPDiscoveryAndInvalidPackages(t *testing.T) {
@@ -283,10 +197,6 @@ func TestDirectHTTPSZIPDiscoveryAndInvalidPackages(t *testing.T) {
 		"/bad-zip":     []byte("PKbroken"),
 	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/large-catalog" {
-			writer.Write([]byte("{" + strings.Repeat(" ", maxCatalogBytes) + "}"))
-			return
-		}
 		if archive, exists := archives[request.URL.Path]; exists {
 			writer.Write(archive)
 			return
@@ -313,7 +223,6 @@ func TestDirectHTTPSZIPDiscoveryAndInvalidPackages(t *testing.T) {
 		{"/bad-nested", "", "parse plugin manifest"},
 		{"/no-manifest", "", "no plugins"},
 		{"/bad-zip", "", "read plugin ZIP"},
-		{"/large-catalog", "", "marketplace exceeds"},
 		{"/missing", "", "HTTP 404"},
 	} {
 		_, err := store.PrepareInstall(ctx, server.URL+test.path, test.selection)
@@ -418,35 +327,37 @@ func TestGitHubNestedPackageAndTreeSource(t *testing.T) {
 	}
 }
 
-func TestGitHubPublishedCatalogPreferred(t *testing.T) {
+func TestGitHubDoesNotFollowPublishedCatalog(t *testing.T) {
 	ctx := context.Background()
 	revision := strings.Repeat("a", 40)
 	manifest, _ := json.Marshal(testManifest("example", "source-version"))
-	packaged := testZIP(t, "example", "release-version")
-	catalogData, _ := json.Marshal(catalog{SchemaVersion: 1, Name: "Published", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "release-version", Source: "release.zip", SHA256: zipDigest(packaged)}}})
-	archive := tarEntries(t, map[string]string{"repository-HEAD/marketplace.json": string(catalogData), "repository-HEAD/plugin/" + ManifestFilename: string(manifest), "repository-HEAD/plugin/rules.json": "{}"})
-	store := githubStore(t, func(request *http.Request) (int, []byte) {
-		switch request.URL.Host {
-		case "api.github.com":
-			return http.StatusOK, []byte(`{"sha":"` + revision + `"}`)
-		case "codeload.github.com":
-			if request.URL.Path != "/owner/repository/tar.gz/"+revision {
-				t.Errorf("pinned archive request = %s", request.URL)
+	for _, hasPackage := range []bool{true, false} {
+		t.Run(fmt.Sprint(hasPackage), func(t *testing.T) {
+			files := map[string]string{"repository/marketplace.json": `{"schema_version":1,"name":"Published","plugins":[{"id":"example","source":"https://example.com/release.zip"}]}`}
+			if hasPackage {
+				files["repository/plugin/"+ManifestFilename] = string(manifest)
+				files["repository/plugin/rules.json"] = "{}"
 			}
-			return http.StatusOK, archive
-		case "raw.githubusercontent.com":
-			if request.URL.Path != "/owner/repository/"+revision+"/release.zip" {
-				t.Errorf("relative repository catalog source = %s", request.URL)
+			archive := tarEntries(t, files)
+			store := githubStore(t, func(r *http.Request) (int, []byte) {
+				if r.URL.Host == "api.github.com" {
+					return 200, []byte(`{"sha":"` + revision + `"}`)
+				}
+				if r.URL.String() == "https://codeload.github.com/owner/repository/tar.gz/"+revision {
+					return 200, archive
+				}
+				t.Errorf("followed removed index: %s", r.URL)
+				return 500, nil
+			})
+			installed, err := store.Install(ctx, "https://github.com/owner/repository", false)
+			if !hasPackage {
+				requireError(t, err, "no plugins")
+				return
 			}
-			return http.StatusOK, packaged
-		default:
-			t.Fatalf("unexpected request = %s", request.URL)
-			return 0, nil
-		}
-	})
-	installed, err := store.Install(ctx, "https://github.com/owner/repository", false)
-	if err != nil || installed.Manifest.Version != "release-version" || installed.SHA256 != zipDigest(packaged) || installed.Revision != revision || installed.PluginID != "example" {
-		t.Fatalf("repository published package = %+v, %v", installed, err)
+			if err != nil || installed.Manifest.Version != "source-version" || installed.Revision != revision {
+				t.Fatalf("repository package = %+v, %v", installed, err)
+			}
+		})
 	}
 }
 

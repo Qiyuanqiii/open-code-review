@@ -55,14 +55,6 @@ func TestEmptyStoreReadOnly(t *testing.T) {
 	if err != nil || len(enabled) != 0 {
 		t.Fatalf("Enabled = %v, %v", enabled, err)
 	}
-	markets, err := store.ListMarkets()
-	if err != nil || len(markets) != 0 {
-		t.Fatalf("ListMarkets = %v, %v", markets, err)
-	}
-	matches, err := store.Search("")
-	if err != nil || len(matches) != 0 {
-		t.Fatalf("Search = %v, %v", matches, err)
-	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("read created store directory: %v", err)
 	}
@@ -245,7 +237,6 @@ func TestInvalidStateAndStoreErrors(t *testing.T) {
 		"id":               `{"schema_version":1,"installed":{"other":{"manifest":{"id":"example"}}}}`,
 		"directory":        `{"schema_version":1,"installed":{"example":{"manifest":{"schema_version":1,"id":"example","name":"Example","version":"1","rules":["rules.json"]},"dir":"../outside"}}}`,
 		"nested directory": `{"schema_version":1,"installed":{"example":{"manifest":{"schema_version":1,"id":"example","name":"Example","version":"1","rules":["rules.json"]},"dir":"packages/extra/example"}}}`,
-		"market":           `{"schema_version":1,"markets":{"example":{"name":"other","schema_version":1}}}`,
 	}
 	for name, data := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -268,18 +259,6 @@ func TestInvalidStateAndStoreErrors(t *testing.T) {
 			if err := store.Remove("example"); err == nil {
 				t.Fatal("remove accepted invalid state")
 			}
-			if _, err := store.AddMarket(ctx, "local", "unused"); err == nil {
-				t.Fatal("market add accepted invalid state")
-			}
-			if _, err := store.RefreshMarket(ctx, "local"); err == nil {
-				t.Fatal("market refresh accepted invalid state")
-			}
-			if err := store.RemoveMarket("local"); err == nil {
-				t.Fatal("market remove accepted invalid state")
-			}
-			if _, err := store.Search(""); err == nil {
-				t.Fatal("search accepted invalid state")
-			}
 		})
 	}
 	root := t.TempDir()
@@ -299,15 +278,6 @@ func TestInvalidStateAndStoreErrors(t *testing.T) {
 	}
 	if err := bad.Remove("anything"); err == nil {
 		t.Fatal("expected remove lock error")
-	}
-	if _, err := bad.AddMarket(ctx, "local", "unused"); err == nil {
-		t.Fatal("expected market add lock error")
-	}
-	if _, err := bad.RefreshMarket(ctx, "local"); err == nil {
-		t.Fatal("expected market refresh lock error")
-	}
-	if err := bad.RemoveMarket("local"); err == nil {
-		t.Fatal("expected market remove lock error")
 	}
 	store := NewStore(t.TempDir())
 	if err := os.Mkdir(filepath.Join(store.root, "state.json"), 0700); err != nil {
@@ -357,7 +327,7 @@ func TestMCPOnlySnapshotDoesNotStartProcesses(t *testing.T) {
 
 func TestOversizedStateWritePreservesRegistry(t *testing.T) {
 	store := NewStore(t.TempDir())
-	value := state{SchemaVersion: 1, Installed: make(map[string]Installed), Markets: make(map[string]Market)}
+	value := state{SchemaVersion: 1, Installed: make(map[string]Installed)}
 	if err := store.writeState(value); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +335,7 @@ func TestOversizedStateWritePreservesRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value.Markets["huge"] = Market{Name: "huge", Source: strings.Repeat("x", maxStateBytes)}
+	value.Installed["huge"] = Installed{Source: strings.Repeat("x", maxStateBytes)}
 	requireError(t, store.writeState(value), "byte limit")
 	after, err := os.ReadFile(filepath.Join(store.root, "state.json"))
 	if err != nil || string(before) != string(after) {

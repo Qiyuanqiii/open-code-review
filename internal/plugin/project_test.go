@@ -203,11 +203,9 @@ func TestProjectFingerprintVerifiesContentAndTrust(t *testing.T) {
 	}
 }
 
-func TestProjectFrozenCatalogDoesNotResolveAgain(t *testing.T) {
+func TestProjectFrozenArchiveUsesLockedBytes(t *testing.T) {
 	ctx := context.Background()
 	archive := testZIP(t, "example", "1")
-	var resolving atomic.Bool
-	resolving.Store(true)
 	var requests atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -215,25 +213,20 @@ func TestProjectFrozenCatalogDoesNotResolveAgain(t *testing.T) {
 			w.Write(archive)
 			return
 		}
-		if !resolving.Load() {
-			t.Errorf("frozen sync accessed catalog: %s", r.URL.Path)
-			w.WriteHeader(500)
-			return
-		}
-		json.NewEncoder(w).Encode(catalog{SchemaVersion: 1, Name: "Test", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "1", Source: "package.zip", SHA256: zipDigest(archive)}}})
+		t.Errorf("unexpected artifact request: %s", r.URL)
+		w.WriteHeader(500)
 	}))
 	defer server.Close()
 	store := NewStore(t.TempDir())
 	store.client = server.Client()
 	p, _ := testProject(t, store)
-	lock, err := p.Add(ctx, server.URL+"/catalog.json", "")
+	lock, err := p.Add(ctx, server.URL+"/package.zip", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if entry := lock.Platforms[projectPlatform()][0]; entry.Source != server.URL+"/package.zip" || entry.ArchiveSHA256 != zipDigest(archive) {
-		t.Fatalf("catalog was not resolved into artifact: %+v", entry)
+		t.Fatalf("archive was not locked: %+v", entry)
 	}
-	resolving.Store(false)
 	before := requests.Load()
 	_, err = p.Sync(ctx, true)
 	requireError(t, err, "ARTIFACT_MISSING")
@@ -255,51 +248,73 @@ func TestProjectFrozenCatalogDoesNotResolveAgain(t *testing.T) {
 }
 
 func TestProjectGitHubLocksConcreteArtifacts(t *testing.T) {
-	for _, published := range []bool{false, true} {
-		t.Run(map[bool]string{false: "repository", true: "published-catalog"}[published], func(t *testing.T) {
+	ctx := context.Background()
+	revision := strings.Repeat("c", 40)
+	manifest, _ := json.Marshal(testManifest("example", "1"))
+	archive := tarEntries(t, map[string]string{"repository-commit/sub/" + ManifestFilename: string(manifest), "repository-commit/sub/rules.json": "{}"})
+	resolving := true
+	var downloads []string
+	store := githubStore(t, func(r *http.Request) (int, []byte) {
+		if resolving && r.URL.Host == "api.github.com" {
+			return 200, []byte(`{"sha":"` + revision + `"}`)
+		}
+		if !resolving {
+			downloads = append(downloads, r.URL.String())
+		}
+		if r.URL.String() == "https://codeload.github.com/owner/repository/tar.gz/"+revision {
+			return 200, archive
+		}
+		t.Errorf("unexpected source lookup: %s", r.URL)
+		return 500, nil
+	})
+	p, _ := testProject(t, store)
+	lock, err := p.Add(ctx, "https://github.com/owner/repository", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := lock.Platforms[projectPlatform()][0]
+	if entry.Revision != revision || entry.Directory != "repository-commit/sub" {
+		t.Fatalf("locked artifact = %+v", entry)
+	}
+	resolving = false
+	if _, err := p.Sync(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(downloads) != 1 || downloads[0] != entry.Source {
+		t.Fatalf("frozen downloads = %v", downloads)
+	}
+}
+
+func TestProjectFrozenArchiveRejectsChangedDownload(t *testing.T) {
+	for _, format := range []string{"zip", "tar.gz"} {
+		t.Run(format, func(t *testing.T) {
 			ctx := context.Background()
-			revision := strings.Repeat("c", 40)
-			manifest, _ := json.Marshal(testManifest("example", "1"))
-			files := map[string]string{"repository-commit/sub/" + ManifestFilename: string(manifest), "repository-commit/sub/rules.json": "{}"}
-			release := testTARGZ(t, "example", "1")
-			if published {
-				catalogData, _ := json.Marshal(catalog{SchemaVersion: 1, Name: "Release", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: "1", Source: "https://example.com/release.tgz", SHA256: archiveDigest(release)}}})
-				files["repository-commit/marketplace.json"] = string(catalogData)
+			original, changed := testZIP(t, "example", "1"), testZIP(t, "example", "2")
+			if format == "tar.gz" {
+				original, changed = testTARGZ(t, "example", "1"), testTARGZ(t, "example", "2")
 			}
-			archive := tarEntries(t, files)
-			resolving := true
-			var downloads []string
-			store := githubStore(t, func(r *http.Request) (int, []byte) {
-				if resolving && r.URL.Host == "api.github.com" {
-					return 200, []byte(`{"sha":"` + revision + `"}`)
+			var serveChanged atomic.Bool
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if serveChanged.Load() {
+					w.Write(changed)
+				} else {
+					w.Write(original)
 				}
-				if !resolving {
-					downloads = append(downloads, r.URL.String())
-				}
-				if r.URL.String() == "https://example.com/release.tgz" {
-					return 200, release
-				}
-				if r.URL.String() == "https://codeload.github.com/owner/repository/tar.gz/"+revision {
-					return 200, archive
-				}
-				t.Errorf("unexpected source lookup: %s", r.URL)
-				return 500, nil
-			})
-			p, _ := testProject(t, store)
-			lock, err := p.Add(ctx, "https://github.com/owner/repository", "")
-			if err != nil {
+			}))
+			defer server.Close()
+			store := NewStore(t.TempDir())
+			store.client = server.Client()
+			project, _ := testProject(t, store)
+			if _, err := project.Add(ctx, server.URL+"/plugin."+format, ""); err != nil {
 				t.Fatal(err)
 			}
-			entry := lock.Platforms[projectPlatform()][0]
-			if entry.Revision != revision || (published && entry.Directory != ".") || (!published && entry.Directory != "repository-commit/sub") {
-				t.Fatalf("locked artifact = %+v", entry)
-			}
-			resolving = false
-			if _, err := p.Sync(ctx, false); err != nil {
-				t.Fatal(err)
-			}
-			if len(downloads) != 1 || downloads[0] != entry.Source {
-				t.Fatalf("frozen downloads = %v", downloads)
+			serveChanged.Store(true)
+			_, err := project.Sync(ctx, false)
+			requireError(t, err, "ARTIFACT_MISMATCH")
+			serveChanged.Store(false)
+			installed, err := project.Sync(ctx, false)
+			if err != nil || len(installed) != 1 || installed[0].Manifest.Version != "1" {
+				t.Fatalf("retry with locked bytes = %+v, %v", installed, err)
 			}
 		})
 	}

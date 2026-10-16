@@ -1,4 +1,4 @@
-# Native OCR plugins and marketplaces
+# Native OCR plugins
 
 OCR can host plugins that contribute review rules, MCP tools and an explicitly
 selected review workflow through its installer, registry, and runtime. These
@@ -12,35 +12,45 @@ invocation only.
 
 ## Install from a link
 
-Install a public GitHub plugin repository or an HTTPS tar.gz package directly. No
-marketplace registration is required:
+Install a public GitHub plugin repository, an HTTPS tar.gz/ZIP archive, or a
+local package:
 
 ```text
-ocr plugin install https://github.com/Qiyuanqiii/ocr-behavior-review
+ocr plugin install https://github.com/OWNER/PLUGIN
 ocr plugin install https://example.com/team-review.tar.gz --enable
+ocr plugin install https://example.com/team-review.zip
+ocr plugin install ./team-review.tar.gz
+ocr plugin install ./team-review.zip
+ocr plugin install ./team-review
 ```
 
-For a GitHub repository, OCR discovers its plugin package or published catalog.
-A catalog can point to release archives containing executable builds that are not
-present in the source tree. Installation downloads and inspects the package; it
-does not execute plugin commands or install dependencies.
+For a GitHub repository, OCR installs the plugin files present in the selected
+commit. For packages requiring compiled executables absent from the source tree,
+use the release asset URL instead. Installation downloads and inspects the
+package; it does not build executables, run plugin commands, or install dependencies.
+JSON indexes and named marketplace references are not installation sources.
+For a local filename containing `@`, use an explicit path such as
+`./team-review@1.0.zip` or an absolute path. Bare `ID@MARKET` inputs are rejected
+so legacy installation records cannot silently resolve to a same-named local file.
 
 Preview a source without installing or enabling anything:
 
 ```text
 ocr plugin install https://example.com/team-review.tar.gz --dry-run
-ocr plugin install https://example.com/ocr-marketplace.json --dry-run --json
+ocr plugin install ./team-review.zip --dry-run --json
 ```
 
-A catalog containing one plugin selects it automatically. If it contains
-multiple plugins, the command lists them and asks for an explicit selection:
+A remote archive or GitHub repository containing one plugin selects it
+automatically. If it contains multiple plugins, the command lists them and asks
+for an explicit selection:
 
 ```text
-ocr plugin install https://example.com/ocr-marketplace.json --plugin team-review --enable
+ocr plugin install https://example.com/team-plugins.tar.gz --plugin team-review --enable
 ```
 
 Direct installations remember their original source and selected plugin.
 `ocr plugin update ID` checks that source again and preserves the enabled state.
+A fixed version URL or commit remains fixed; updates do not search for new releases.
 GitHub branch/tag sources are resolved to a commit before download. If resolution
 fails, including API quota errors, installation/update fails without changing the
 registered package. Retry later or supply a `/tree/FULL_COMMIT_SHA` URL; a full
@@ -78,7 +88,7 @@ New installations expose these fields in `show --json` and installation results:
 | `archive_sha256` | SHA-256 of the exact downloaded/local archive bytes; absent for directory sources |
 | `content_sha256` | SHA-256 of the prepared package's files, also checked after copying into the installed snapshot |
 | `content_digest_format` | `ocr-package-tree-v1`, identifying the content-digest algorithm |
-| `revision` | GitHub commit used to discover the package or published catalog |
+| `revision` | GitHub commit containing the package |
 
 The content digest walks files in lexical directory order, using forward-slash
 relative paths. For each file it hashes `PATH_BYTE_LENGTH:PATH:EXEC_BITS:SIZE:`
@@ -93,19 +103,16 @@ OCR does not guess their digest kind or silently fill new fields. Updating such 
 package records the explicit fields. Old OCR builds that reject the new state
 fields cannot read the updated state; retain a backup before downgrading.
 
-A direct archive digest records downloaded bytes. Marketplace-provided archive
-digests are checked before installation. Neither is a publisher signature, and
-these records alone do not select a project's plugin set. The project declaration
-and lock described below provide that selection and frozen installation.
+A direct archive digest records downloaded bytes; it is not a publisher signature.
+The project declaration and lock described below select the plugin set and verify
+archive and content digests on frozen installation.
 
-## Browse the bundled marketplace
+## Try the bundled plugins
 
 From this checkout:
 
 ```text
-ocr plugin market add examples ./examples/ocr-plugins
-ocr plugin market search
-ocr plugin install review-checklist@examples
+ocr plugin install ./examples/ocr-plugins/review-checklist
 ocr plugin show review-checklist
 ocr plugin enable review-checklist
 ocr rules check src/main.go
@@ -115,7 +122,7 @@ The checklist is appended to matching review rules. The existing project,
 user, and built-in rules keep their priority. Enable the tool example with:
 
 ```text
-ocr plugin install project-notes@examples --enable
+ocr plugin install ./examples/ocr-plugins/project-notes --enable
 ```
 
 The Project Notes example requires `node` on PATH. During a review or scan, its
@@ -136,20 +143,14 @@ including executing their server commands with your account's permissions.
 | --- | --- |
 | `ocr plugin list` | List installed packages and enabled state |
 | `ocr plugin show ID` | Show source, package location, and contributed capabilities |
-| `ocr plugin install URL` | Install an HTTPS tar.gz/ZIP, public GitHub plugin repository, or single-plugin catalog |
+| `ocr plugin install URL` | Install an HTTPS tar.gz/ZIP or public GitHub plugin repository |
 | `ocr plugin install URL --plugin ID` | Choose a plugin from a source containing multiple packages |
 | `ocr plugin install SOURCE --dry-run` | Inspect packages without installing or enabling them |
 | `ocr plugin install PATH` | Copy a local directory or tar.gz/ZIP package |
-| `ocr plugin install ID@MARKET` | Install the selected marketplace entry |
 | `ocr plugin enable ID` / `disable ID` | Change rule and MCP contributions for subsequent reviews |
 | `ocr plugin update ID` | Replace from the original source; preserve enabled state; reject changed execution declarations |
 | `ocr plugin update ID --accept-permissions` | Explicitly accept added/changed execution declarations |
 | `ocr plugin remove ID` | Unregister a package |
-| `ocr plugin market add NAME SOURCE` | Register a local or HTTPS catalog and cache it |
-| `ocr plugin market list` | List configured catalogs |
-| `ocr plugin market search [QUERY...]` | Search cached catalogs without network access |
-| `ocr plugin market refresh NAME` | Fetch and validate the catalog again |
-| `ocr plugin market remove NAME` | Unregister a catalog; installed plugins remain |
 
 All commands support `--json`. Management output omits MCP environment values,
 arguments, authentication headers, and source URL query parameters. Installing a
@@ -170,12 +171,21 @@ the package is disabled. It does not change the saved enabled state. There is no
 automatic project installation during reviews. See [Project plugins](#project-plugins)
 for an explicit declaration and frozen installation workflow.
 
-Marketplace updates are explicit:
+### Existing prototype installations
 
-```text
-ocr plugin market refresh examples
-ocr plugin update review-checklist
-```
+Installed snapshots remain usable after upgrading from a build with marketplace
+support. For an old `ID@MARKET` installation, OCR reads its cached source URL or
+absolute local path and uses that direct source for updates. Reading the registry
+does not fetch an index or write state. The next successful registry change saves
+the direct source and drops the old market cache.
+
+If the cache was removed, the source is unavailable, or the original source was a
+JSON index URL, existing plugins can still be listed, enabled, disabled, or removed.
+To change that source, note the enabled state, remove the registration with
+`ocr plugin remove ID`, and install the author's direct archive/repository URL.
+A fixed release URL stays on that release. Old project locks already record the
+concrete artifacts and remain usable with `sync --frozen`; replace index URLs in
+project declarations with direct sources before relocking.
 
 ## Project plugins
 
@@ -210,16 +220,14 @@ A declaration looks like this:
 
 Local sources must be inside the project and are stored as relative paths.
 Remote sources use permanent HTTPS URLs without credentials, fragments, or query
-parameters. A named marketplace selection is resolved into a source URL/path;
-teammates do not need the same marketplace alias. The lock contains artifact
-locations and digests, not the manifest's command arguments, environment values,
+parameters. The lock contains artifact locations and digests, not the manifest's
+command arguments, environment values,
 or authentication headers. Do not put secrets in committed local plugin files.
 
 The lock ties the declaration to an ordered list of package identities, exact
 archive URLs or local sources, package directories, and archive/content digests.
-GitHub sources are resolved to a full commit's archive; a published catalog is
-resolved to its selected release archive. Frozen sync fetches those archives
-directly, without consulting a catalog or resolving a branch again. If bytes,
+GitHub sources are resolved to a full commit's archive. Frozen sync fetches
+locked archives directly, without resolving a branch again. If bytes,
 identity, or the declaration do not match, installation fails. It never runs
 plugin programs or package managers.
 
@@ -496,44 +504,18 @@ resolver, then start the same captured tool configuration. Rule text, manifests,
 and package snapshot identity participate in the existing resume rule hash,
 so incompatible changes reject reuse of an old checkpoint.
 
-## Publish a marketplace
+## Distribute a plugin
 
-A local directory uses `ocr-marketplace.json`, or pass an explicit JSON path:
+Publish the complete package as a tar.gz or ZIP asset and share its HTTPS URL.
+Include `ocr-plugin.json`, all referenced rule files, and any executables needed
+on the target platform. tar.gz preserves executable permissions on Unix systems.
+Authors can also share a GitHub repository URL when it contains the ready-to-use
+package; OCR does not follow repository index files to another download.
 
-```json
-{
-  "schema_version": 1,
-  "name": "Team Plugins",
-  "plugins": [
-    {
-      "id": "team-review",
-      "name": "Team Review",
-      "version": "1.0.0",
-      "description": "Team review rules and context tools.",
-      "source": "./team-review"
-    }
-  ]
-}
-```
+HTTPS redirects must remain HTTPS. Credentials in URL userinfo and fragments are
+rejected. Use `--dry-run` to inspect the package before installing it.
 
-Local sources are resolved relative to the catalog. They can be directories or
-tar.gz or ZIP archives. A catalog archive must contain `ocr-plugin.json` directly at its root, rather
-than wrapping the package in another directory.
-
-For an HTTPS catalog, each entry must reference an HTTPS tar.gz or ZIP (an HTTPS-relative
-URL is allowed) and include `sha256`, the 64-character hexadecimal digest of
-the archive bytes. OCR verifies the digest and the manifest ID/version before
-committing installation. HTTPS redirects must remain HTTPS. Credentials in URL
-userinfo and fragments are rejected. A catalog digest detects mismatched
-downloads; the catalog source itself must still be trusted.
-
-```text
-ocr plugin market add team https://example.com/ocr-marketplace.json
-ocr plugin market search
-ocr plugin install team-review@team
-```
-
-Limits are 1 MiB for a manifest, 4 MiB for a catalog, 32 MiB for an archive download,
+Limits are 1 MiB for a manifest, 4 MiB for a project configuration, 32 MiB for an archive download,
 64 MiB expanded package content, and 4096 package entries. For tar.gz, the
 decompressed stream also has a 72 MiB limit including headers, padding and
 metadata. Gzip checksums are verified before installation. Rule packs and their

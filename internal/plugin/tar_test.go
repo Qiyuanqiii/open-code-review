@@ -172,7 +172,7 @@ func TestTARGZBoundsAndCorruption(t *testing.T) {
 
 func TestTARGZInstallAndUpdate(t *testing.T) {
 	ctx := context.Background()
-	for _, mode := range []string{"local", "direct", "catalog", "market"} {
+	for _, mode := range []string{"local", "direct"} {
 		t.Run(mode, func(t *testing.T) {
 			archives := map[int32][]byte{1: testTARGZ(t, "example", "1"), 2: testTARGZ(t, "example", "2")}
 			var version atomic.Int32
@@ -181,8 +181,6 @@ func TestTARGZInstallAndUpdate(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				current := version.Load()
 				switch r.URL.Path {
-				case "/catalog":
-					json.NewEncoder(w).Encode(catalog{SchemaVersion: 1, Name: "Test", Plugins: []catalogPlugin{{ID: "example", Name: "Example", Version: fmt.Sprint(current), Source: "download", SHA256: archiveDigest(archives[current])}}})
 				case "/download":
 					if corrupt.Load() {
 						w.Write([]byte{0x1f, 0x8b, 0})
@@ -203,13 +201,6 @@ func TestTARGZInstallAndUpdate(t *testing.T) {
 				if err := os.WriteFile(source, archives[1], 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "catalog":
-				source = server.URL + "/catalog"
-			case "market":
-				if _, err := store.AddMarket(ctx, "test", server.URL+"/catalog"); err != nil {
-					t.Fatal(err)
-				}
-				source = "example@test"
 			}
 			prepared, err := store.PrepareInstall(ctx, source, "")
 			if err != nil {
@@ -223,11 +214,6 @@ func TestTARGZInstallAndUpdate(t *testing.T) {
 			version.Store(2)
 			if mode == "local" {
 				if err := os.WriteFile(source, archives[2], 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if mode == "market" {
-				if _, err := store.RefreshMarket(ctx, "test"); err != nil {
 					t.Fatal(err)
 				}
 			}

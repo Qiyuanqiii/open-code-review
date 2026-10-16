@@ -101,64 +101,6 @@ func TestPluginCommandLifecycleAndCredentialRedaction(t *testing.T) {
 	}
 }
 
-func TestPluginMarketplaceCommandLifecycle(t *testing.T) {
-	freshOCRHome(t)
-	t.Setenv("PATH", "")
-	dir := t.TempDir()
-	packageDir := filepath.Join(dir, "package")
-	writePluginCommandFixture(t, packageDir, "1.0.0")
-	catalog := filepath.Join(dir, "ocr-marketplace.json")
-	writeCatalog := func(version string) {
-		t.Helper()
-		data, err := json.Marshal(map[string]any{
-			"schema_version": 1, "name": "Examples",
-			"plugins": []map[string]string{{"id": "test-review", "name": "Test Review", "version": version, "description": "Review error handling", "source": "package"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(catalog, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeCatalog("1.0.0")
-	if out := pluginCommandOK(t, "market", "list"); !strings.Contains(out, "No marketplaces") {
-		t.Fatalf("unexpected initial marketplace: %s", out)
-	}
-	pluginCommandOK(t, "market", "add", "examples", catalog, "--json")
-	if out := pluginCommandOK(t, "market", "list"); !strings.Contains(out, "examples") || !strings.Contains(out, "ocr-marketplace.json") {
-		t.Fatalf("marketplace missing: %s", out)
-	}
-	var markets []plugin.Market
-	if err := json.Unmarshal([]byte(pluginCommandOK(t, "market", "list", "--json")), &markets); err != nil || len(markets) != 1 {
-		t.Fatalf("marketplace JSON: %+v, %v", markets, err)
-	}
-	if out := pluginCommandOK(t, "market", "search", "error", "handling"); !strings.Contains(out, "test-review@examples") {
-		t.Fatalf("search did not expose install identifier: %s", out)
-	}
-	var entries []plugin.CatalogEntry
-	if err := json.Unmarshal([]byte(pluginCommandOK(t, "market", "search", "--json")), &entries); err != nil || len(entries) != 1 || entries[0].Market != "examples" {
-		t.Fatalf("catalog JSON: %+v, %v", entries, err)
-	}
-	if out := pluginCommandOK(t, "market", "search", "no-matching-plugin"); !strings.Contains(out, "No matching plugins") {
-		t.Fatalf("search guidance missing: %s", out)
-	}
-	pluginCommandOK(t, "install", "test-review@examples", "--enable", "--json")
-	writePluginCommandFixture(t, packageDir, "1.1.0")
-	writeCatalog("1.1.0")
-	pluginCommandOK(t, "market", "refresh", "examples")
-	if out := pluginCommandOK(t, "update", "test-review"); !strings.Contains(out, "1.1.0 (enabled)") {
-		t.Fatalf("market update did not install refreshed version: %s", out)
-	}
-	pluginCommandOK(t, "market", "remove", "examples", "--json")
-	if out := pluginCommandOK(t, "market", "list", "--json"); !strings.Contains(out, "[]") {
-		t.Fatalf("removed market remained: %s", out)
-	}
-	// Removing the catalog does not uninstall a plugin already copied from it.
-	pluginCommandOK(t, "show", "test-review")
-	pluginCommandOK(t, "remove", "test-review")
-}
-
 func TestPluginCommandErrorsAreReturnedToCLIAndTUI(t *testing.T) {
 	freshOCRHome(t)
 	for _, args := range [][]string{
@@ -173,7 +115,7 @@ func TestPluginCommandErrorsAreReturnedToCLIAndTUI(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"--help"}, {"market", "--help"}} {
+	for _, args := range [][]string{{"--help"}} {
 		if out := pluginCommandOK(t, args...); !strings.Contains(out, "Available Commands:") {
 			t.Fatalf("help omitted commands: %s", out)
 		}
@@ -186,33 +128,10 @@ func TestPluginManagementTextStripsTerminalControl(t *testing.T) {
 	}
 }
 
-func TestPluginMarketplaceOutputRedactsSourceQueries(t *testing.T) {
-	freshOCRHome(t)
-	dir := t.TempDir()
-	catalog := filepath.Join(dir, plugin.MarketplaceFilename)
-	data := `{"schema_version":1,"name":"Private downloads","plugins":[{"id":"test-review","name":"Test Review","version":"1.0.0","source":"https://example.invalid/plugin.zip?token=source-secret","sha256":"` + strings.Repeat("a", 64) + `"}]}`
-	if err := os.WriteFile(catalog, []byte(data), 0600); err != nil {
-		t.Fatal(err)
-	}
-	pluginCommandOK(t, "market", "add", "private", catalog)
-	for _, args := range [][]string{{"market", "list", "--json"}, {"market", "search", "--json"}} {
-		out := pluginCommandOK(t, args...)
-		if strings.Contains(out, "source-secret") || !strings.Contains(out, "https://example.invalid/plugin.zip") {
-			t.Fatalf("unsafe or missing public source: %s", out)
-		}
-	}
-	// Display redaction must not change the private download location in storage.
-	store, err := plugin.DefaultStore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := store.Search("")
-	if err != nil || len(entries) != 1 || !strings.Contains(entries[0].Source, "source-secret") {
-		t.Fatalf("download source was altered: %+v, %v", entries, err)
-	}
-	info := pluginManagementInfo(plugin.Installed{Source: entries[0].Source})
-	if strings.Contains(info.Source, "source-secret") {
-		t.Fatalf("installed plugin source leaked query: %s", info.Source)
+func TestPluginManagementOutputRedactsSourceQueries(t *testing.T) {
+	info := pluginManagementInfo(plugin.Installed{Source: "https://example.invalid/plugin.zip?token=source-secret"})
+	if info.Source != "https://example.invalid/plugin.zip" {
+		t.Fatalf("unsafe source: %s", info.Source)
 	}
 }
 

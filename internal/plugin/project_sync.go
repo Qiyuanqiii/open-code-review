@@ -24,17 +24,7 @@ func (p *Project) Add(ctx context.Context, source, selection string) (ProjectLoc
 			return err
 		}
 		defer prepared.Close()
-		// Resolve named markets now; project declarations cannot depend on a
-		// different user's registry having the same market alias.
-		state, err := p.home.readState()
-		if err != nil {
-			return err
-		}
-		resolved, _, _, err := resolveInstallSource(source, state.Markets)
-		if err != nil {
-			return err
-		}
-		portable, err := p.portableSource(resolved)
+		portable, err := p.portableSource(prepared.Source)
 		if err != nil {
 			return err
 		}
@@ -180,8 +170,7 @@ func (p *Project) prepareLocked(ctx context.Context, store *Store, entry LockedP
 	if err != nil {
 		return nil, err
 	}
-	// This path only fetches the locked artifact. It never interprets a catalog
-	// or resolves a repository ref, even if the URL now serves different data.
+	// Only fetch the locked artifact, even if the URL now serves different data.
 	archiveHash, err := store.preparePackage(ctx, source, entry.ArchiveSHA256, directory)
 	if err != nil {
 		return nil, projectError("ARTIFACT_MISMATCH", "prepare %q: %v", entry.ID, err)

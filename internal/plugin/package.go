@@ -16,11 +16,11 @@ import (
 )
 
 const (
-	maxManifestBytes = 1 << 20
-	maxCatalogBytes  = 4 << 20
-	maxArchiveBytes  = 32 << 20
-	maxPackageBytes  = 64 << 20
-	maxPackageFiles  = 4096
+	maxManifestBytes      = 1 << 20
+	maxProjectConfigBytes = 4 << 20
+	maxArchiveBytes       = 32 << 20
+	maxPackageBytes       = 64 << 20
+	maxPackageFiles       = 4096
 )
 
 // ContentDigest hashes the current package files, including executable bits.

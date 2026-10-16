@@ -97,7 +97,7 @@ func (p *Project) readJSON(name string, value any) error {
 		return err
 	}
 	defer file.Close()
-	data, err := readBounded(file, maxCatalogBytes)
+	data, err := readBounded(file, maxProjectConfigBytes)
 	if err != nil {
 		return err
 	}
@@ -244,8 +244,8 @@ func (p *Project) writeJSON(name string, value any) error {
 	if err != nil {
 		return err
 	}
-	if len(data)+1 > maxCatalogBytes {
-		return fmt.Errorf("project plugin configuration exceeds %d bytes", maxCatalogBytes)
+	if len(data)+1 > maxProjectConfigBytes {
+		return fmt.Errorf("project plugin configuration exceeds %d bytes", maxProjectConfigBytes)
 	}
 	temporary := ".plugins-" + rand.Text()
 	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)

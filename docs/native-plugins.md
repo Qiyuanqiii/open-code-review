@@ -5,6 +5,9 @@ selected review workflow through its installer, registry, and runtime. These
 packages use `ocr-plugin.json` and are
 separate from the integrations that install OCR into other coding agents.
 
+For module boundaries, lifecycle diagrams, and a suggested code-review order,
+see [Native plugin architecture](plugin-architecture.md).
+
 [Review workflow plugins](review-workflow-plugins.md) provide their own stage plan,
 prompts and validators through a local process. Start one with
 `ocr review --review-plugin ID`. Selection affects that

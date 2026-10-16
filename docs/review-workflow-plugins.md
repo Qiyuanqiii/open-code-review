@@ -1,5 +1,8 @@
 # Review workflow plugins
 
+For the relationship between package installation, authorization, and runtime
+adapters, see [Native plugin architecture](plugin-architecture.md).
+
 For a repository-managed workflow, declare it with `ocr plugin add SOURCE`,
 commit `.opencodereview/plugins.json` and `plugins.lock.json`, then install using
 `ocr plugin sync --frozen`. Inspect the locked package and run `ocr plugin trust`

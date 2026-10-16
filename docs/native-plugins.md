@@ -268,6 +268,9 @@ restore it from a shared CI cache.
 `ocr plugin preflight` checks locked snapshots, host compatibility, and execution
 authorization without obtaining model credentials, starting MCP/workflow
 processes, or calling a model. `--json` returns the installed package summaries.
+`--fingerprint` instead returns a digest of the verified lock and platform;
+with `--json`, the result is a JSON string. It repeats the same content and trust
+checks, and excludes machine-local installation paths.
 Project command operational errors return an `error` object with a code and
 message on stdout and exit nonzero. Codes include `LOCK_MISMATCH`,
 `PLATFORM_UNSUPPORTED`, `ARTIFACT_MISSING`, `ARTIFACT_MISMATCH`, and
@@ -294,10 +297,47 @@ its `state.json` and `packages` directory) and sync again to recover. This cache
 is outside the repository; keep the committed declaration and lock files.
 No automatic pruning is included.
 
-These commands establish the local project workflow. The GitHub Action does not
-yet provide a trusted policy checkout or an `allow_plugin_exec` input. Do not
-authorize execution from an untrusted pull request's declaration or lock, or
-place model secrets in a job that runs its code.
+### GitHub Actions
+
+The Action checks out the PR's base commit for rules and plugin policy. For
+comment-triggered runs, it obtains the base SHA from the PR API. A workflow can
+override this with `policy_sha`, a full trusted commit SHA. PR head files are
+fetched for the diff; they do not supply the active plugin declaration or lock.
+
+Set `project_plugins: 'true'` to install the committed lock with `sync --frozen`
+before configuring model credentials. Pin an Action and CLI version containing
+project-plugin support; older published CLI versions cannot run these commands.
+The declaration, lock, project rules, custom `rule` file, and referenced rule
+files must be committed at the policy SHA, inside its checkout, and unchanged
+under Git's checkout/clean transformations. Package content digests still require
+identical installed bytes; keep repository-local package line endings stable
+(for example, use `eol=lf` in `.gitattributes`). The lock must include the runner's
+OS/architecture.
+
+Each plugin-enabled run uses a fresh private OCR home. Personal/global packages,
+rules, configuration, and old trust records are not inherited. Missing artifacts,
+changed content, unsupported packages/platforms, or invalid locks stop the job;
+the Action does not replace a locked version with the latest available package.
+
+`allow_plugin_exec` defaults to `'false'`. Set it to `'true'` in the trusted
+workflow only after inspecting the locked MCP/workflow declarations. It grants
+that lock execution permission for this run. Native plugins have the runner's
+permissions and can access the review process's environment, including model
+credentials. A lock file by itself never authorizes execution. See the
+[Action example](../examples/github_actions/README.md#project-plugins-in-ci).
+
+### Resume and incremental review
+
+Session identity includes enabled plugin manifests, package contents (including
+executable bits), rule text, and selected workflow. Changing these rejects a
+resume and asks for a new review. Locked project snapshots must still pass
+content and execution-authorization checks before a session can resume.
+
+Action checkpoints include the trusted policy SHA, verified plugin lock/content
+identity, and execution permission input. Changed policy or plugins force a full
+review. A missing verified fingerprint prevents checkpoint reuse or advancement.
+The CI plugin identity excludes temporary installation paths, so moving to a
+fresh runner does not by itself invalidate a checkpoint.
 
 ## Author a package
 

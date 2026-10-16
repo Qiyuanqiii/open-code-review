@@ -302,3 +302,15 @@ func (p *Project) Explain() (ProjectLock, error) {
 	}
 	return lock, err
 }
+
+// Fingerprint identifies the verified project lock without machine-local paths.
+func (p *Project) Fingerprint(ctx context.Context) (string, error) {
+	lock, err := p.Explain()
+	if err != nil {
+		return "", err
+	}
+	if _, err := p.load(ctx, lock, true); err != nil {
+		return "", err
+	}
+	return projectLockID(lock), nil
+}

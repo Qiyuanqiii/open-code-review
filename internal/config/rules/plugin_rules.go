@@ -78,11 +78,17 @@ func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver
 				return nil, fmt.Errorf("review plugin %q: %w", reviewID, err)
 			}
 			p.Enabled = true
-			selected = &p
 		}
 		if p.Enabled {
 			if err := p.Manifest.CheckCompatibility(plugin.HostVersion); err != nil {
 				return nil, err
+			}
+			p.ContentSHA256, err = plugin.ContentDigest(context.Background(), p.Dir)
+			if err != nil {
+				return nil, fmt.Errorf("identify plugin %q contents: %w", p.Manifest.ID, err)
+			}
+			if p.Manifest.ID == reviewID {
+				selected = &p
 			}
 			installed = append(installed, p)
 		}
@@ -201,7 +207,7 @@ func (r *pluginResolver) CanonicalConfig() []string {
 		// Manifests are validated by the store. JSON map keys are sorted by
 		// encoding/json; this also covers enabled plugins with only MCP tools.
 		manifest, _ := json.Marshal(p.Manifest)
-		fields = append(fields, "plugin", p.Manifest.ID, "manifest", string(manifest), "directory", p.Dir)
+		fields = append(fields, "plugin", p.Manifest.ID, "manifest", string(manifest), "directory", p.Dir, "content", p.ContentSHA256)
 	}
 	for _, pack := range r.packs {
 		fields = append(fields, "plugin", pack.plugin.Manifest.ID, "file", pack.file)

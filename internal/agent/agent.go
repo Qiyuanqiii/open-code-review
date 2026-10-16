@@ -1065,7 +1065,7 @@ func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
 	if a.args.ReviewPlugin != nil {
 		manifest, _ := json.Marshal(a.args.ReviewPlugin.Manifest)
-		fields = append(fields, "review_plugin", string(manifest), "directory", a.args.ReviewPlugin.Dir)
+		fields = append(fields, "review_plugin", string(manifest), "directory", a.args.ReviewPlugin.Dir, "content", a.args.ReviewPlugin.ContentSHA256)
 	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)

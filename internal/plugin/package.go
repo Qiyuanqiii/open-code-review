@@ -23,6 +23,11 @@ const (
 	maxPackageFiles  = 4096
 )
 
+// ContentDigest hashes the current package files, including executable bits.
+func ContentDigest(ctx context.Context, directory string) (string, error) {
+	return packageDigest(ctx, directory)
+}
+
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {

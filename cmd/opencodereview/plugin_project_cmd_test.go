@@ -39,6 +39,13 @@ func TestPluginProjectCommandLifecycle(t *testing.T) {
 		t.Fatalf("untrusted project preflight = %s, %v", out, err)
 	}
 	pluginCommandOK(t, "trust", "--repo", repo, "--json")
+	var fingerprint string
+	if err := json.Unmarshal([]byte(pluginCommandOK(t, "preflight", "--fingerprint", "--json", "--repo", repo)), &fingerprint); err != nil || len(fingerprint) != 64 {
+		t.Fatalf("preflight fingerprint = %q, %v", fingerprint, err)
+	}
+	if got := strings.TrimSpace(pluginCommandOK(t, "preflight", "--fingerprint", "--repo", repo)); got != fingerprint {
+		t.Fatalf("text fingerprint differs: %q", got)
+	}
 	if out := pluginCommandOK(t, "preflight", "--repo", repo); !strings.Contains(out, "test-review 1") {
 		t.Fatalf("trusted preflight = %s", out)
 	}
@@ -55,4 +62,7 @@ func TestPluginProjectCommandLifecycle(t *testing.T) {
 	}
 	pluginCommandOK(t, "trust", "--repo", repo)
 	pluginCommandOK(t, "preflight", "--repo", repo, "--json")
+	if got := strings.TrimSpace(pluginCommandOK(t, "preflight", "--fingerprint", "--repo", repo)); got == fingerprint {
+		t.Fatal("relocked plugin retained fingerprint")
+	}
 }

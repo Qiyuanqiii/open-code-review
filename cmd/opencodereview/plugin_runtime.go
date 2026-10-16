@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/mcp"
@@ -49,7 +48,7 @@ func pluginMCPConfig(cfg *Config, installed []plugin.Installed) (*Config, error)
 				return nil, fmt.Errorf("duplicate plugin MCP server %q", label)
 			}
 			replace := func(value string) string {
-				return strings.ReplaceAll(value, "${plugin_dir}", p.Dir)
+				return plugin.ExpandCommandValue(value, p.Dir)
 			}
 			args := make([]string, len(server.Args))
 			for i, arg := range server.Args {

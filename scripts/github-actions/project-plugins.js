@@ -34,15 +34,10 @@ function preserveActionScripts(root, temporary) {
   return saved;
 }
 
-function runCommand(command, args, options) {
-  // npm installs a shell shim on Windows, which spawn cannot execute directly.
-  if (command === "ocr" && process.platform === "win32") {
-    return spawnSync("bash", ["--noprofile", "--norc", "-c", 'ocr "$@"', "ocr", ...args], options);
+function prepareProjectPlugins({ workspace, policySHA, allowExec = false, rule = "", temporary, ocrBinary, run = spawnSync }) {
+  if (!ocrBinary || !path.isAbsolute(ocrBinary)) {
+    throw new Error("project plugin preparation requires an absolute OCR native binary path");
   }
-  return spawnSync(command, args, options);
-}
-
-function prepareProjectPlugins({ workspace, policySHA, allowExec = false, rule = "", temporary, run = runCommand }) {
   const root = fs.realpathSync(workspace);
   const digest = data => crypto.createHash("sha256").update(data).digest("hex");
   const git = (args, input) => run("git", ["--literal-pathspecs", "-C", root, ...args], { input, maxBuffer: 8 * 1024 * 1024 });
@@ -79,7 +74,7 @@ function prepareProjectPlugins({ workspace, policySHA, allowExec = false, rule =
     // Apply the same clean filters as Git, so checkout EOL conversion is not an edit.
     const object = checked(git(["hash-object", `--path=${relative}`, "--stdin"], data), "verify policy contents").toString().trim();
     if (object !== blob[1]) throw new Error(`policy file differs from the trusted commit: ${relative}`);
-    policyFiles.push([relative, digest(data)]);
+    policyFiles.push([relative, object]);
     return data;
   }
   readPolicyFile(".opencodereview/plugins.json", true);
@@ -100,7 +95,7 @@ function prepareProjectPlugins({ workspace, policySHA, allowExec = false, rule =
   }
   const home = fs.mkdtempSync(path.join(temporary, "ocr-project-home-"));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
-  const ocr = args => checked(run("ocr", ["plugin", ...args, "--repo", root], {
+  const ocr = args => checked(run(ocrBinary, ["plugin", ...args, "--repo", root], {
     env, cwd: root, encoding: "utf8", maxBuffer: 8 * 1024 * 1024,
   }), `ocr plugin ${args[0]}`).toString();
   try {
@@ -127,6 +122,7 @@ if (require.main === module) {
       allowExec: process.env.OCR_ALLOW_PLUGIN_EXEC === "true",
       rule: process.env.OCR_RULE || "",
       temporary: process.env.RUNNER_TEMP,
+      ocrBinary: process.env.OCR_NATIVE_BINARY,
     });
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `home=${result.home}\nfingerprint=${result.fingerprint}\n`);
   } catch (error) {

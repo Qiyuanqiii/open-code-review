@@ -19,25 +19,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pluginInfo is the public management view. It omits MCP arguments, environment
-// variables and authentication headers, which can contain credentials.
+type pluginReviewInfo struct {
+	Protocol string   `json:"protocol"`
+	Stages   []string `json:"stages"`
+}
+
+// pluginInfo omits execution arguments, environment variables and headers,
+// which can contain credentials.
 type pluginInfo struct {
-	ID                  string                     `json:"id"`
-	Name                string                     `json:"name"`
-	Version             string                     `json:"version"`
-	Description         string                     `json:"description"`
-	Enabled             bool                       `json:"enabled"`
-	Source              string                     `json:"source"`
-	Directory           string                     `json:"directory"`
-	Rules               []string                   `json:"rules"`
-	MCPServers          []string                   `json:"mcp_servers"`
-	Review              *plugin.ReviewContribution `json:"review,omitempty"`
-	SHA256              string                     `json:"sha256,omitempty"`
-	ArchiveSHA256       string                     `json:"archive_sha256,omitempty"`
-	ContentSHA256       string                     `json:"content_sha256,omitempty"`
-	ContentDigestFormat string                     `json:"content_digest_format,omitempty"`
-	Requires            *plugin.Requirements       `json:"requires,omitempty"`
-	Revision            string                     `json:"revision,omitempty"`
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	Version             string               `json:"version"`
+	Description         string               `json:"description"`
+	Enabled             bool                 `json:"enabled"`
+	Source              string               `json:"source"`
+	Directory           string               `json:"directory"`
+	Rules               []string             `json:"rules"`
+	MCPServers          []string             `json:"mcp_servers"`
+	Review              *pluginReviewInfo    `json:"review,omitempty"`
+	SHA256              string               `json:"sha256,omitempty"`
+	ArchiveSHA256       string               `json:"archive_sha256,omitempty"`
+	ContentSHA256       string               `json:"content_sha256,omitempty"`
+	ContentDigestFormat string               `json:"content_digest_format,omitempty"`
+	Requires            *plugin.Requirements `json:"requires,omitempty"`
+	Revision            string               `json:"revision,omitempty"`
 }
 
 func pluginManagementInfo(installed plugin.Installed) pluginInfo {
@@ -47,10 +52,14 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	var review *pluginReviewInfo
+	if m.Review != nil {
+		review = &pluginReviewInfo{Protocol: m.Review.Protocol, Stages: append([]string{}, m.Review.Stages...)}
+	}
 	return pluginInfo{
 		ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
 		Enabled: installed.Enabled, Source: plugin.DisplaySource(installed.Source), Directory: installed.Dir,
-		Rules: append([]string{}, m.Rules...), MCPServers: names, Review: m.Review,
+		Rules: append([]string{}, m.Rules...), MCPServers: names, Review: review,
 		SHA256: installed.SHA256, Revision: installed.Revision,
 		ArchiveSHA256: installed.ArchiveSHA256, ContentSHA256: installed.ContentSHA256, ContentDigestFormat: installed.ContentDigestFormat, Requires: m.Requires,
 	}

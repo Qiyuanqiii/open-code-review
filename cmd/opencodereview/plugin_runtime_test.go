@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -190,6 +191,24 @@ func TestPluginMCPConfigPreservesUserConfig(t *testing.T) {
 	installed[0].Enabled = false
 	if cfg, err := pluginMCPConfig(user, installed); err != nil || cfg != nil {
 		t.Fatalf("disabled plugin config = %+v, %v", cfg, err)
+	}
+}
+
+func TestPluginMCPPlatformPlaceholders(t *testing.T) {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	p := plugin.Installed{Enabled: true, Dir: "/package ${os} & spaces", Manifest: plugin.Manifest{ID: "platform", MCPServers: map[string]plugin.MCPServer{
+		"tool": {Command: "${plugin_dir}/${os}-${arch}/tool${exe}", Args: []string{"${os}", "${arch}", "${exe}", "${plugin_dir}", "$UNCHANGED"}, Env: []string{"PLATFORM=${os}-${arch}", "ROOT=${plugin_dir}"}},
+	}}}
+	cfg, err := pluginMCPConfig(nil, []plugin.Installed{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.MCPServers["plugin/platform/tool"]
+	if got.Command != p.Dir+"/"+runtime.GOOS+"-"+runtime.GOARCH+"/tool"+ext || !reflect.DeepEqual(got.Args, []string{runtime.GOOS, runtime.GOARCH, ext, p.Dir, "$UNCHANGED"}) || !reflect.DeepEqual(got.Env, []string{"PLATFORM=" + runtime.GOOS + "-" + runtime.GOARCH, "ROOT=" + p.Dir}) {
+		t.Fatalf("platform expansion = %+v", got)
 	}
 }
 

@@ -16,13 +16,18 @@ func addProjectPluginCommands(parent *cobra.Command, jsonOutput *bool) {
 	command := func(use, short string, args cobra.PositionalArgs, action func(*cobra.Command, []string, *plugin.Project) (any, error)) *cobra.Command {
 		var repo string
 		cmd := &cobra.Command{Use: use, Short: short, Args: args}
-		cmd.Flags().StringVar(&repo, "repo", ".", "project root containing .opencodereview")
+		addRepoFlag(cmd, &repo)
+		cmd.Flags().Lookup("repo").Usage = "project root containing .opencodereview (default: current dir)"
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
-			store, err := plugin.DefaultStore()
+			directory, _, err := resolveWorkingDir(repo, false)
+			var store *plugin.Store
+			if err == nil {
+				store, err = plugin.DefaultStore()
+			}
 			var value any
 			if err == nil {
 				var project *plugin.Project
-				project, err = store.Project(repo)
+				project, err = store.Project(directory)
 				if err == nil {
 					value, err = action(cmd, args, project)
 				}

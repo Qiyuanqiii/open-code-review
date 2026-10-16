@@ -137,17 +137,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}()
 
 	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContextWithResolver(opts.repoDir, opts.rulePath, rules.ResolverOptions{
+		Ref: contentRef, ReviewPlugin: opts.reviewPlugin,
+	}, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
-	}
-	if opts.reviewPlugin != "" {
-		cc.Resolver, cc.FileFilter, err = rules.NewResolver(cc.RepoDir, opts.rulePath, rules.ResolverOptions{
-			Ref: contentRef, Runner: cc.GitRunner, ReviewPlugin: opts.reviewPlugin,
-		})
-		if err != nil {
-			return fmt.Errorf("load review plugin: %w", err)
-		}
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 

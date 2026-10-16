@@ -309,10 +309,17 @@ before configuring model credentials. Pin an Action and CLI version containing
 project-plugin support; older published CLI versions cannot run these commands.
 The declaration, lock, project rules, custom `rule` file, and referenced rule
 files must be committed at the policy SHA, inside its checkout, and unchanged
-under Git's checkout/clean transformations. Package content digests still require
+under Git's checkout/clean transformations. Policy fingerprints use the verified
+Git blob identities, so accepted LF/CRLF conversions preserve checkpoint identity.
+Package content digests still require
 identical installed bytes; keep repository-local package line endings stable
 (for example, use `eol=lf` in `.gitattributes`). The lock must include the runner's
 OS/architecture.
+
+The preparation helper launches the installed package's native OCR binary
+directly, using the same platform resolver as the npm launcher. It preserves
+argument boundaries and does not invoke a shell on Windows. The composite
+Action's other shell steps still require Bash.
 
 Each plugin-enabled run uses a fresh private OCR home. Personal/global packages,
 rules, configuration, and old trust records are not inherited. Missing artifacts,
@@ -332,6 +339,10 @@ Session identity includes enabled plugin manifests, package contents (including
 executable bits), rule text, and selected workflow. Changing these rejects a
 resume and asks for a new review. Locked project snapshots must still pass
 content and execution-authorization checks before a session can resume.
+Reinstalling an identical data-only rule plugin into a different snapshot
+directory preserves resume identity. Active MCP/workflow contributions retain
+their installation paths in the identity because executable code can observe
+those paths.
 
 Action checkpoints include the trusted policy SHA, verified plugin lock/content
 identity, and execution permission input. Changed policy or plugins force a full
@@ -400,9 +411,18 @@ Example manifest:
 - `mcp_servers` uses named server configurations. `stdio` (the default) supports
   `command`, `args`, `env` as `KEY=value` strings, and a `tools` allowlist. Remote
   servers use `type: "remote"`, `url`, `headers`, and optional `tools`.
-- `${plugin_dir}` expands literally in stdio command, arguments, and environment
-  values to the copied installation directory. Commands run with the reviewed
-  repository as their working directory. OCR does not evaluate a shell.
+- Stdio commands, arguments, and environment values support `${plugin_dir}`
+  (installation directory), `${os}` (Go OS name), `${arch}` (Go architecture),
+  and `${exe}` (`.exe` on Windows, empty elsewhere), matching Review Workflow
+  commands and arguments. Substitution is literal and does not expand environment
+  variables or re-expand placeholders inside substituted paths. Commands run
+  with the reviewed repository as their working directory; OCR does not evaluate
+  a shell.
+
+Management JSON exposes Review Workflow protocol and stage names, while omitting
+its command and arguments. MCP arguments, environment variables, and authentication
+headers are also omitted. This applies to list, show, installation previews, and
+project plugin output; execution still uses the original manifest.
 
 MCP tool names must be unique across the active tools. User-configured MCP tools
 are registered before plugin tools; conflicts with built-in or already

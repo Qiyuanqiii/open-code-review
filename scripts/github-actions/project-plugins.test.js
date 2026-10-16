@@ -12,7 +12,7 @@ const { resolvePolicySHA, preserveActionScripts, prepareProjectPlugins } = requi
 
 function fixture() {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-policy-test-"));
-  const workspace = path.join(temporary, "repo");
+  const workspace = path.join(temporary, "repo & literal %VALUE% $NAME");
   fs.mkdirSync(path.join(workspace, ".opencodereview"), { recursive: true });
   const git = (...args) => {
     const result = spawnSync("git", ["-C", workspace, ...args], { encoding: "utf8" });
@@ -33,13 +33,13 @@ function fixture() {
     git("-c", "commit.gpgsign=false", "commit", "--no-verify", "-m", "policy");
     return git("rev-parse", "HEAD");
   };
-  const args = { workspace, temporary, policySHA: commit() };
+  const args = { workspace, temporary, policySHA: commit(), ocrBinary: process.execPath };
   const calls = [];
   let identity = "a".repeat(64);
   let failure = "";
   args.run = (command, argv, options) => {
     if (command === "git") return spawnSync(command, argv, options);
-    assert.strictEqual(command, "ocr");
+    assert.strictEqual(command, args.ocrBinary);
     calls.push({ argv, options });
     assert.strictEqual(options.env.HOME, options.env.USERPROFILE);
     assert.ok(options.env.HOME.startsWith(path.join(temporary, "ocr-project-home-")));
@@ -77,23 +77,33 @@ async function main() {
 
   const f = fixture();
   try {
-    const bin = path.join(f.args.temporary, "bin");
+    assert.throws(() => prepareProjectPlugins({ ...f.args, ocrBinary: undefined }), /absolute OCR native binary/);
+    assert.throws(() => prepareProjectPlugins({ ...f.args, ocrBinary: "ocr.cmd" }), /absolute OCR native binary/);
+    const bin = path.join(f.args.temporary, "bin & literal %VALUE%");
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, "ocr"), `#!/usr/bin/env node
+    const native = path.join(bin, path.basename(process.execPath));
+    fs.copyFileSync(process.execPath, native);
+    fs.chmodSync(native, 0o755);
+    const preload = path.join(bin, "cli.cjs");
+    fs.writeFileSync(preload, `
 const fs = require("fs");
 const path = require("path");
 const args = process.argv.slice(2);
-if (args[1] === "sync") fs.writeFileSync(path.join(process.env.HOME, "installed"), JSON.stringify(args));
-if (args[1] === "preflight") process.stdout.write(JSON.stringify("a".repeat(64)));
-`, { mode: 0o755 });
-    const originalPath = process.env.PATH;
+if (args[0] === "sync") fs.writeFileSync(path.join(process.env.HOME, "installed"), JSON.stringify(args));
+if (args[0] === "preflight") process.stdout.write(JSON.stringify("a".repeat(64)));
+process.exit(0);
+`);
+    const originalOptions = process.env.NODE_OPTIONS;
     try {
-      process.env.PATH = bin + path.delimiter + originalPath;
-      const result = prepareProjectPlugins({ ...f.args, run: undefined });
+      process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
+      const result = prepareProjectPlugins({ ...f.args, ocrBinary: native, run: undefined });
       const args = JSON.parse(fs.readFileSync(path.join(result.home, "installed"), "utf8"));
-      assert.deepStrictEqual(args.slice(0, 3), ["plugin", "sync", "--frozen"]);
+      assert.deepStrictEqual(args.slice(0, 2), ["sync", "--frozen"]);
       assert.strictEqual(args[args.length - 1], fs.realpathSync(f.args.workspace));
-    } finally { process.env.PATH = originalPath; }
+    } finally {
+      if (originalOptions === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = originalOptions;
+    }
     const localAction = path.join(f.args.temporary, "local-action");
     const relative = "scripts/github-actions";
     fs.mkdirSync(path.join(localAction, relative), { recursive: true });
@@ -133,12 +143,13 @@ if (args[1] === "preflight") process.stdout.write(JSON.stringify("a".repeat(64))
     assert.throws(() => prepareProjectPlugins(f.args), /verified project plugin fingerprint/);
     f.identity("a".repeat(64));
 
+    const beforeConversion = prepareProjectPlugins(f.args).fingerprint;
     f.git("config", "core.autocrlf", "true");
     for (const name of [".opencodereview/plugins.json", ".opencodereview/plugins.lock.json", ".opencodereview/rule.json", "review.md"]) {
       const file = path.join(f.args.workspace, name);
       fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/\r?\n/g, "\r\n"));
     }
-    assert.match(prepareProjectPlugins(f.args).fingerprint, /^[0-9a-f]{64}$/, "checkout EOL conversion is not a policy edit");
+    assert.strictEqual(prepareProjectPlugins(f.args).fingerprint, beforeConversion, "checkout EOL conversion must preserve policy identity");
 
     f.calls.length = 0;
     assert.throws(() => prepareProjectPlugins({ ...f.args, policySHA: "d".repeat(40) }), /trusted commit/);

@@ -25,6 +25,7 @@ func writePluginCommandFixture(t *testing.T, dir, version string) {
 		MCPServers: map[string]plugin.MCPServer{"notes": {
 			Command: "nonexistent-plugin-test-command", Args: []string{"secret-argument"}, Env: []string{"TOKEN=secret-token"},
 		}},
+		Review: &plugin.ReviewContribution{Protocol: "stdio-v1", Command: "private-workflow-command", Args: []string{"workflow-secret"}, Stages: []string{"inspect"}},
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -54,6 +55,10 @@ func TestPluginCommandLifecycleAndCredentialRedaction(t *testing.T) {
 	t.Setenv("PATH", "")
 	dir := filepath.Join(t.TempDir(), "package with spaces")
 	writePluginCommandFixture(t, dir, "1.0.0")
+	preview := pluginCommandOK(t, "install", dir, "--dry-run", "--json")
+	if strings.Contains(preview, "workflow-secret") || strings.Contains(preview, "private-workflow-command") || !strings.Contains(preview, "stdio-v1") {
+		t.Fatalf("preview omitted protocol or exposed workflow execution: %s", preview)
+	}
 	if out := pluginCommandOK(t, "list", "--json"); strings.TrimSpace(out) != "[]" {
 		t.Fatalf("new store = %s", out)
 	}
@@ -65,9 +70,13 @@ func TestPluginCommandLifecycleAndCredentialRedaction(t *testing.T) {
 	}
 	for _, args := range [][]string{{"show", "test-review"}, {"show", "test-review", "--json"}, {"list", "--json"}} {
 		out := pluginCommandOK(t, args...)
-		if strings.Contains(out, "secret-token") || strings.Contains(out, "secret-argument") || !strings.Contains(out, "notes") {
+		if strings.Contains(out, "secret-token") || strings.Contains(out, "secret-argument") || strings.Contains(out, "workflow-secret") || strings.Contains(out, "private-workflow-command") || !strings.Contains(out, "notes") {
 			t.Fatalf("management output leaked credentials or omitted capabilities: %s", out)
 		}
+	}
+	var info pluginInfo
+	if err := json.Unmarshal([]byte(pluginCommandOK(t, "show", "test-review", "--json")), &info); err != nil || info.Review == nil || info.Review.Protocol != "stdio-v1" || len(info.Review.Stages) != 1 {
+		t.Fatalf("management output omitted workflow capabilities: %+v, %v", info, err)
 	}
 	pluginCommandOK(t, "enable", "test-review", "--json")
 	var infos []pluginInfo

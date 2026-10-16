@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -30,6 +31,32 @@ func TestReviewPluginFlags(t *testing.T) {
 	}
 	if _, err := parseReviewFlags([]string{"--review-plugin", "example-review", "--resume", "old"}); err == nil {
 		t.Fatal("unsupported resume accepted")
+	}
+}
+
+func TestCommonContextSelectsDisabledReviewPlugin(t *testing.T) {
+	freshOCRHome(t)
+	repo := initRulesCheckTestRepo(t)
+	source := t.TempDir()
+	writePluginCommandFixture(t, source, "1")
+	pluginCommandOK(t, "install", source)
+	cc, err := loadCommonContextWithResolver(repo, "", rules.ResolverOptions{ReviewPlugin: "test-review"}, 0, 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := cc.Resolver.(interface{ ReviewPlugin() *plugin.Installed }).ReviewPlugin()
+	if selected == nil || selected.Manifest.ID != "test-review" || !strings.Contains(cc.Resolver.Resolve("main.go"), "Check returned errors.") {
+		t.Fatal("common context did not select the workflow and its rules")
+	}
+	plain, err := loadCommonContext(repo, "", "", 0, 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.Resolver.Resolve("main.go"), "Check returned errors.") {
+		t.Fatal("explicit selection changed the global enabled state")
+	}
+	if _, err := loadCommonContextWithResolver(repo, "", rules.ResolverOptions{ReviewPlugin: "missing"}, 0, 2, true); err == nil {
+		t.Fatal("missing workflow was ignored")
 	}
 }
 

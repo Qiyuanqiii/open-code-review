@@ -593,6 +593,7 @@ runs:
       shell: bash
       env:
         OCR_VERSION: ${{ inputs.ocr_version }}
+        OCR_PROJECT_PLUGINS: ${{ inputs.project_plugins }}
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
@@ -643,6 +644,15 @@ runs:
         # as "fingerprint nothing" so a future gap can't silently narrow.
         VERSION_ACTUAL="${OCR_VERSION_LINE//$'\r'/}"
         echo "OCR_VERSION_ACTUAL=${VERSION_ACTUAL}" >> "$GITHUB_ENV"
+
+        if [ "$OCR_PROJECT_PLUGINS" = "true" ]; then
+          OCR_NATIVE_BINARY="$(node -e '
+            const binary = require(process.argv[1]).resolveNativeBinary();
+            if (!binary) throw new Error("Installed OCR native binary was not found");
+            process.stdout.write(binary.path);
+          ' "$(npm root -g)/@alibaba-group/open-code-review/scripts/platform.js")"
+          printf 'OCR_NATIVE_BINARY=%s\n' "$OCR_NATIVE_BINARY" >> "$GITHUB_ENV"
+        fi
 
     - name: Prepare project plugins
       if: inputs.project_plugins == 'true'

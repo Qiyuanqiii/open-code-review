@@ -207,7 +207,11 @@ func (r *pluginResolver) CanonicalConfig() []string {
 		// Manifests are validated by the store. JSON map keys are sorted by
 		// encoding/json; this also covers enabled plugins with only MCP tools.
 		manifest, _ := json.Marshal(p.Manifest)
-		fields = append(fields, "plugin", p.Manifest.ID, "manifest", string(manifest), "directory", p.Dir, "content", p.ContentSHA256)
+		fields = append(fields, "plugin", p.Manifest.ID, "manifest", string(manifest), "content", p.ContentSHA256)
+		// Executable contributions can observe their installation path.
+		if len(p.Manifest.MCPServers) > 0 || p.Manifest.ID == r.reviewID {
+			fields = append(fields, "directory", p.Dir)
+		}
 	}
 	for _, pack := range r.packs {
 		fields = append(fields, "plugin", pack.plugin.Manifest.ID, "file", pack.file)

@@ -66,3 +66,29 @@ func TestPluginProjectCommandLifecycle(t *testing.T) {
 		t.Fatal("relocked plugin retained fingerprint")
 	}
 }
+
+func TestPluginProjectRepoFlagUsesCurrentDirectory(t *testing.T) {
+	freshOCRHome(t)
+	repo := t.TempDir()
+	t.Chdir(repo)
+	if err := os.MkdirAll(filepath.Join(repo, ".opencodereview"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".opencodereview", "plugins.json"), []byte(`{"schema_version":1,"plugins":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	implicit := pluginCommandOK(t, "lock", "--json")
+	explicit := pluginCommandOK(t, "project", "--repo", repo, "--json")
+	if implicit != explicit {
+		t.Fatalf("default repo differs from explicit repo: %s / %s", implicit, explicit)
+	}
+	for _, args := range [][]string{{"project"}, {"project", "--repo", "."}} {
+		if got := pluginCommandOK(t, append(args, "--json")...); got != explicit {
+			t.Fatalf("relative repo changed project selection: %s", got)
+		}
+	}
+	out, err := runPluginCommand(context.Background(), []string{"project", "--repo", filepath.Join(repo, "missing"), "--json"})
+	if err == nil || !json.Valid([]byte(out)) || !strings.Contains(out, "PROJECT_PLUGIN_ERROR") {
+		t.Fatalf("repo resolution lost structured error: %s / %v", out, err)
+	}
+}

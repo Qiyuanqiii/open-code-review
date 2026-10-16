@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,88 @@ func initIdentityRepo(t *testing.T) string {
 
 func identityArgs(dir string, maxTokens int) Args {
 	return Args{RepoDir: dir, Template: template.Template{MaxTokens: maxTokens}}
+}
+
+func TestResumeAfterIdenticalPluginUpdate(t *testing.T) {
+	for _, executable := range []bool{false, true} {
+		name := "rules"
+		if executable {
+			name = "mcp"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := initIdentityRepo(t)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			ctx := context.Background()
+			manifest := plugin.Manifest{SchemaVersion: 1, ID: "identity", Name: "Identity", Version: "1", Rules: []string{"rules.json"}}
+			if executable {
+				manifest.MCPServers = map[string]plugin.MCPServer{"tool": {Command: "node", Args: []string{"${plugin_dir}/tool.js"}}}
+			}
+			data, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := t.TempDir()
+			for name, content := range map[string]string{
+				plugin.ManifestFilename: string(data),
+				"rules.json":            `{"rules":[{"path":"**/*.go","rule":"Check error handling."}]}`,
+				"tool.js":               "process.exit(0);\n",
+			} {
+				if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store, err := plugin.DefaultStore()
+			if err != nil {
+				t.Fatal(err)
+			}
+			installed, err := store.Install(ctx, source, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity := func() session.RunIdentity {
+				t.Helper()
+				args := identityArgs(repo, 4000)
+				args.SystemRule, args.FileFilter, err = rules.NewResolver(repo, "", rules.ResolverOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(args.SystemRule.Resolve("main.go"), "Check error handling.") {
+					t.Fatal("identity fixture did not load its rule plugin")
+				}
+				sealed, err := ResolveIdentity(ctx, args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return sealed.Identity
+			}
+			before := identity()
+			parent := &session.ResumeState{SessionID: "plugin-update", Closed: true, Manifest: &session.RunManifest{
+				SchemaVersion: session.ManifestSchemaVersion, Operation: session.OperationReview,
+				Input:      session.ManifestInput{Mode: before.Mode, SourceArtifactSHA256: before.SourceArtifactSHA256},
+				Repository: session.ManifestRepository{IdentitySHA256: before.RepositorySHA256},
+				Execution:  session.ManifestExecution{RuleConfigSHA256: before.RuleConfigSHA256},
+				Coverage:   session.Coverage{Selected: []session.CoverageItem{{ItemID: "selected"}}},
+			}}
+			updated, err := store.Update(ctx, "identity")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if installed.Dir == updated.Dir || installed.ContentSHA256 != updated.ContentSHA256 {
+				t.Fatal("update must change only the snapshot path")
+			}
+			if err := parent.ValidateResume(session.ResumeRequest{Identity: identity()}); (err != nil) != executable {
+				t.Fatalf("resume after identical %s update: %v", name, err)
+			}
+			if err := os.WriteFile(filepath.Join(updated.Dir, "tool.js"), []byte("process.exit(1);\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := parent.ValidateResume(session.ResumeRequest{Identity: identity()}); err == nil {
+				t.Fatal("changed package contents must reject resume")
+			}
+		})
+	}
 }
 
 func TestResumeRejectsChangedPluginScript(t *testing.T) {

@@ -60,16 +60,21 @@ func ReviewCommand(p Installed) (string, []string, error) {
 	if p.Manifest.Review.retired() {
 		return "", nil, fmt.Errorf("plugin %q uses the retired engine/prompt format; update it with ocr plugin update %s", p.Manifest.ID, p.Manifest.ID)
 	}
+	args := make([]string, len(p.Manifest.Review.Args))
+	for i, arg := range p.Manifest.Review.Args {
+		args[i] = ExpandCommandValue(arg, p.Dir)
+	}
+	return ExpandCommandValue(p.Manifest.Review.Command, p.Dir), args, nil
+}
+
+// ExpandCommandValue replaces package/platform placeholders without expanding
+// shell syntax, environment variables, or placeholders inside substituted paths.
+func ExpandCommandValue(value, directory string) string {
 	ext := ""
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	replace := strings.NewReplacer("${plugin_dir}", p.Dir, "${os}", runtime.GOOS, "${arch}", runtime.GOARCH, "${exe}", ext)
-	args := make([]string, len(p.Manifest.Review.Args))
-	for i, arg := range p.Manifest.Review.Args {
-		args[i] = replace.Replace(arg)
-	}
-	return replace.Replace(p.Manifest.Review.Command), args, nil
+	return strings.NewReplacer("${plugin_dir}", directory, "${os}", runtime.GOOS, "${arch}", runtime.GOARCH, "${exe}", ext).Replace(value)
 }
 
 type ReviewClient struct {

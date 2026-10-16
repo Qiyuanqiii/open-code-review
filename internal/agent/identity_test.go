@@ -12,6 +12,8 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/plugin"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 // initIdentityRepo builds a workspace with two reviewable files, one the
@@ -34,6 +36,70 @@ func initIdentityRepo(t *testing.T) string {
 
 func identityArgs(dir string, maxTokens int) Args {
 	return Args{RepoDir: dir, Template: template.Template{MaxTokens: maxTokens}}
+}
+
+func TestResumeRejectsChangedPluginScript(t *testing.T) {
+	repo := initIdentityRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	ctx := context.Background()
+	source := t.TempDir()
+	for name, content := range map[string]string{
+		plugin.ManifestFilename: `{"schema_version":1,"id":"identity","name":"Identity","version":"1","mcp_servers":{"tool":{"command":"node","args":["${plugin_dir}/tool.js"]}}}`,
+		"tool.js":               "process.exit(0);\n",
+	} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := plugin.DefaultStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := store.Install(ctx, source, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := func() session.RunIdentity {
+		t.Helper()
+		args := identityArgs(repo, 4000)
+		var err error
+		args.SystemRule, args.FileFilter, err = rules.NewResolver(repo, "", rules.ResolverOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded := args.SystemRule.(interface{ EnabledPlugins() []plugin.Installed }).EnabledPlugins()
+		if len(loaded) != 1 || loaded[0].Manifest.ID != "identity" {
+			t.Fatalf("resume fixture did not load its plugin: %+v", loaded)
+		}
+		sealed, err := ResolveIdentity(ctx, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed.Identity
+	}
+	before := identity()
+	parent := &session.ResumeState{SessionID: "plugin-script", Closed: true, Manifest: &session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion, Operation: session.OperationReview,
+		Input:      session.ManifestInput{Mode: before.Mode, SourceArtifactSHA256: before.SourceArtifactSHA256},
+		Repository: session.ManifestRepository{IdentitySHA256: before.RepositorySHA256},
+		Execution:  session.ManifestExecution{RuleConfigSHA256: before.RuleConfigSHA256},
+		Coverage:   session.Coverage{Selected: []session.CoverageItem{{ItemID: "selected"}}},
+	}}
+	if err := parent.ValidateResume(session.ResumeRequest{Identity: identity()}); err != nil {
+		t.Fatalf("unchanged plugin cannot resume: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installed.Dir, "tool.js"), []byte("process.exit(1);\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	after := identity()
+	if after.SourceArtifactSHA256 != before.SourceArtifactSHA256 {
+		t.Fatal("plugin script changed the reviewed source identity")
+	}
+	if err := parent.ValidateResume(session.ResumeRequest{Identity: after}); err == nil || !strings.Contains(err.Error(), "plugin configuration or package contents") {
+		t.Fatalf("changed script reused the old review: %v", err)
+	}
 }
 
 // TestResolveIdentityMatchesRunPath is the assertion the whole resume check rests

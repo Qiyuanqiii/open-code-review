@@ -144,6 +144,65 @@ func TestProjectExecutionTrustIsLocalAndBoundToLock(t *testing.T) {
 	requireError(t, err, "PLUGIN_EXEC_NOT_AUTHORIZED")
 }
 
+func TestProjectFingerprintVerifiesContentAndTrust(t *testing.T) {
+	ctx := context.Background()
+	p, source := testProject(t, NewStore(t.TempDir()))
+	_, err := p.Fingerprint(ctx)
+	requireError(t, err, "LOCK_MISMATCH")
+	m := testManifest("example", "1")
+	m.MCPServers = map[string]MCPServer{"tool": {Command: "must-never-execute"}}
+	writeTestJSON(t, filepath.Join(source, ManifestFilename), m)
+	if _, err := p.Add(ctx, source, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Fingerprint(ctx)
+	requireError(t, err, "ARTIFACT_MISSING")
+	items, err := p.Sync(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Fingerprint(ctx)
+	requireError(t, err, "PLUGIN_EXEC_NOT_AUTHORIZED")
+	if err := p.Trust(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	before, err := p.Fingerprint(ctx)
+	if err != nil || len(before) != 64 {
+		t.Fatalf("verified fingerprint = %q, %v", before, err)
+	}
+	other, err := NewStore(t.TempDir()).Project(p.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Sync(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Trust(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := other.Fingerprint(ctx); err != nil || got != before {
+		t.Fatalf("fingerprint depends on private store path: %q, %v", got, err)
+	}
+	writeTestJSON(t, filepath.Join(items[0].Dir, "rules.json"), map[string]string{"default_rule": "Tampered snapshot"})
+	_, err = p.Fingerprint(ctx)
+	requireError(t, err, "ARTIFACT_MISMATCH")
+	writeTestJSON(t, filepath.Join(source, "rules.json"), map[string]string{"default_rule": "Approved new content"})
+	if _, err := other.Lock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Sync(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	_, err = other.Fingerprint(ctx)
+	requireError(t, err, "PLUGIN_EXEC_NOT_AUTHORIZED")
+	if err := other.Trust(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := other.Fingerprint(ctx); err != nil || after == before {
+		t.Fatalf("changed package retained fingerprint: %q, %v", after, err)
+	}
+}
+
 func TestProjectFrozenCatalogDoesNotResolveAgain(t *testing.T) {
 	ctx := context.Background()
 	archive := testZIP(t, "example", "1")

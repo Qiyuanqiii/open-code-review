@@ -96,13 +96,18 @@ func addProjectPluginCommands(parent *cobra.Command, jsonOutput *bool) {
 	command("project", "Inspect the project lock without installing or authorizing it", cobra.NoArgs, func(_ *cobra.Command, _ []string, p *plugin.Project) (any, error) {
 		return p.Explain()
 	})
-	command("preflight", "Verify project plugins and execution authorization without model access", cobra.NoArgs, func(cmd *cobra.Command, _ []string, p *plugin.Project) (any, error) {
+	var fingerprint bool
+	preflight := command("preflight", "Verify project plugins and execution authorization without model access", cobra.NoArgs, func(cmd *cobra.Command, _ []string, p *plugin.Project) (any, error) {
+		if fingerprint {
+			return p.Fingerprint(cmd.Context())
+		}
 		items, present, err := p.Load(cmd.Context())
 		if err == nil && !present {
 			err = &plugin.ProjectError{Code: "LOCK_MISMATCH", Message: "no project plugins declared"}
 		}
 		return projectPluginInfo(items), err
 	})
+	preflight.Flags().BoolVar(&fingerprint, "fingerprint", false, "print the verified lock identity for incremental review")
 }
 
 func projectPluginInfo(items []plugin.Installed) []pluginInfo {

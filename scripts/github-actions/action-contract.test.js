@@ -222,7 +222,7 @@ function makeFixture() {
 const fs = require("fs");
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT"]) {
+for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT", "HOME", "USERPROFILE"]) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 const record = { args, env };
@@ -1957,7 +1957,41 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testProjectPluginExecutionInputsAndHome() {
+  for (const [values, valid] of [
+    [inputValues(), true],
+    [inputValues({ project_plugins: "true", allow_plugin_exec: "true" }), true],
+    [inputValues({ allow_plugin_exec: "true" }), false],
+    [inputValues({ project_plugins: "yes" }), false],
+    [inputValues({ project_plugins: "true", allow_plugin_exec: "TRUE" }), false],
+  ]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validationStep(), values, fixture);
+      assert.strictEqual(result.status === 0, valid, resultDescription(result));
+    } finally { removeFixture(fixture); }
+  }
+  const fixture = makeFixture();
+  try {
+    const home = path.join(fixture.dir, "private home");
+    fs.mkdirSync(home);
+    const env = { OCR_PROJECT_HOME: home, REVIEW_TASK_TIMEOUT: "15" };
+    for (const name of ["Configure OCR", "Run OpenCodeReview"]) {
+      const result = runStep(stepNamed(name), inputValues(), fixture, env, { replaceResultPaths: true });
+      assert.strictEqual(result.status, 0, resultDescription(result));
+    }
+    const calls = readJsonLines(fixture.callsPath);
+    assert.ok(calls.some(call => call.args[0] === "config"));
+    assert.ok(calls.some(call => call.args[0] === "review"));
+    for (const call of calls) {
+      assert.strictEqual(call.env.HOME, home);
+      assert.strictEqual(call.env.USERPROFILE, home);
+    }
+  } finally { removeFixture(fixture); }
+}
+
 const TESTS = [
+  ["project plugin authorization is explicit and OCR uses its private home", testProjectPluginExecutionInputsAndHome],
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
   ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],

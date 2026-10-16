@@ -1,0 +1,30 @@
+name: Validate project plugins and CI on Linux
+on:
+  push:
+    branches: [Qiyuanqiii/validate-project-plugins-ci-d81c9c20]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: d81c9c20744d56612a60a80000912717f2bb10dc
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.9'
+      - name: Test Action policy and shell contracts
+        shell: bash
+        run: npm run test:github-actions 2>&1 | tee action-linux.log
+      - name: Test project plugins and review identity
+        shell: bash
+        run: make test PACKAGES='./internal/plugin ./internal/config/rules ./internal/agent ./internal/session ./cmd/opencodereview -run "Project|Plugin|ResolveIdentity|Resume"' 2>&1 | tee plugin-linux.log
+      - name: Save test logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: project-plugins-ci-linux-logs
+          path: '*-linux.log'

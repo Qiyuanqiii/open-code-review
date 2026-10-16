@@ -33,6 +33,11 @@ func (e *SelectionRequiredError) Error() string {
 	return fmt.Sprintf("source contains multiple plugins (%s); select one with --plugin ID", strings.Join(ids, ", "))
 }
 
+type packageArtifact struct {
+	Source    string
+	Directory string
+}
+
 // PreparedInstall holds a validated package for inspection before installation.
 // Exported metadata is a copy; changing it never changes the installed package.
 // Close and InstallPrepared are serialized. A successful install consumes the
@@ -53,6 +58,7 @@ type PreparedInstall struct {
 	directory   string
 	packageDir  string
 	packageHash string
+	artifact    packageArtifact
 	closed      bool
 }
 
@@ -104,6 +110,7 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 		}
 	}()
 	item := Installed{Source: origin}
+	p.artifact.Source = resolved
 	if expected.ID != "" {
 		if pluginID != "" && pluginID != expected.ID {
 			return nil, fmt.Errorf("plugin selection %q does not match catalog id %q", pluginID, expected.ID)
@@ -111,12 +118,19 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 		item.SHA256, err = s.preparePackage(ctx, resolved, expected.SHA256, directory)
 	} else if strings.HasPrefix(strings.ToLower(resolved), "https:") {
 		item.PluginID = pluginID
-		p.packageDir, item.SHA256, item.Revision, item.PluginID, err = s.prepareURL(ctx, resolved, pluginID, directory)
+		p.packageDir, item.SHA256, item.Revision, item.PluginID, err = s.prepareURL(ctx, resolved, pluginID, directory, &p.artifact)
 	} else {
 		item.SHA256, err = s.preparePackage(ctx, resolved, "", directory)
 	}
 	if err != nil {
 		return nil, err
+	}
+	if p.artifact.Directory == "" {
+		p.artifact.Directory, err = filepath.Rel(directory, p.packageDir)
+		if err != nil {
+			return nil, err
+		}
+		p.artifact.Directory = filepath.ToSlash(p.artifact.Directory)
 	}
 	manifest, err := inspectPackage(ctx, p.packageDir)
 	if err != nil {
@@ -154,12 +168,12 @@ func (s *Store) prepareInstall(ctx context.Context, source, pluginID string, mar
 	return p, nil
 }
 
-func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory string) (packageDir, digest, revision, selection string, err error) {
+func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory string, artifact *packageArtifact) (packageDir, digest, revision, selection string, err error) {
 	if repository, ok, parseErr := parseGitHubSource(source); ok || parseErr != nil {
 		if parseErr != nil {
 			return "", "", "", "", parseErr
 		}
-		return s.prepareGitHub(ctx, repository, pluginID, directory)
+		return s.prepareGitHub(ctx, repository, pluginID, directory, artifact)
 	}
 	data, catalogSource, err := s.download(ctx, source, maxArchiveBytes)
 	if err != nil {
@@ -170,7 +184,7 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 		if len(data) > maxCatalogBytes {
 			return "", "", "", "", fmt.Errorf("marketplace exceeds %d byte limit", maxCatalogBytes)
 		}
-		packageDir, digest, selection, err = s.prepareCatalog(ctx, catalogSource, data, pluginID, directory)
+		packageDir, digest, selection, err = s.prepareCatalog(ctx, catalogSource, data, pluginID, directory, artifact)
 		return packageDir, digest, "", selection, err
 	}
 	if !bytes.HasPrefix(data, []byte("PK")) && !bytes.HasPrefix(data, []byte{0x1f, 0x8b}) {
@@ -183,7 +197,7 @@ func (s *Store) prepareURL(ctx context.Context, source, pluginID, directory stri
 	return packageDir, archiveDigest(data), "", pluginID, err
 }
 
-func (s *Store) prepareCatalog(ctx context.Context, source string, data []byte, pluginID, directory string) (string, string, string, error) {
+func (s *Store) prepareCatalog(ctx context.Context, source string, data []byte, pluginID, directory string, artifact *packageArtifact) (string, string, string, error) {
 	market, err := parseMarket("", source, data, true)
 	if err != nil {
 		return "", "", "", err
@@ -192,6 +206,7 @@ func (s *Store) prepareCatalog(ctx context.Context, source string, data []byte, 
 	if err != nil {
 		return "", "", "", err
 	}
+	artifact.Source = entry.Source
 	digest, err := s.preparePackage(ctx, entry.Source, entry.SHA256, directory)
 	if err != nil {
 		return "", "", "", err

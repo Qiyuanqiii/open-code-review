@@ -349,7 +349,7 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 			objcRule: objcRule,
 		},
 	}
-	withPlugins, err := loadPluginRules(resolver, opts.ReviewPlugin)
+	withPlugins, err := loadPluginRules(resolver, repoDir, opts.ReviewPlugin)
 	if err != nil {
 		return nil, nil, err
 	}

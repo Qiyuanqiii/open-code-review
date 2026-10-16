@@ -68,7 +68,7 @@ func parseGitHubSource(source string) (githubSource, bool, error) {
 	return result, true, nil
 }
 
-func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, pluginID, directory string) (string, string, string, string, error) {
+func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, pluginID, directory string, artifact *packageArtifact) (string, string, string, string, error) {
 	base := url.PathEscape(repository.owner) + "/" + url.PathEscape(repository.repo)
 	ref := repository.ref
 	revision := ""
@@ -92,7 +92,8 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 		revision = strings.ToLower(commit.SHA)
 	}
 	ref = revision
-	archive, _, err := s.download(ctx, "https://codeload.github.com/"+base+"/tar.gz/"+url.PathEscape(ref), maxArchiveBytes)
+	artifact.Source = "https://codeload.github.com/" + base + "/tar.gz/" + url.PathEscape(ref)
+	archive, _, err := s.download(ctx, artifact.Source, maxArchiveBytes)
 	if err != nil {
 		return "", "", "", "", err
 	}
@@ -131,7 +132,10 @@ func (s *Store) prepareGitHub(ctx context.Context, repository githubSource, plug
 				catalogPath = repository.directory + "/" + filename
 			}
 			catalogURL := "https://raw.githubusercontent.com/" + base + "/" + url.PathEscape(ref) + "/" + catalogPath
-			prepared, digest, selection, err := s.prepareCatalog(ctx, catalogURL, catalogData, pluginID, packageDir)
+			prepared, digest, selection, err := s.prepareCatalog(ctx, catalogURL, catalogData, pluginID, packageDir, artifact)
+			if err == nil {
+				artifact.Directory = "."
+			}
 			return prepared, digest, revision, selection, err
 		}
 	}

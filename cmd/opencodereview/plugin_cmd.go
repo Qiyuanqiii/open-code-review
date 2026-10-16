@@ -110,6 +110,7 @@ func newPluginCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	command.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output structured JSON")
+	addProjectPluginCommands(command, &jsonOutput)
 	withStore := func(action func(*cobra.Command, []string, *plugin.Store) error) func(*cobra.Command, []string) error {
 		return func(cmd *cobra.Command, args []string) error {
 			store, err := plugin.DefaultStore()

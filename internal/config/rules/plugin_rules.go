@@ -4,6 +4,7 @@
 package rules
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,18 +42,32 @@ type pluginResolver struct {
 	reviewPlugin *plugin.Installed
 }
 
-func loadPluginRules(base *composedResolver, reviewID string) (Resolver, error) {
+func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver, error) {
 	store, err := plugin.DefaultStore()
 	if err != nil {
 		return nil, fmt.Errorf("load plugins: %w", err)
 	}
-	load := store.Enabled
-	if reviewID != "" {
-		load = store.List
+	var all []plugin.Installed
+	var projectScoped bool
+	if repoDir != "" {
+		project, err := store.Project(repoDir)
+		if err != nil {
+			return nil, err
+		}
+		all, projectScoped, err = project.Load(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("load project plugins: %w", err)
+		}
 	}
-	all, err := load()
-	if err != nil {
-		return nil, fmt.Errorf("load plugins: %w", err)
+	if !projectScoped {
+		load := store.Enabled
+		if reviewID != "" {
+			load = store.List
+		}
+		all, err = load()
+		if err != nil {
+			return nil, fmt.Errorf("load plugins: %w", err)
+		}
 	}
 	var installed []plugin.Installed
 	var selected *plugin.Installed
@@ -75,7 +90,9 @@ func loadPluginRules(base *composedResolver, reviewID string) (Resolver, error) 
 	if reviewID != "" && selected == nil {
 		return nil, fmt.Errorf("review plugin %q is not installed", reviewID)
 	}
-	sort.Slice(installed, func(i, j int) bool { return installed[i].Manifest.ID < installed[j].Manifest.ID })
+	if !projectScoped {
+		sort.Slice(installed, func(i, j int) bool { return installed[i].Manifest.ID < installed[j].Manifest.ID })
+	}
 	r := &pluginResolver{base: base, plugins: installed, reviewID: reviewID, reviewPlugin: selected}
 	for _, p := range installed {
 		for _, file := range p.Manifest.Rules {

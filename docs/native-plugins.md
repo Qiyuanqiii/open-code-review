@@ -95,7 +95,8 @@ fields cannot read the updated state; retain a backup before downgrading.
 
 A direct archive digest records downloaded bytes. Marketplace-provided archive
 digests are checked before installation. Neither is a publisher signature, and
-these records do not provide project declarations or frozen installation.
+these records alone do not select a project's plugin set. The project declaration
+and lock described below provide that selection and frozen installation.
 
 ## Browse the bundled marketplace
 
@@ -161,11 +162,13 @@ snapshot. Editing the source directory takes effect only after `update`.
 Older snapshots remain on disk after update/removal so an active review can
 finish using its original files. This version has no automatic cache cleanup.
 
-Enabled rules and MCP contributions apply to every repository for that user.
+Without a project plugin declaration, enabled rules and MCP contributions apply
+to every repository for that user.
 `disable` stops automatic loading; an explicit `--review-plugin ID` selects the
 workflow and its accompanying rules/MCP servers for that invocation, even when
 the package is disabled. It does not change the saved enabled state. There is no
-project lock mode in this version.
+automatic project installation during reviews. See [Project plugins](#project-plugins)
+for an explicit declaration and frozen installation workflow.
 
 Marketplace updates are explicit:
 
@@ -173,6 +176,128 @@ Marketplace updates are explicit:
 ocr plugin market refresh examples
 ocr plugin update review-checklist
 ```
+
+## Project plugins
+
+Declare the plugin set in the repository when a team needs repeatable reviews.
+All participants need an OCR build providing these project commands; earlier
+builds do not read the project declaration.
+Run these commands from the project root (or pass `--repo PROJECT_ROOT`):
+
+```text
+ocr plugin add https://github.com/example/team-review
+ocr plugin project --json
+ocr plugin sync --frozen
+ocr plugin preflight --json
+```
+
+`add` resolves the package and writes `.opencodereview/plugins.json` and
+`.opencodereview/plugins.lock.json`. Commit both files. `--plugin ID` selects a
+package from a multi-plugin source. Existing global installation commands remain
+available; `add` does not change globally installed or enabled plugins.
+
+A declaration looks like this:
+
+```json
+{
+  "schema_version": 1,
+  "plugins": [
+    {"id": "team-review", "source": "https://github.com/example/team-review"},
+    {"id": "local-rules", "source": "./plugins/local-rules"}
+  ]
+}
+```
+
+Local sources must be inside the project and are stored as relative paths.
+Remote sources use permanent HTTPS URLs without credentials, fragments, or query
+parameters. A named marketplace selection is resolved into a source URL/path;
+teammates do not need the same marketplace alias. The lock contains artifact
+locations and digests, not the manifest's command arguments, environment values,
+or authentication headers. Do not put secrets in committed local plugin files.
+
+The lock ties the declaration to an ordered list of package identities, exact
+archive URLs or local sources, package directories, and archive/content digests.
+GitHub sources are resolved to a full commit's archive; a published catalog is
+resolved to its selected release archive. Frozen sync fetches those archives
+directly, without consulting a catalog or resolving a branch again. If bytes,
+identity, or the declaration do not match, installation fails. It never runs
+plugin programs or package managers.
+
+Each `platforms` entry is keyed by OS/architecture, such as `windows/amd64` or
+`linux/arm64`. The `ocr-package-tree-v1` digest includes executable bits and can
+differ between platforms. Run `ocr plugin lock` on each required platform and
+commit the resulting entries. Relocking an unchanged declaration preserves other
+platform entries. Changing the declaration invalidates those entries so they
+must be resolved again; an absent platform fails with `PLATFORM_UNSUPPORTED`.
+
+### Frozen use and local authorization
+
+When a project declaration exists, review, scan, and rule inspection load only
+its locked plugins, in declaration order. An empty `plugins` array selects no
+plugins. Missing or invalid project files cause an error instead of falling back
+to global plugins. Existing project/user rule files and ordinary MCP configuration
+retain their existing behavior; the declaration controls packaged plugins.
+
+Installed project snapshots are kept under the user's plugin store, separately
+for each canonical project path, lock, and platform. Review and preflight verify
+their contents before use and perform no plugin downloads. To populate a fresh
+checkout's snapshots, run `ocr plugin sync --frozen`. With `--offline`, sync uses
+already verified snapshots or repository-local sources and makes no network
+requests. A missing remote artifact fails with `ARTIFACT_MISSING`.
+
+Data-only rule packages need no execution authorization. Any package declaring
+MCP servers (including remote endpoints) or an active review workflow requires a
+separate local decision after inspecting the locked package:
+
+```text
+ocr plugin sync --frozen
+ocr plugin trust
+ocr plugin preflight --json
+ocr review --review-plugin team-review
+ocr plugin trust --revoke
+```
+
+`trust` authorizes the current project lock's executable contributions. The record
+is stored outside the repository and is bound to the canonical project path,
+lock contents, and platform. It is not written by `add`, `lock`, or `sync`, and a
+changed lock needs new authorization. Repositories cannot grant themselves trust
+by committing an enabled flag. Trust permits native execution with the current
+user's permissions; it is not a sandbox. Protect the local trust store and do not
+restore it from a shared CI cache.
+
+`ocr plugin preflight` checks locked snapshots, host compatibility, and execution
+authorization without obtaining model credentials, starting MCP/workflow
+processes, or calling a model. `--json` returns the installed package summaries.
+Project command operational errors return an `error` object with a code and
+message on stdout and exit nonzero. Codes include `LOCK_MISMATCH`,
+`PLATFORM_UNSUPPORTED`, `ARTIFACT_MISSING`, `ARTIFACT_MISMATCH`, and
+`PLUGIN_EXEC_NOT_AUTHORIZED`; other failures use `PROJECT_PLUGIN_ERROR`.
+
+### Update or remove a project dependency
+
+Edit `plugins.json` to change a source, change order, or remove a dependency, then
+resolve and review the new lock explicitly:
+
+```text
+ocr plugin lock
+git diff -- .opencodereview/plugins.json .opencodereview/plugins.lock.json
+ocr plugin sync --frozen
+ocr plugin trust
+```
+
+`lock` refreshes all declared sources for the current platform. Use the global
+`plugin update --accept-permissions` flow only for global installations; project
+execution authorization is bound to the entire lock instead. Snapshots for old
+locks remain available to in-progress reviews. A modified cached snapshot is
+rejected; remove the project cache directory reported in the error (including
+its `state.json` and `packages` directory) and sync again to recover. This cache
+is outside the repository; keep the committed declaration and lock files.
+No automatic pruning is included.
+
+These commands establish the local project workflow. The GitHub Action does not
+yet provide a trusted policy checkout or an `allow_plugin_exec` input. Do not
+authorize execution from an untrusted pull request's declaration or lock, or
+place model secrets in a job that runs its code.
 
 ## Author a package
 

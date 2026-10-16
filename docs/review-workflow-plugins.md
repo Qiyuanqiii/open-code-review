@@ -1,5 +1,14 @@
 # Review workflow plugins
 
+For a repository-managed workflow, declare it with `ocr plugin add SOURCE`,
+commit `.opencodereview/plugins.json` and `plugins.lock.json`, then install using
+`ocr plugin sync --frozen`. Inspect the locked package and run `ocr plugin trust`
+before selecting it with `--review-plugin ID`. `ocr plugin preflight --json`
+checks the installed contents, compatibility, and local authorization without
+starting the workflow or contacting a model. A project declaration restricts
+selection to its locked packages; a globally installed workflow cannot bypass
+that set. See [Project plugins](native-plugins.md#project-plugins).
+
 A review plugin owns its stage plan, prompts, completion schema, validation and
 cross-stage state. OCR provides selected diffs and rules, model/tool execution,
 sessions, usage accounting, comment processing and output. The host contains no

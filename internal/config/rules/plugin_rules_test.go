@@ -14,6 +14,54 @@ import (
 	"github.com/alibaba/open-code-review/internal/plugin"
 )
 
+func TestProjectPluginsOverrideGlobalSetAndPreserveDeclarationOrder(t *testing.T) {
+	store := pluginRuleTestHome(t)
+	installRulePlugin(t, store, "global", []string{"rule.json"}, map[string]string{
+		"rule.json": `{"rules":[{"path":"**/*.go","rule":"Global contribution"}]}`,
+	}, true)
+	repo := t.TempDir()
+	project, err := store.Project(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"z-project", "a-project"} {
+		source := filepath.Join(repo, id)
+		m := plugin.Manifest{SchemaVersion: 1, ID: id, Name: id, Version: "1", Rules: []string{"rules.json"}}
+		data, _ := json.Marshal(m)
+		writePluginRuleFile(t, source, plugin.ManifestFilename, string(data))
+		writePluginRuleFile(t, source, "rules.json", `{"rules":[{"path":"**/*.go","rule":"`+id+` contribution"}]}`)
+		if _, err := project.Add(context.Background(), source, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := NewResolver(repo, "", ResolverOptions{}); err == nil || !strings.Contains(err.Error(), "ARTIFACT_MISSING") {
+		t.Fatalf("missing project snapshots fell back to global: %v", err)
+	}
+	if _, err := project.Sync(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	resolver, _, err := NewResolver(repo, "", ResolverOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := resolver.(DetailResolver).ResolveDetail("main.go")
+	if len(detail.PluginRules) != 2 || detail.PluginRules[0].ID != "z-project" || detail.PluginRules[1].ID != "a-project" || strings.Contains(detail.Rule, "Global contribution") {
+		t.Fatalf("project contributions = %+v", detail)
+	}
+	other, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil || !strings.Contains(other.Resolve("main.go"), "Global contribution") {
+		t.Fatalf("legacy global behavior changed: %v", err)
+	}
+	writePluginRuleFile(t, repo, ".opencodereview/plugins.json", `{"schema_version":1,"plugins":[]}`)
+	if _, err := project.Lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	empty, _, err := NewResolver(repo, "", ResolverOptions{})
+	if err != nil || len(empty.(DetailResolver).ResolveDetail("main.go").PluginRules) != 0 {
+		t.Fatalf("empty declaration loaded global plugins: %v", err)
+	}
+}
+
 func pluginRuleTestHome(t *testing.T) *plugin.Store {
 	t.Helper()
 	home := t.TempDir()

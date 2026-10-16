@@ -90,8 +90,9 @@ func TestSnapshotLifecycle(t *testing.T) {
 	}
 	_, err = store.Install(ctx, source, true)
 	requireError(t, err, "already installed")
-	if err := store.SetEnabled("example", true); err != nil {
-		t.Fatal(err)
+	activated, err := store.SetEnabledWithResult("example", true)
+	if err != nil || !activated.Enabled || activated.Dir != item.Dir {
+		t.Fatalf("activation result = %+v, %v", activated, err)
 	}
 	enabled, err := store.Enabled()
 	if err != nil || len(enabled) != 1 || !enabled[0].Enabled {
@@ -105,8 +106,9 @@ func TestSnapshotLifecycle(t *testing.T) {
 	if _, err := os.Stat(item.Dir); err != nil {
 		t.Fatalf("update deleted snapshot held by an active review: %v", err)
 	}
-	if err := store.SetEnabled("example", false); err != nil {
-		t.Fatal(err)
+	deactivated, err := store.SetEnabledWithResult("example", false)
+	if err != nil || deactivated.Enabled || deactivated.Dir != updated.Dir {
+		t.Fatalf("deactivation result = %+v, %v", deactivated, err)
 	}
 	writeTestJSON(t, filepath.Join(source, ManifestFilename), testManifest("example", "3.0.0"))
 	updated, err = store.Update(ctx, "example")

@@ -36,6 +36,7 @@ type pluginInfo struct {
 	Directory           string               `json:"directory"`
 	Rules               []string             `json:"rules"`
 	MCPServers          []string             `json:"mcp_servers"`
+	MCPExecution        []mcpExecutionInfo   `json:"mcp_execution"`
 	Review              *pluginReviewInfo    `json:"review,omitempty"`
 	SHA256              string               `json:"sha256,omitempty"`
 	ArchiveSHA256       string               `json:"archive_sha256,omitempty"`
@@ -52,6 +53,10 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	execution := make([]mcpExecutionInfo, 0, len(names))
+	for _, name := range names {
+		execution = append(execution, describeMCPExecution(name, m.MCPServers[name].Type))
+	}
 	var review *pluginReviewInfo
 	if m.Review != nil {
 		review = &pluginReviewInfo{Protocol: m.Review.Protocol, Stages: append([]string{}, m.Review.Stages...)}
@@ -59,7 +64,7 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 	return pluginInfo{
 		ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
 		Enabled: installed.Enabled, Source: plugin.DisplaySource(installed.Source), Directory: installed.Dir,
-		Rules: append([]string{}, m.Rules...), MCPServers: names, Review: review,
+		Rules: append([]string{}, m.Rules...), MCPServers: names, MCPExecution: execution, Review: review,
 		SHA256: installed.SHA256, Revision: installed.Revision,
 		ArchiveSHA256: installed.ArchiveSHA256, ContentSHA256: installed.ContentSHA256, ContentDigestFormat: installed.ContentDigestFormat, Requires: m.Requires,
 	}
@@ -90,6 +95,9 @@ func printPluginInstallPreview(out io.Writer, preview pluginInstallPreview, json
 					return err
 				}
 			}
+			if err := printMCPExecution(out, p.MCPExecution); err != nil {
+				return err
+			}
 		}
 	}
 	message := "No plugin was installed."
@@ -98,6 +106,19 @@ func printPluginInstallPreview(out io.Writer, preview pluginInstallPreview, json
 	}
 	_, err := fmt.Fprintln(out, message)
 	return err
+}
+
+func printMCPExecution(out io.Writer, entries []mcpExecutionInfo) error {
+	for _, entry := range entries {
+		effect := "starts a local process with your user permissions"
+		if entry.Transport == "remote" {
+			effect = "opens a connection to a remote service"
+		}
+		if _, err := fmt.Fprintf(out, "MCP %s: %s during review/scan when the plugin is active and authorized.\n", pluginText(entry.Name), effect); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func pluginText(value string) string {
@@ -143,6 +164,9 @@ func newPluginCmd() *cobra.Command {
 			pluginText(info.Directory), pluginText(strings.Join(info.Rules, ", ")), pluginText(strings.Join(info.MCPServers, ", ")))
 		if err == nil && info.Review != nil {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
+		}
+		if err == nil {
+			err = printMCPExecution(cmd.OutOrStdout(), info.MCPExecution)
 		}
 		if err == nil && info.Revision != "" {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revision: %s\n", pluginText(info.Revision))
@@ -270,19 +294,31 @@ func newPluginCmd() *cobra.Command {
 		command.AddCommand(&cobra.Command{
 			Use: action + " <id>", Short: strings.ToUpper(action[:1]) + action[1:] + " an installed plugin", Args: exactArgs(1),
 			RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
+				var execution []mcpExecutionInfo
 				var err error
 				if action == "remove" {
 					err = store.Remove(args[0])
 				} else {
-					err = store.SetEnabled(args[0], action == "enable")
+					var item plugin.Installed
+					item, err = store.SetEnabledWithResult(args[0], action == "enable")
+					if err == nil && action == "enable" {
+						execution = pluginManagementInfo(item).MCPExecution
+					}
 				}
 				if err != nil {
 					return err
 				}
 				if jsonOutput {
-					return pluginJSON(cmd.OutOrStdout(), map[string]string{"id": args[0], "action": action, "status": "ok"})
+					result := map[string]any{"id": args[0], "action": action, "status": "ok"}
+					if action == "enable" {
+						result["mcp_execution"] = execution
+					}
+					return pluginJSON(cmd.OutOrStdout(), result)
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Plugin %s: %s complete. Changes apply to subsequent reviews.\n", pluginText(args[0]), action)
+				if err == nil {
+					err = printMCPExecution(cmd.OutOrStdout(), execution)
+				}
 				return err
 			}),
 		})

@@ -40,6 +40,14 @@ ocr plugin install https://example.com/team-review.tar.gz --dry-run
 ocr plugin install ./team-review.zip --dry-run --json
 ```
 
+For a selected package, the preview describes each MCP server as a local process
+or a remote connection. `show`, `enable`, and installation results include the
+same summary. Local processes run with your user permissions; remote servers
+receive tool requests. These effects occur during review/scan when the package
+is active and authorized, not during preview, installation, or enablement.
+JSON output adds `mcp_execution` entries with `name`, `transport`, `execution`,
+and `activation`; command arguments, environment values and headers remain omitted.
+
 A remote archive or GitHub repository containing one plugin selects it
 automatically. If it contains multiple plugins, the command lists them and asks
 for an explicit selection:
@@ -151,6 +159,7 @@ including executing their server commands with your account's permissions.
 | `ocr plugin update ID` | Replace from the original source; preserve enabled state; reject changed execution declarations |
 | `ocr plugin update ID --accept-permissions` | Explicitly accept added/changed execution declarations |
 | `ocr plugin remove ID` | Unregister a package |
+| `ocr mcp list --repo PROJECT_ROOT` | Inspect manual and selected plugin MCP configuration without connecting |
 
 All commands support `--json`. Management output omits MCP environment values,
 arguments, authentication headers, and source URL query parameters. Installing a
@@ -170,6 +179,51 @@ workflow and its accompanying rules/MCP servers for that invocation, even when
 the package is disabled. It does not change the saved enabled state. There is no
 automatic project installation during reviews. See [Project plugins](#project-plugins)
 for an explicit declaration and frozen installation workflow.
+
+### Inspect all MCP configuration
+
+Existing servers in `~/.opencodereview/config.json` remain usable without being
+repackaged as plugins. View them alongside plugin-provided servers:
+
+```text
+ocr mcp list
+ocr mcp list --repo /path/to/project --json
+```
+
+The list shows the server name, configuration source, plugin ID/version,
+execution type, configuration state, and authorization state. Plugin server
+names use `plugin/ID/SERVER`, matching the runtime. Sources are `user_config`,
+`global_plugin`, and `project_plugin`.
+
+Without a project declaration, the list includes enabled and disabled global
+plugins. A project declaration selects its locked plugins instead; manual MCP
+configuration still applies. Project snapshots must already be installed with
+`ocr plugin sync --frozen`. Missing or changed snapshots and invalid locks cause
+an error, rather than falling back to global plugins. Untrusted but valid
+snapshots can be inspected without granting execution authorization.
+
+| State | Meaning |
+| --- | --- |
+| `configured` | A server declaration is selected and authorized; connectivity has not been tested |
+| `disabled` | The globally installed plugin is disabled |
+| `incompatible` | An enabled global plugin's host requirements are unmet; its configuration remains inspectable |
+| `authorization_required` | The project's installed snapshot is valid but its lock has not been trusted |
+| `missing_command` / `missing_url` | A manual declaration lacks the field needed for its transport |
+| `server_name_conflict` | A selected, authorized plugin server has the same name as a manual server |
+
+Authorization values distinguish explicit user configuration (`user_configured`),
+enabled global plugins (`enabled_by_user`), disabled plugins (`not_enabled`),
+and project lock trust (`required` or `trusted_project_lock`). Execution values
+are `local_process`, `local_setup_and_process` for manual servers with a setup
+hook, or `remote_connection`.
+
+This command reads configuration and installed snapshots. It does not run setup
+hooks, start processes, connect to endpoints, download packages, resolve LLM
+credentials, or change configuration/trust. JSON returns `connection_status:
+"not_checked"`; tool-name conflicts require a live connection and are not
+checked. The list describes normal review/scan selection; an explicit
+`--review-plugin ID` can additionally select that workflow's MCP contributions
+for a particular review.
 
 ### Existing prototype installations
 

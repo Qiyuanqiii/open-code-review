@@ -249,12 +249,8 @@ func (p *Project) load(ctx context.Context, lock ProjectLock, requireTrust bool)
 			execution = append(execution, entry.ID)
 		}
 	}
-	if requireTrust && len(execution) > 0 {
-		digest := projectLockID(lock)
-		trusted, err := readFileBounded(filepath.Join(p.store.root, "trust-"+digest), 128)
-		if err != nil || string(trusted) != digest {
-			return nil, projectError("PLUGIN_EXEC_NOT_AUTHORIZED", "project plugins %s require local authorization; inspect the packages, then run ocr plugin trust", strings.Join(execution, ", "))
-		}
+	if requireTrust && len(execution) > 0 && !p.executionAuthorized(lock) {
+		return nil, projectError("PLUGIN_EXEC_NOT_AUTHORIZED", "project plugins %s require local authorization; inspect the packages, then run ocr plugin trust", strings.Join(execution, ", "))
 	}
 	return items, nil
 }

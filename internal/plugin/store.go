@@ -325,30 +325,44 @@ func (s *Store) installPrepared(ctx context.Context, value *state, prepared *Pre
 }
 
 func (s *Store) SetEnabled(id string, enabled bool) error {
+	_, err := s.SetEnabledWithResult(id, enabled)
+	return err
+}
+
+// SetEnabledWithResult returns the declaration from the same locked update so
+// management output describes the package that was actually enabled.
+func (s *Store) SetEnabledWithResult(id string, enabled bool) (Installed, error) {
 	unlock, err := s.lock(context.Background())
 	if err != nil {
-		return err
+		return Installed{}, err
 	}
 	defer unlock()
 	value, err := s.readState()
 	if err != nil {
-		return err
+		return Installed{}, err
 	}
 	item, ok := value.Installed[id]
 	if !ok {
-		return fmt.Errorf("plugin %q is not installed", id)
+		return Installed{}, fmt.Errorf("plugin %q is not installed", id)
 	}
 	if enabled {
 		if err := item.Manifest.CheckCompatibility(HostVersion); err != nil {
-			return err
+			return Installed{}, err
 		}
 		if _, err := s.validateSnapshot(item); err != nil {
-			return fmt.Errorf("enable plugin %q: %w", id, err)
+			return Installed{}, fmt.Errorf("enable plugin %q: %w", id, err)
 		}
 	}
 	item.Enabled = enabled
 	value.Installed[id] = item
-	return s.writeState(value)
+	item.Dir, err = filepath.Abs(filepath.Join(s.root, filepath.FromSlash(item.Dir)))
+	if err != nil {
+		return Installed{}, err
+	}
+	if err := s.writeState(value); err != nil {
+		return Installed{}, err
+	}
+	return item, nil
 }
 
 func (s *Store) Remove(id string) error {

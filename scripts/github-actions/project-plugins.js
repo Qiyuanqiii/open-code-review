@@ -15,10 +15,12 @@ async function resolvePolicySHA({ github, context, policySHA, prNumber }) {
     const { data } = await github.rest.pulls.get({
       ...context.repo, pull_number: Number(prNumber),
     });
-    sha = data.base.sha;
+    sha = data?.base?.sha;
   }
   if (typeof sha !== "string" || !/^[0-9a-f]{40}$/i.test(sha)) {
-    throw new Error("policy_sha must be a full 40-character commit SHA");
+    throw new Error(policySHA
+      ? "policy_sha must be a full 40-character commit SHA"
+      : `Could not resolve a valid base commit SHA for PR #${prNumber}`);
   }
   return sha.toLowerCase();
 }

@@ -19,11 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type pluginReviewInfo struct {
-	Protocol string   `json:"protocol"`
-	Stages   []string `json:"stages"`
-}
-
 // pluginInfo omits execution arguments, environment variables and headers,
 // which can contain credentials.
 type pluginInfo struct {
@@ -37,7 +32,6 @@ type pluginInfo struct {
 	Rules               []string             `json:"rules"`
 	MCPServers          []string             `json:"mcp_servers"`
 	MCPExecution        []mcpExecutionInfo   `json:"mcp_execution"`
-	Review              *pluginReviewInfo    `json:"review,omitempty"`
 	SHA256              string               `json:"sha256,omitempty"`
 	ArchiveSHA256       string               `json:"archive_sha256,omitempty"`
 	ContentSHA256       string               `json:"content_sha256,omitempty"`
@@ -57,14 +51,10 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 	for _, name := range names {
 		execution = append(execution, describeMCPExecution(name, m.MCPServers[name].Type))
 	}
-	var review *pluginReviewInfo
-	if m.Review != nil {
-		review = &pluginReviewInfo{Protocol: m.Review.Protocol, Stages: append([]string{}, m.Review.Stages...)}
-	}
 	return pluginInfo{
 		ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
 		Enabled: installed.Enabled, Source: plugin.DisplaySource(installed.Source), Directory: installed.Dir,
-		Rules: append([]string{}, m.Rules...), MCPServers: names, MCPExecution: execution, Review: review,
+		Rules: append([]string{}, m.Rules...), MCPServers: names, MCPExecution: execution,
 		SHA256: installed.SHA256, Revision: installed.Revision,
 		ArchiveSHA256: installed.ArchiveSHA256, ContentSHA256: installed.ContentSHA256, ContentDigestFormat: installed.ContentDigestFormat, Requires: m.Requires,
 	}
@@ -89,11 +79,6 @@ func printPluginInstallPreview(out io.Writer, preview pluginInstallPreview, json
 		if len(preview.Plugins) == 1 {
 			if _, err := fmt.Fprintf(out, "Rules: %s\nMCP servers: %s\n", pluginText(strings.Join(p.Rules, ", ")), pluginText(strings.Join(p.MCPServers, ", "))); err != nil {
 				return err
-			}
-			if p.Review != nil {
-				if _, err := fmt.Fprintf(out, "Review stages: %s\n", pluginText(strings.Join(p.Review.Stages, ", "))); err != nil {
-					return err
-				}
 			}
 			if err := printMCPExecution(out, p.MCPExecution); err != nil {
 				return err
@@ -162,9 +147,6 @@ func newPluginCmd() *cobra.Command {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s)\n%s\nSource: %s\nPackage: %s\nRules: %s\nMCP servers: %s\n",
 			pluginText(info.ID), pluginText(info.Version), state, pluginText(info.Description), pluginText(info.Source),
 			pluginText(info.Directory), pluginText(strings.Join(info.Rules, ", ")), pluginText(strings.Join(info.MCPServers, ", ")))
-		if err == nil && info.Review != nil {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
-		}
 		if err == nil {
 			err = printMCPExecution(cmd.OutOrStdout(), info.MCPExecution)
 		}
@@ -207,9 +189,6 @@ func newPluginCmd() *cobra.Command {
 					state = "enabled"
 				}
 				capabilities := fmt.Sprintf("%d rule packs, %d MCP servers", len(info.Rules), len(info.MCPServers))
-				if info.Review != nil {
-					capabilities += ", review policy (explicit selection)"
-				}
 				fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", pluginText(info.ID), pluginText(info.Version), state, capabilities)
 			}
 			return out.Flush()
@@ -288,7 +267,7 @@ func newPluginCmd() *cobra.Command {
 			return printInstalled(cmd, installed)
 		}),
 	}
-	update.Flags().BoolVar(&acceptPermissions, "accept-permissions", false, "accept added or changed MCP and workflow execution declarations")
+	update.Flags().BoolVar(&acceptPermissions, "accept-permissions", false, "accept added or changed MCP execution declarations")
 	command.AddCommand(update)
 	for _, action := range []string{"enable", "disable", "remove"} {
 		command.AddCommand(&cobra.Command{

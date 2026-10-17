@@ -35,14 +35,12 @@ type pluginRulePack struct {
 // pluginResolver keeps the regular priority chain intact and appends matching
 // plugin rules. The installed snapshot also supplies the runtime's MCP config.
 type pluginResolver struct {
-	base         *composedResolver
-	plugins      []plugin.Installed
-	packs        []pluginRulePack
-	reviewID     string
-	reviewPlugin *plugin.Installed
+	base    *composedResolver
+	plugins []plugin.Installed
+	packs   []pluginRulePack
 }
 
-func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver, error) {
+func loadPluginRules(base *composedResolver, repoDir string) (Resolver, error) {
 	store, err := plugin.DefaultStore()
 	if err != nil {
 		return nil, fmt.Errorf("load plugins: %w", err)
@@ -60,25 +58,13 @@ func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver
 		}
 	}
 	if !projectScoped {
-		load := store.Enabled
-		if reviewID != "" {
-			load = store.List
-		}
-		all, err = load()
+		all, err = store.Enabled()
 		if err != nil {
 			return nil, fmt.Errorf("load plugins: %w", err)
 		}
 	}
 	var installed []plugin.Installed
-	var selected *plugin.Installed
 	for _, p := range all {
-		if p.Manifest.ID == reviewID {
-			_, _, err = plugin.ReviewCommand(p)
-			if err != nil {
-				return nil, fmt.Errorf("review plugin %q: %w", reviewID, err)
-			}
-			p.Enabled = true
-		}
 		if p.Enabled {
 			if err := p.Manifest.CheckCompatibility(plugin.HostVersion); err != nil {
 				return nil, err
@@ -87,19 +73,13 @@ func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver
 			if err != nil {
 				return nil, fmt.Errorf("identify plugin %q contents: %w", p.Manifest.ID, err)
 			}
-			if p.Manifest.ID == reviewID {
-				selected = &p
-			}
 			installed = append(installed, p)
 		}
-	}
-	if reviewID != "" && selected == nil {
-		return nil, fmt.Errorf("review plugin %q is not installed", reviewID)
 	}
 	if !projectScoped {
 		sort.Slice(installed, func(i, j int) bool { return installed[i].Manifest.ID < installed[j].Manifest.ID })
 	}
-	r := &pluginResolver{base: base, plugins: installed, reviewID: reviewID, reviewPlugin: selected}
+	r := &pluginResolver{base: base, plugins: installed}
 	for _, p := range installed {
 		for _, file := range p.Manifest.Rules {
 			pack, err := loadPluginRulePack(p.Dir, file)
@@ -172,9 +152,6 @@ func (r *pluginResolver) EnabledPlugins() []plugin.Installed {
 	return append([]plugin.Installed(nil), r.plugins...)
 }
 
-// ReviewPlugin is set only by explicit invocation selection.
-func (r *pluginResolver) ReviewPlugin() *plugin.Installed { return r.reviewPlugin }
-
 func (r *pluginResolver) Resolve(path string) string {
 	return r.ResolveDetail(path).Rule
 }
@@ -200,16 +177,13 @@ func (r *pluginResolver) ResolveDetail(path string) RuleDetail {
 
 func (r *pluginResolver) CanonicalConfig() []string {
 	fields := r.base.CanonicalConfig()
-	if r.reviewID != "" {
-		fields = append(fields, "review_plugin", r.reviewID)
-	}
 	for _, p := range r.plugins {
 		// Manifests are validated by the store. JSON map keys are sorted by
 		// encoding/json; this also covers enabled plugins with only MCP tools.
 		manifest, _ := json.Marshal(p.Manifest)
 		fields = append(fields, "plugin", p.Manifest.ID, "manifest", string(manifest), "content", p.ContentSHA256)
 		// Executable contributions can observe their installation path.
-		if len(p.Manifest.MCPServers) > 0 || p.Manifest.ID == r.reviewID {
+		if len(p.Manifest.MCPServers) > 0 {
 			fields = append(fields, "directory", p.Dir)
 		}
 	}

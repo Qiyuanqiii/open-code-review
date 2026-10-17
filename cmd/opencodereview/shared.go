@@ -109,10 +109,6 @@ func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
 // tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
 // read the working tree, which is what scan wants.
 func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
-	return loadCommonContextWithResolver(repoDirInput, rulePath, rules.ResolverOptions{Ref: contentRef}, maxTools, maxGitProcs, requireGit)
-}
-
-func loadCommonContextWithResolver(repoDirInput, rulePath string, resolverOptions rules.ResolverOptions, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -133,8 +129,10 @@ func loadCommonContextWithResolver(repoDirInput, rulePath string, resolverOption
 	// through this limiter.
 	gitRunner := gitcmd.New(maxGitProcs)
 
-	resolverOptions.Runner = gitRunner
-	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, resolverOptions)
+	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
+		Ref:    contentRef,
+		Runner: gitRunner,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("load rules: %w", err)
 	}
@@ -882,16 +880,10 @@ func emitRunResult(
 		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
 			groups = p.FileGroups()
 		}
-		var reports []agent.PluginReviewReport
-		if p, ok := ag.(interface {
-			PluginReviewReports() []agent.PluginReviewReport
-		}); ok {
-			reports = p.PluginReviewReports()
-		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, reports)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)

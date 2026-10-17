@@ -245,7 +245,7 @@ func (p *Project) load(ctx context.Context, lock ProjectLock, requireTrust bool)
 			return nil, err
 		}
 		items = append(items, item)
-		if len(item.Manifest.MCPServers) > 0 || (item.Manifest.Review != nil && !item.Manifest.Review.retired()) {
+		if len(item.Manifest.MCPServers) > 0 {
 			execution = append(execution, entry.ID)
 		}
 	}

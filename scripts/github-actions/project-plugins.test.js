@@ -70,10 +70,25 @@ async function main() {
   assert.strictEqual(await resolvePolicySHA({ github, context, prNumber: "7" }), sha);
   assert.strictEqual(await resolvePolicySHA({ github, context, policySHA: "C".repeat(40) }), "c".repeat(40));
   assert.strictEqual(fetched, 1);
-  await assert.rejects(resolvePolicySHA({ github, context, policySHA: "main" }), /full 40-character/);
+  await assert.rejects(resolvePolicySHA({ github, context, policySHA: "main" }), {
+    message: "policy_sha must be a full 40-character commit SHA",
+  });
   context.payload.pull_request.number = 8;
   assert.strictEqual(await resolvePolicySHA({ github, context, prNumber: "7" }), sha);
   assert.strictEqual(fetched, 2, "an explicit PR override must resolve that PR's base");
+
+  const emptyContext = { ...context, payload: {} };
+  const resolutionError = { message: "Could not resolve a valid base commit SHA for PR #7" };
+  for (const data of [undefined, {}, { base: {} }, { base: { sha: "invalid" } }, { base: { sha: 123 } }]) {
+    const invalidAPI = { rest: { pulls: { get: async () => ({ data }) } } };
+    await assert.rejects(resolvePolicySHA({ github: invalidAPI, context: emptyContext, prNumber: "7" }), resolutionError);
+  }
+  const invalidPayload = { ...context, payload: { pull_request: { number: 7, base: { sha: "invalid" } } } };
+  await assert.rejects(resolvePolicySHA({ github, context: invalidPayload, prNumber: "7" }), resolutionError);
+  assert.strictEqual(fetched, 2, "invalid explicit or payload SHAs must not fall back to an API lookup");
+  const apiFailure = new Error("API request failed");
+  const failingAPI = { rest: { pulls: { get: async () => { throw apiFailure; } } } };
+  await assert.rejects(resolvePolicySHA({ github: failingAPI, context: emptyContext, prNumber: "7" }), error => error === apiFailure);
 
   const f = fixture();
   try {

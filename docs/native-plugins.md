@@ -1,11 +1,17 @@
 # Native OCR plugins
 
-OCR can host plugins that contribute review rules and MCP tools through its
-installer, registry, and runtime. These packages use `ocr-plugin.json` and are
+OCR can host plugins that contribute review rules, MCP tools and an explicitly
+selected review workflow through its installer, registry, and runtime. These
+packages use `ocr-plugin.json` and are
 separate from the integrations that install OCR into other coding agents.
 
 For module boundaries, lifecycle diagrams, and a suggested code-review order,
 see [Native plugin architecture](plugin-architecture.md).
+
+[Review workflow plugins](review-workflow-plugins.md) provide their own stage plan,
+prompts and validators through a local process. Start one with
+`ocr review --review-plugin ID`. Selection affects that
+invocation only.
 
 ## Install from a link
 
@@ -63,8 +69,9 @@ registered package. Retry later or supply a `/tree/FULL_COMMIT_SHA` URL; a full
 
 ### Accept execution changes during updates
 
-When an update adds or changes an MCP server configuration, OCR reports the
-changed declaration and field names and leaves the previous installation unchanged. Values such as
+When an update adds or changes an MCP server configuration or a workflow's
+protocol, command, arguments or stages, OCR reports the changed declaration and
+field names and leaves the previous installation unchanged. Values such as
 arguments, environment variables and authentication headers are omitted from the
 change report. Inspect the new package source before accepting:
 
@@ -170,8 +177,10 @@ finish using its original files. This version has no automatic cache cleanup.
 
 Without a project plugin declaration, enabled rules and MCP contributions apply
 to every repository for that user.
-`disable` stops automatic loading. There is no automatic project installation
-during reviews. See [Project plugins](#project-plugins)
+`disable` stops automatic loading; an explicit `--review-plugin ID` selects the
+workflow and its accompanying rules/MCP servers for that invocation, even when
+the package is disabled. It does not change the saved enabled state. There is no
+automatic project installation during reviews. See [Project plugins](#project-plugins)
 for an explicit declaration and frozen installation workflow.
 
 ### Inspect all MCP configuration
@@ -215,13 +224,14 @@ This command reads configuration and installed snapshots. It does not run setup
 hooks, start processes, connect to endpoints, download packages, resolve LLM
 credentials, or change configuration/trust. JSON returns `connection_status:
 "not_checked"`; tool-name conflicts require a live connection and are not
-checked. The list describes normal review/scan selection.
+checked. The list describes normal review/scan selection; an explicit
+`--review-plugin ID` can additionally select that workflow's MCP contributions
+for a particular review.
 
 ### Existing prototype installations
 
-Installed rules/MCP snapshots remain usable after upgrading from a build with
-marketplace support. Packages declaring `review` require the separate Workflow
-Plugin implementation; this build rejects that unsupported manifest field. For an old `ID@MARKET` installation, OCR reads its cached source URL or
+Installed snapshots remain usable after upgrading from a build with marketplace
+support. For an old `ID@MARKET` installation, OCR reads its cached source URL or
 absolute local path and uses that direct source for updates. Reading the registry
 does not fetch an index or write state. The next successful registry change saves
 the direct source and drops the old market cache.
@@ -301,14 +311,14 @@ already verified snapshots or repository-local sources and makes no network
 requests. A missing remote artifact fails with `ARTIFACT_MISSING`.
 
 Data-only rule packages need no execution authorization. Any package declaring
-MCP servers (including remote endpoints) requires a
+MCP servers (including remote endpoints) or an active review workflow requires a
 separate local decision after inspecting the locked package:
 
 ```text
 ocr plugin sync --frozen
 ocr plugin trust
 ocr plugin preflight --json
-ocr review
+ocr review --review-plugin team-review
 ocr plugin trust --revoke
 ```
 
@@ -321,7 +331,7 @@ user's permissions; it is not a sandbox. Protect the local trust store and do no
 restore it from a shared CI cache.
 
 `ocr plugin preflight` checks locked snapshots, host compatibility, and execution
-authorization without obtaining model credentials, starting MCP
+authorization without obtaining model credentials, starting MCP/workflow
 processes, or calling a model. `--json` returns the installed package summaries.
 `--fingerprint` instead returns a digest of the verified lock and platform;
 with `--json`, the result is a JSON string. It repeats the same content and trust
@@ -382,7 +392,7 @@ changed content, unsupported packages/platforms, or invalid locks stop the job;
 the Action does not replace a locked version with the latest available package.
 
 `allow_plugin_exec` defaults to `'false'`. Set it to `'true'` in the trusted
-workflow only after inspecting the locked MCP declarations. It grants
+workflow only after inspecting the locked MCP/workflow declarations. It grants
 that lock execution permission for this run. Native plugins have the runner's
 permissions and can access the review process's environment, including model
 credentials. A lock file by itself never authorizes execution. See the
@@ -391,11 +401,11 @@ credentials. A lock file by itself never authorizes execution. See the
 ### Resume and incremental review
 
 Session identity includes enabled plugin manifests, package contents (including
-executable bits) and rule text. Changing these rejects a
+executable bits), rule text, and selected workflow. Changing these rejects a
 resume and asks for a new review. Locked project snapshots must still pass
 content and execution-authorization checks before a session can resume.
 Reinstalling an identical data-only rule plugin into a different snapshot
-directory preserves resume identity. Active MCP contributions retain
+directory preserves resume identity. Active MCP/workflow contributions retain
 their installation paths in the identity because executable code can observe
 those paths.
 
@@ -458,8 +468,8 @@ Example manifest:
   underscores, or hyphens, with an alphanumeric first and last character, at
   most 64 characters. Windows reserved filenames are rejected.
 - `name` and `version` are required nonempty strings. Change the version when
-  publishing a different release. At least one rule pack or MCP server is
-  required.
+  publishing a different release. At least one rule pack, MCP server or review
+  policy is required.
 - `rules` contains relative `.json` paths. All packaged files must be regular
   files or directories. Symlinks, traversal, absolute paths, conflicting names,
   and special files are rejected.
@@ -468,13 +478,15 @@ Example manifest:
   servers use `type: "remote"`, `url`, `headers`, and optional `tools`.
 - Stdio commands, arguments, and environment values support `${plugin_dir}`
   (installation directory), `${os}` (Go OS name), `${arch}` (Go architecture),
-  and `${exe}` (`.exe` on Windows, empty elsewhere). Substitution is literal and does not expand environment
+  and `${exe}` (`.exe` on Windows, empty elsewhere), matching Review Workflow
+  commands and arguments. Substitution is literal and does not expand environment
   variables or re-expand placeholders inside substituted paths. Commands run
   with the reviewed repository as their working directory; OCR does not evaluate
   a shell.
 
-Management JSON omits MCP arguments, environment variables, and authentication
-headers. This applies to list, show, installation previews, and
+Management JSON exposes Review Workflow protocol and stage names, while omitting
+its command and arguments. MCP arguments, environment variables, and authentication
+headers are also omitted. This applies to list, show, installation previews, and
 project plugin output; execution still uses the original manifest.
 
 MCP tool names must be unique across the active tools. User-configured MCP tools
@@ -486,14 +498,14 @@ OCR reports the failure and continues without that server's tools.
 ### Compatibility and host requirements
 
 The package version is the author's release label. It is separate from manifest
-`schema_version: 1`.
+`schema_version: 1` and workflow `stdio-v1` / message `version: 1`.
 
 A manifest can optionally declare:
 
 ```json
 "requires": {
   "ocr_min_version": "1.2.3",
-  "features": ["rules", "mcp"]
+  "features": ["rules", "mcp", "stdio-v1"]
 },
 "metadata": {
   "homepage": "https://example.com/team-review",
@@ -504,20 +516,23 @@ A manifest can optionally declare:
 `ocr_min_version` is a minimum full semantic version, with optional `v` prefix,
 prerelease and build metadata; it is not a version range. The number above is an
 illustration, not the release that introduced plugins. Feature names currently
-supported are `rules` and `mcp`. Unknown required features fail before
+supported are `rules`, `mcp`, and `stdio-v1`. Unknown required features fail before
 installation, activation or runtime loading. A `dev` or otherwise non-semantic
 host version cannot satisfy a minimum-version declaration; build with an accurate
 semantic version or use a versioned release. Manifests without requirements remain
 supported. Installed incompatible packages can still be inspected or removed.
 
 Only `metadata` is an open-ended descriptive object. Its contents never authorize
-execution or change behavior. Other manifest objects, including `requires` and MCP
-declarations, remain strict. Duplicate keys are rejected everywhere.
+execution or change behavior. Other manifest objects, including `requires`, MCP
+and workflow declarations, remain strict. Duplicate keys are rejected everywhere.
 Old hosts may reject these new optional fields; omitting them retains the old
 manifest shape. Older hosts must not silently ignore requirements they cannot
 enforce.
 
-Breaking manifest semantics require a new schema version.
+Breaking manifest semantics require a new schema version. Incompatible workflow
+messages require a new protocol identifier/message version. The current workflow
+protocol remains experimental, with no new mandatory handshake in this release;
+its v1 message shape remains unchanged. See the [workflow protocol](review-workflow-plugins.md).
 
 ### Rule packs
 

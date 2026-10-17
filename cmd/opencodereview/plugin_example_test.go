@@ -4,7 +4,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +16,80 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/plugin"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestSinglePassExampleRecoversFromInvalidRequests(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		python, err = exec.LookPath("python3")
+	}
+	if err != nil {
+		t.Skip("Python 3 is required to exercise the bundled review example")
+	}
+	requests := []struct {
+		input string
+		kind  string
+	}{
+		{`{`, "error"},
+		{`[]`, "error"},
+		{`"text"`, "error"},
+		{`null`, "error"},
+		{`{"version":1,"stage":"review"}`, "error"},
+		{`{"version":1,"stage":"review","method":"begin"}`, "error"},
+		{`{"version":1,"stage":"review","method":"begin","severities":["medium"],"categories":null}`, "error"},
+		{`{"version":1,"stage":"review","method":"submit","arguments":null}`, "rejected"},
+		{`{"version":1,"stage":"review","method":"submit","arguments":[]}`, "rejected"},
+		{`{"version":1,"stage":"review","method":"begin","severities":["medium"],"categories":["bug"]}`, "task"},
+		{`{"version":1,"stage":"review","method":"submit","arguments":{"complete":true,"summary":"No findings.","comments":[]}}`, "complete"},
+	}
+	var input bytes.Buffer
+	for _, request := range requests {
+		input.WriteString(request.input + "\n")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, filepath.Join("..", "..", "examples", "ocr-plugins", "single-pass", "review.py"))
+	cmd.Stdin = &input
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("example exited before completing requests: %v: %s", err, stderr.String())
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for i, request := range requests {
+		var response plugin.ReviewResponse
+		if err := decoder.Decode(&response); err != nil {
+			t.Fatalf("request %d: %v", i+1, err)
+		}
+		if response.Version != 1 {
+			t.Fatalf("request %d: wrong protocol version: %+v", i+1, response)
+		}
+		switch request.kind {
+		case "error":
+			if response.Error == "" {
+				t.Fatalf("request %d: missing protocol error", i+1)
+			}
+		case "rejected":
+			if response.Accepted == nil || *response.Accepted || response.Feedback == "" {
+				t.Fatalf("request %d: missing rejection: %+v", i+1, response)
+			}
+		case "task":
+			if response.Error != "" || response.Task == nil || response.Task.Instructions == "" {
+				t.Fatalf("valid begin after invalid requests failed: %+v", response)
+			}
+		case "complete":
+			if response.Error != "" || response.Accepted == nil || !*response.Accepted || response.Complete == nil || !*response.Complete {
+				t.Fatalf("valid submit after invalid requests failed: %+v", response)
+			}
+		}
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		t.Fatalf("unexpected extra output: %v", err)
+	}
+}
 
 func TestNativePluginExamplePackagesThroughRuntime(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {

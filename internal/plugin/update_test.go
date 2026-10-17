@@ -88,4 +88,30 @@ func TestExecutionDeclarationChanges(t *testing.T) {
 	if changes := executionChanges(before, after); len(changes) != 0 {
 		t.Fatalf("equivalent defaults = %+v", changes)
 	}
+	for _, field := range []string{"added", "protocol", "command", "args", "stages"} {
+		t.Run("review/"+field, func(t *testing.T) {
+			before := Manifest{Review: &ReviewContribution{Protocol: "stdio-v1", Command: "review", Stages: []string{"inspect"}}}
+			copy := *before.Review
+			after := Manifest{Review: &copy}
+			switch field {
+			case "added":
+				before.Review = nil
+			case "protocol":
+				after.Review.Protocol = "stdio-v2"
+			case "command":
+				after.Review.Command = "other"
+			case "args":
+				after.Review.Args = []string{"secret"}
+			case "stages":
+				after.Review.Stages = []string{"inspect", "verify"}
+			}
+			changes := executionChanges(before, after)
+			if len(changes) != 1 || len(changes[0].Fields) != 1 || changes[0].Fields[0] != field {
+				t.Fatalf("changes = %+v", changes)
+			}
+			if changes := executionChanges(after, after); len(changes) != 0 {
+				t.Fatalf("same workflow = %+v", changes)
+			}
+		})
+	}
 }

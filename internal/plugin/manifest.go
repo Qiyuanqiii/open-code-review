@@ -26,8 +26,24 @@ type Manifest struct {
 	Description   string                     `json:"description,omitempty"`
 	Rules         []string                   `json:"rules,omitempty"`
 	MCPServers    map[string]MCPServer       `json:"mcp_servers,omitempty"`
+	Review        *ReviewContribution        `json:"review,omitempty"`
 	Requires      *Requirements              `json:"requires,omitempty"`
 	Metadata      map[string]json.RawMessage `json:"metadata,omitempty"`
+}
+
+// ReviewContribution runs a package's workflow only when explicitly selected.
+type ReviewContribution struct {
+	Protocol string   `json:"protocol"`
+	Command  string   `json:"command"`
+	Args     []string `json:"args,omitempty"`
+	Stages   []string `json:"stages"`
+	// Read-only compatibility lets existing installations be listed/updated.
+	RetiredEngine string `json:"engine,omitempty"`
+	RetiredPrompt string `json:"prompt,omitempty"`
+}
+
+func (r ReviewContribution) retired() bool {
+	return r.RetiredEngine != "" && r.RetiredPrompt != "" && r.Protocol == "" && r.Command == "" && len(r.Args) == 0 && len(r.Stages) == 0
 }
 
 // MCPServer supports the existing stdio and remote MCP transports. Installation
@@ -73,8 +89,34 @@ func (m Manifest) Validate() error {
 	if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Version) == "" {
 		return fmt.Errorf("plugin name and version are required")
 	}
-	if len(m.Rules) == 0 && len(m.MCPServers) == 0 {
-		return fmt.Errorf("plugin must contribute rules or MCP servers")
+	if len(m.Rules) == 0 && len(m.MCPServers) == 0 && m.Review == nil {
+		return fmt.Errorf("plugin must contribute rules, MCP servers or a review policy")
+	}
+	if m.Review != nil {
+		if m.Review.retired() {
+			if err := safeRelativePath(m.Review.RetiredPrompt); err != nil {
+				return fmt.Errorf("invalid retired review prompt: %w", err)
+			}
+		} else {
+			if m.Review.RetiredEngine != "" || m.Review.RetiredPrompt != "" || m.Review.Protocol != "stdio-v1" || strings.TrimSpace(m.Review.Command) == "" {
+				return fmt.Errorf("review requires protocol stdio-v1 and an executable command")
+			}
+			if len(m.Review.Stages) == 0 || len(m.Review.Stages) > 64 {
+				return fmt.Errorf("review requires one to 64 named stages")
+			}
+			stages := make(map[string]bool)
+			for _, stage := range m.Review.Stages {
+				if !validID(stage) || stages[stage] {
+					return fmt.Errorf("review stages must have unique portable IDs")
+				}
+				stages[stage] = true
+			}
+			for _, value := range append([]string{m.Review.Command}, m.Review.Args...) {
+				if strings.ContainsRune(value, 0) {
+					return fmt.Errorf("review command and args cannot contain NUL")
+				}
+			}
+		}
 	}
 	seen := make(map[string]bool)
 	for _, rule := range m.Rules {

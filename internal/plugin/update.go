@@ -75,5 +75,28 @@ func executionChanges(old, next Manifest) []ExecutionChange {
 			changes = append(changes, ExecutionChange{"mcp_servers." + name, fields})
 		}
 	}
+	if next.Review != nil && !next.Review.retired() {
+		if old.Review == nil || old.Review.retired() {
+			changes = append(changes, ExecutionChange{"review", []string{"added"}})
+		} else {
+			var fields []string
+			for _, field := range []struct {
+				name string
+				same bool
+			}{
+				{"protocol", old.Review.Protocol == next.Review.Protocol},
+				{"command", old.Review.Command == next.Review.Command},
+				{"args", slices.Equal(old.Review.Args, next.Review.Args)},
+				{"stages", slices.Equal(old.Review.Stages, next.Review.Stages)},
+			} {
+				if !field.same {
+					fields = append(fields, field.name)
+				}
+			}
+			if len(fields) > 0 {
+				changes = append(changes, ExecutionChange{"review", fields})
+			}
+		}
+	}
 	return changes
 }

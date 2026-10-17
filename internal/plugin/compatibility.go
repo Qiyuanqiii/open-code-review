@@ -58,7 +58,7 @@ func (m Manifest) CheckCompatibility(hostVersion string) error {
 	}
 	for _, feature := range m.Requires.Features {
 		switch feature {
-		case "rules", "mcp":
+		case "rules", "mcp", "stdio-v1":
 		default:
 			return fmt.Errorf("plugin %q requires unsupported capability %q", m.ID, feature)
 		}

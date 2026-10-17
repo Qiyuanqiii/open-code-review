@@ -261,25 +261,31 @@ func TestPluginRuleLoadingErrors(t *testing.T) {
 func TestPluginHostRequirementsBeforeRulesLoading(t *testing.T) {
 	previous := plugin.HostVersion
 	t.Cleanup(func() { plugin.HostVersion = previous })
-	plugin.HostVersion = "1.2.3"
-	store := pluginRuleTestHome(t)
-	source := t.TempDir()
-	manifest := plugin.Manifest{
-		SchemaVersion: 1, ID: "compatible", Name: "Compatible", Version: "1",
-		Rules: []string{"rules.json"}, Requires: &plugin.Requirements{MinOCRVersion: "1.2.0"},
-	}
-	data, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writePluginRuleFile(t, source, plugin.ManifestFilename, string(data))
-	writePluginRuleFile(t, source, "rules.json", `{"default_rule":"Test rule"}`)
-	if _, err := store.Install(context.Background(), source, true); err != nil {
-		t.Fatal(err)
-	}
-	plugin.HostVersion = "1.1.0"
-	options := ResolverOptions{}
-	if _, _, err := NewResolver(t.TempDir(), "", options); err == nil || !strings.Contains(err.Error(), "requires OCR") {
-		t.Fatalf("incompatible runtime loading: %v", err)
+	for _, explicit := range []bool{false, true} {
+		plugin.HostVersion = "1.2.3"
+		store := pluginRuleTestHome(t)
+		source := t.TempDir()
+		manifest := plugin.Manifest{
+			SchemaVersion: 1, ID: "compatible", Name: "Compatible", Version: "1",
+			Rules: []string{"rules.json"}, Requires: &plugin.Requirements{MinOCRVersion: "1.2.0"},
+			Review: &plugin.ReviewContribution{Protocol: "stdio-v1", Command: "never-run", Stages: []string{"inspect"}},
+		}
+		data, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writePluginRuleFile(t, source, plugin.ManifestFilename, string(data))
+		writePluginRuleFile(t, source, "rules.json", `{"default_rule":"Test rule"}`)
+		if _, err := store.Install(context.Background(), source, !explicit); err != nil {
+			t.Fatal(err)
+		}
+		plugin.HostVersion = "1.1.0"
+		options := ResolverOptions{}
+		if explicit {
+			options.ReviewPlugin = "compatible"
+		}
+		if _, _, err := NewResolver(t.TempDir(), "", options); err == nil || !strings.Contains(err.Error(), "requires OCR") {
+			t.Fatalf("incompatible runtime loading: %v", err)
+		}
 	}
 }

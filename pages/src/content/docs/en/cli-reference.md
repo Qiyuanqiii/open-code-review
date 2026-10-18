@@ -126,7 +126,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
+| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. When combined with `--review-plugin`, inspects the workflow manifest without launching the executable. |
+| `--review-plugin <id>` | — | — | Select and execute a custom review workflow from an installed and authorized native plugin. See [Review workflow plugins](../../../../docs/review-workflow-plugins.md). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |

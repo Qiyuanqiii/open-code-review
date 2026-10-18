@@ -121,7 +121,8 @@ unstaged + untracked 变更。
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
-| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
+| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。结合 `--review-plugin` 时仅加载工作流清单而不启动可执行文件。 |
+| `--review-plugin <id>` | — | — | 选取并运行已安装且授权的原生插件所定义的审查工作流。参阅[审查工作流插件](../../../../docs/review-workflow-plugins.zh-CN.md)。 |
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |

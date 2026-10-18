@@ -120,7 +120,8 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
-| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
+| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--review-plugin` と併用した場合はプロセスを起動せずにワークフローマニフェストのみを検査します。 |
+| `--review-plugin <id>` | — | — | インストールおよび承認済みのネイティブプラグインからレビューワークフローを選択して実行します。[レビューワークフロープラグイン](../../../../docs/review-workflow-plugins.ja-JP.md) を参照。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |

@@ -83,7 +83,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 저장된 리뷰 세션 하나를 삭제합니다. |
 | `ocr plugin install <url\|path>` | — | URL 또는 로컬 경로에서 OCR 네이티브 플러그인을 설치합니다. |
-| `ocr plugin list` | `ocr plugins` | 설치된 플러그인 목록과 활성화 상태를 나열합니다. |
+| `ocr plugin list` | `ocr plugins list` | 설치된 플러그인 목록과 활성화 상태를 나열합니다. |
 | `ocr plugin show <id>` | — | 설치된 플러그인의 상세 정보와 기여 기능을 검사합니다. |
 | `ocr plugin update <id>` | — | 원래 소스에서 플러그인을 업데이트합니다(`--accept-permissions`). |
 | `ocr plugin enable <id>` / `disable <id>` | — | 설치된 플러그인을 활성화하거나 비활성화합니다. |
@@ -91,7 +91,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin add <source>` | — | 프로젝트의 플러그인 의존성을 선언하고 잠금 파일에 기록합니다. |
 | `ocr plugin lock` | — | 의존성을 해석하고 프로젝트 잠금 파일을 업데이트합니다. |
 | `ocr plugin sync --frozen` | — | 코드 실행 없이 잠금 파일에 지정된 정확한 플러그인을 설치합니다. |
-| `ocr plugin trust` | — | 잠긴 MCP 실행 파일에 로컬 실행 권한을 부여합니다(`--revoke`). |
+| `ocr plugin trust` | — | 잠긴 MCP 서버(원격 엔드포인트 포함)에 로컬 실행 권한을 부여합니다(`--revoke`). |
 | `ocr plugin project` | — | 프로젝트 플러그인 선언 및 잠금 파일 상태를 검사합니다. |
 | `ocr plugin preflight` | — | 프로젝트 플러그인 설치 및 실행 권한 상태를 사전 검증합니다(`--fingerprint`). |
 | `ocr mcp list` | — | 연결 없이 구성된 모든 MCP 서버와 승인 상태를 검사합니다. |
@@ -777,7 +777,7 @@ PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세�
 
 ## `ocr plugin` {#ocr-plugin}
 
-리뷰 규칙 및 MCP 도구를 제공하는 OCR 네이티브 플러그인을 관리합니다. 지원되는 소스와 아키텍처에 대한 자세한 내용은 [네이티브 OCR 플러그인 가이드](../../../../docs/native-plugins.ko-KR.md)를 참조하십시오.
+리뷰 규칙 및 MCP 도구를 제공하는 OCR 네이티브 플러그인을 관리합니다. 지원되는 소스와 아키텍처에 대한 자세한 내용은 [네이티브 OCR 플러그인 가이드](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.ko-KR.md)를 참조하십시오.
 
 ### 전역 플러그인 관리
 
@@ -793,7 +793,7 @@ PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세�
 - `ocr plugin add <source>`: `.opencodereview/plugins.json`에 의존성을 선언하고 잠금 파일을 업데이트합니다.
 - `ocr plugin lock`: 현재 플랫폼용으로 의존성을 해석하고 `.opencodereview/plugins.lock.json`을 업데이트합니다.
 - `ocr plugin sync --frozen`: 코드를 실행하지 않고 잠금 파일의 정확한 스냅샷을 설치합니다(`--offline` 지원).
-- `ocr plugin trust`: 현재 머신에서 잠긴 MCP 실행 파일에 로컬 실행 신뢰를 부여합니다(`--revoke`로 취소).
+- `ocr plugin trust`: 현재 머신에서 잠긴 MCP 서버(원격 엔드포인트 포함)에 로컬 실행 신뢰를 부여합니다(`--revoke`로 취소).
 - `ocr plugin project`: 프로젝트 선언 및 잠금 상태를 읽기 전용으로 검사합니다.
 - `ocr plugin preflight`: 리뷰 실행 전 플러그인 설치 및 실행 권한 상태를 사전 검증합니다(`--fingerprint`로 결정론적 지문 출력).
 

@@ -82,7 +82,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 删除一个已保存的评审会话。 |
 | `ocr plugin install <url\|path>` | — | 从 URL 或本地路径安装 OCR 原生插件。 |
-| `ocr plugin list` | `ocr plugins` | 列出已安装的插件及其启用状态。 |
+| `ocr plugin list` | `ocr plugins list` | 列出已安装的插件及其启用状态。 |
 | `ocr plugin show <id>` | — | 查看已安装插件的详细信息与声明能力。 |
 | `ocr plugin update <id>` | — | 从原始源更新插件（`--accept-permissions` 确认权限）。 |
 | `ocr plugin enable <id>` / `disable <id>` | — | 启用或禁用指定的已安装插件。 |
@@ -90,7 +90,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin add <source>` | — | 为当前项目声明并锁定插件依赖。 |
 | `ocr plugin lock` | — | 解析依赖并更新项目的平台锁文件。 |
 | `ocr plugin sync --frozen` | — | 严格按锁文件同步安装项目插件，不执行代码。 |
-| `ocr plugin trust` | — | 在本地为当前项目锁定的 MCP 可执行文件授权（`--revoke` 撤销）。 |
+| `ocr plugin trust` | — | 在本地为当前项目锁定的 MCP 服务（包括远程端点）授权（`--revoke` 撤销）。 |
 | `ocr plugin project` | — | 检查当前项目的插件声明与锁文件状态。 |
 | `ocr plugin preflight` | — | 预检验证项目锁文件依赖与执行授权（`--fingerprint` 输出指纹）。 |
 | `ocr mcp list` | — | 查看所有已配置的 MCP 服务器及其授权状态（不建立连接）。 |
@@ -754,7 +754,7 @@ ocr completion powershell > ocr.ps1
 
 ## `ocr plugin`
 
-管理为 OCR 注入评审规则和 MCP 上下文工具的原生插件。完整指南与架构请参阅[原生 OCR 插件](../../../../docs/native-plugins.zh-CN.md)。
+管理为 OCR 注入评审规则和 MCP 上下文工具的原生插件。完整指南与架构请参阅[原生 OCR 插件](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.zh-CN.md)。
 
 ### 全局插件管理
 
@@ -770,7 +770,7 @@ ocr completion powershell > ocr.ps1
 - `ocr plugin add <source>`：在 `.opencodereview/plugins.json` 声明依赖并更新锁文件。
 - `ocr plugin lock`：为当前系统平台解析依赖并更新 `.opencodereview/plugins.lock.json`。
 - `ocr plugin sync --frozen`：严格按锁文件同步安装构件快照，不执行任何代码（支持 `--offline`）。
-- `ocr plugin trust`：在当前机器上对锁定的 MCP 可执行文件授予本地执行信任（`--revoke` 撤销）。
+- `ocr plugin trust`：在当前机器上对锁定的 MCP 服务（包括远程端点）授予本地执行信任（`--revoke` 撤销）。
 - `ocr plugin project`：只读检查当前项目的依赖声明与锁文件状态。
 - `ocr plugin preflight`：执行前预检验证依赖安装与授权（`--fingerprint` 输出确定性指纹）。
 

@@ -84,7 +84,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session. |
 | `ocr plugin install <url\|path>` | — | Install an OCR native plugin from a URL or local path. |
-| `ocr plugin list` | `ocr plugins` | List installed plugins and their enabled status. |
+| `ocr plugin list` | `ocr plugins list` | List installed plugins and their enabled status. |
 | `ocr plugin show <id>` | — | Inspect an installed plugin and its capabilities. |
 | `ocr plugin update <id>` | — | Refresh a plugin from source (`--accept-permissions`). |
 | `ocr plugin enable <id>` / `disable <id>` | — | Enable or disable an installed plugin. |
@@ -92,7 +92,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin add <source>` | — | Declare and lock a plugin dependency for the project. |
 | `ocr plugin lock` | — | Resolve dependencies and update project lockfile. |
 | `ocr plugin sync --frozen` | — | Install exact locked project plugins without executing code. |
-| `ocr plugin trust` | — | Authorize locked project MCP executables locally (`--revoke`). |
+| `ocr plugin trust` | — | Authorize locked project MCP servers (including remote endpoints) locally (`--revoke`). |
 | `ocr plugin project` | — | Inspect project plugin declaration and lockfile status. |
 | `ocr plugin preflight` | — | Verify locked project plugins and authorization (`--fingerprint`). |
 | `ocr mcp list` | — | Inspect all configured MCP servers without connecting. |
@@ -798,7 +798,7 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 ## `ocr plugin`
 
-Manage OCR native plugins that contribute review rules and MCP tools. For a comprehensive guide covering supported sources and architecture, see [Native OCR plugins](../../../../docs/native-plugins.md).
+Manage OCR native plugins that contribute review rules and MCP tools. For a comprehensive guide covering supported sources and architecture, see [Native OCR plugins](https://github.com/alibaba/open-code-review/blob/main/docs/native-plugins.md).
 
 ### Global plugin management
 
@@ -814,7 +814,7 @@ Manage OCR native plugins that contribute review rules and MCP tools. For a comp
 - `ocr plugin add <source>`: Declare a plugin dependency in `.opencodereview/plugins.json` and lock it.
 - `ocr plugin lock`: Resolve declared dependencies for the host platform and update `.opencodereview/plugins.lock.json`.
 - `ocr plugin sync --frozen`: Deterministically install exact locked snapshots without executing code (`--offline` supported).
-- `ocr plugin trust`: Authorize locked MCP executables locally on this machine (`--revoke` to withdraw).
+- `ocr plugin trust`: Authorize locked MCP servers (including remote endpoints) locally on this machine (`--revoke` to withdraw).
 - `ocr plugin project`: Inspect project declaration and lockfile status without downloading.
 - `ocr plugin preflight`: Verify locked plugin installation and execution authorization (`--fingerprint` prints deterministic identity hash).
 

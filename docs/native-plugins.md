@@ -1,5 +1,7 @@
 # Native OCR plugins
 
+[English](native-plugins.md) | [简体中文](i18n/native-plugins.zh-CN.md) | [日本語](i18n/native-plugins.ja-JP.md) | [한국어](i18n/native-plugins.ko-KR.md) | [Русский](i18n/native-plugins.ru-RU.md)
+
 OCR can host plugins that contribute review rules and MCP tools through its
 installer, registry, and runtime. These packages use `ocr-plugin.json` and are
 separate from the integrations that install OCR into other coding agents.
@@ -11,7 +13,11 @@ see [Native plugin architecture](plugin-architecture.md).
 
 A frequent question when getting started with OCR plugins is: **What sources are supported, and does input support URLs?**
 
-**Yes, URL inputs are fully supported.** Both `ocr plugin install <source>` and `ocr plugin add <source>` accept remote URLs as well as local file paths.
+`ocr plugin install <source>` accepts public GitHub URLs, HTTPS archive URLs, and local directories or archives. `ocr plugin add <source>` uses those package formats with stricter project-source requirements:
+
+- Local sources must resolve inside the target repository. They are recorded as normalized `./` paths. An absolute path inside the repository is accepted; a directory or archive outside it is rejected.
+- Project HTTPS sources must be permanent URLs without query parameters, including an empty `?`. Global `install` accepts query parameters, but omits them from management output.
+- `--repo` selects the target project for `add`; use an absolute source path if your shell's current directory differs from that project.
 
 ### Supported Sources
 
@@ -30,7 +36,7 @@ OCR supports four primary package source types:
    - **HTTPS tar.gz archives**: `https://example.com/team-review.tar.gz`
    - **HTTPS ZIP archives**: `https://example.com/team-review.zip`
    - Release assets (e.g. from GitHub Releases or GitLab) containing pre-built binaries or packaged rules: `https://github.com/OWNER/REPO/releases/download/v1.0.0/plugin.tar.gz`
-   - *How it works*: OCR downloads the archive via HTTPS, inspects magic bytes (gzip `0x1f 0x8b` or ZIP `PK`) so a file extension is not strictly required, verifies the download against size limits, and extracts the content into an isolated sandbox for validation.
+   - *How it works*: OCR downloads the archive via HTTPS, inspects magic bytes (gzip `0x1f 0x8b` or ZIP `PK`) so a file extension is not strictly required, verifies the download against size limits, and extracts the content into an isolated preparation directory for validation.
 
 3. **Local Directories (Paths)**
    - Relative or absolute directory containing `ocr-plugin.json` at its root:
@@ -106,15 +112,15 @@ Downloads and validates a package from a URL or local file path, creates an isol
   ```
 
 #### 2. `ocr plugin list`
-Lists all globally registered plugins, their installed version, source location, and enabled/disabled state.
+Lists globally registered plugins with `ID`, `VERSION`, `STATE`, and `CAPABILITIES` columns. Use `ocr plugin show <id>` or `ocr plugin list --json` to inspect sources. `ocr plugins list` is equivalent; `ocr plugins` alone displays command help.
 
 - **Flags**:
   - `--json`: Output as a JSON array of plugin records.
 - **Example output**:
-  ```text
-  team-review      1.0.0  [enabled]   https://example.com/team-review.tar.gz
-  project-notes    1.2.0  [disabled]  ./examples/ocr-plugins/project-notes
-  ```
+```text
+ID                VERSION  STATE     CAPABILITIES
+review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
+```
 
 #### 3. `ocr plugin show <id>`
 Inspects an installed plugin's manifest, snapshot directory, contributed rules, MCP servers, and compatibility requirements.
@@ -146,6 +152,8 @@ Deactivates a plugin. The plugin remains installed in the store, but its rules a
 Unregisters and removes a plugin from the registry. Existing review sessions that are currently in progress continue running against their existing snapshots.
 
 ---
+
+<a id="project-plugins"></a>
 
 ### Project-Level Plugin Subcommands
 
@@ -182,15 +190,16 @@ Installs the exact package snapshots specified in `.opencodereview/plugins.lock.
 - **Safety**: Sync installs snapshots into a project-isolated store. It **never** executes package code or authorizes execution.
 
 #### 4. `ocr plugin trust`
-Grants explicit local execution authorization for the current project's locked MCP server executables on this machine.
+Authorizes the current project lock on this machine. All declared MCP servers require this decision, including remote endpoints. Data-only rule packages do not require execution authorization.
 
 - **Flags**:
   - `--revoke`: Revokes local execution trust for the current lock.
   - `--repo <path>`: Project root directory.
-- **Trust Boundary**: Trust is stored outside the repository in `~/.opencodereview/trust` and is cryptographically bound to the canonical repository path, exact lockfile SHA, and host platform. A repository cannot grant itself trust by committing configuration. Data-only rule plugins do not require execution authorization.
+
+Trust records are outside the repository at `~/.opencodereview/plugins/projects/<project-hash>/trust-<lock-id>`. They are bound to the canonical project path, lock contents, and host platform. Changing the lock requires a new authorization; `add`, `lock`, and `sync` do not grant trust. Use `ocr plugin trust --revoke` to withdraw it.
 
 #### 5. `ocr plugin project`
-Inspects the project declaration, lockfile contents, platform entries, and local authorization status without downloading packages or modifying trust.
+Validates the declaration against the lock and prints the lock contents, including platform entries. It does not report installation or authorization status. Use `ocr plugin preflight --json` to verify installed packages and authorization, or `ocr mcp list --json` to inspect MCP configuration and authorization states.
 
 - **Flags**:
   - `--repo <path>`: Project root directory.
@@ -275,6 +284,27 @@ ocr review
 
 ---
 
+### GitHub Actions
+
+Enable project plugins explicitly in the existing OCR Action step's `with` inputs:
+
+```yaml
+project_plugins: 'true'
+allow_plugin_exec: 'false'
+```
+
+Pin Action and CLI versions that include `plugin sync --frozen` and `preflight --fingerprint`; older published versions do not support this flow. The Action installs the committed lock before configuring model credentials. Set `allow_plugin_exec: 'true'` only after inspecting the locked MCP declarations, including remote endpoints. This authorizes that lock for the current run; the lock itself does not grant permission.
+
+Rules, the declaration, the lock, and repository-local packages must exist in the trusted policy checkout. The default policy is the PR base commit; comment-triggered runs resolve it through the PR API. `policy_sha` optionally selects another full trusted commit SHA. PR head files supply the diff, not plugin policy.
+
+The lock must contain the runner's OS/architecture. Run `ocr plugin lock` on each required platform and commit the resulting entries. Relocking an unchanged declaration preserves other platforms; changing the declaration invalidates them. Keep local package bytes stable across checkouts, for example with `eol=lf` in `.gitattributes`.
+
+Each enabled run uses a fresh private OCR home and verifies package contents and authorization. Native programs run with the runner's permissions and can access its environment, including model credentials. Do not restore local trust records from a shared cache. Changed policy, plugin identity, or execution permission invalidates incremental-review checkpoints.
+
+See the [complete Action configuration](../examples/github_actions/README.md#project-plugins-in-ci).
+
+---
+
 ## Authoring a Package
 
 Place `ocr-plugin.json` at the root of a directory or tar.gz archive. Existing ZIP packages remain supported.
@@ -315,15 +345,25 @@ Example manifest:
 }
 ```
 
+### Rule pack files
+
+The manifest's `rules` array contains relative `.json` paths. Each JSON file contains a `rules` array using OCR's rule format; a rule can reference a Markdown file within the package. Package rule files cannot set `include` or `exclude`. Plugin rules are additive to the existing rule configuration.
+
+```json
+{"rules":[{"path":"**/*","rule":"checks.md"}]}
+```
+
+Each rule JSON file is limited to 512 KiB. Paths must stay inside the package. Use the bundled [review-checklist package](../examples/ocr-plugins/review-checklist) as a complete example.
+
 ### Manifest Specifications
 
 - `schema_version`: Must be `1`. Unknown operational fields fail validation.
 - `id`: Unique lowercase identifier containing letters, digits, dots, underscores, or hyphens (up to 64 chars). Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`, etc.) are rejected.
 - `name` & `version`: Required non-empty strings. Use semantic versioning for releases.
-- `rules`: Array of relative paths to rule files (`rules.json` or markdown files referenced within rules).
+- `rules`: Array of relative `.json` rule-pack paths; individual rules can reference package-local Markdown files.
 - `mcp_servers`: Map of MCP server configurations.
   - `stdio`: Supports `command`, `args`, `env` (`KEY=VALUE`), and `tools` allowlist.
-  - `remote`: Supports `url` (HTTPS), `headers`, and `tools`.
+  - `remote`: Supports `url` (HTTP or HTTPS), `headers`, and `tools`. Prefer HTTPS when sending credentials; package-download URLs require HTTPS separately.
   - Placeholders supported in `command`, `args`, and `env`:
     - `${plugin_dir}`: Absolute path to the installed package snapshot directory.
     - `${os}`: Operating system name (`linux`, `darwin`, `windows`).
@@ -349,3 +389,11 @@ tar -czf team-review-1.0.0.tar.gz -C my-plugin .
 3. **Execution Change Gates**: Updating a global plugin that changes or adds executable MCP declarations requires explicit confirmation via `--accept-permissions`.
 4. **Project Trust Isolation**: Project execution authorization is stored outside the repository and cannot be committed. Repositories cannot execute arbitrary code on clean developer clones without explicit `ocr plugin trust`.
 5. **CI Base Policy Protection**: In GitHub Actions, OCR loads plugin declarations and locks from the trusted base commit of a pull request, never from an untrusted PR head branch.
+
+<a id="compatibility-and-host-requirements"></a>
+
+## Compatibility and host requirements
+
+`requires` is optional. `ocr_min_version` must be a full semantic version such as `1.2.0`; a `dev` build without a comparable version cannot satisfy it. `features` lists required capabilities: this version supports `rules` and `mcp`. Unsupported requirements fail before plugin execution. Omit requirements you do not need rather than copying a version constraint blindly.
+
+Descriptive metadata belongs under `metadata`; unknown operational fields and duplicate JSON keys are rejected. Retired marketplace metadata may be read for migration, but catalog installation is unavailable.

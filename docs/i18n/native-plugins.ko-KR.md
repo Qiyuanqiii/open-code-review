@@ -1,14 +1,20 @@
 # 네이티브 OCR 플러그인
 
+[English](../native-plugins.md) | [简体中文](native-plugins.zh-CN.md) | [日本語](native-plugins.ja-JP.md) | [한국어](native-plugins.ko-KR.md) | [Русский](native-plugins.ru-RU.md)
+
 OCR은 설치 프로그램, 레지스트리 및 런타임을 통해 리뷰 규칙(Review Rules)과 MCP 도구를 제공하는 플러그인을 호스팅할 수 있습니다. 이러한 패키지는 `ocr-plugin.json`을 매니페스트로 사용하며, OCR을 다른 코딩 에이전트에 통합하는 구성과는 독립적으로 동작합니다.
 
-모듈 경계, 수명 주기 다이어그램 및 권장 검토 순서는 [네이티브 플러그인 아키텍처 가이드](plugin-architecture.md)를 참조하십시오.
+모듈 경계, 수명 주기 다이어그램 및 권장 검토 순서는 [네이티브 플러그인 아키텍처 가이드](../plugin-architecture.md)를 참조하십시오.
 
 ## 지원되는 설치 소스 및 URL 입력
 
 OCR 플러그인을 처음 사용할 때 가장 자주 묻는 질문: **현재 어떤 소스가 지원되며, 입력으로 URL을 지원합니까?**
 
-**답변: URL 입력은 완전히 지원됩니다.** `ocr plugin install <source>` 및 `ocr plugin add <source>` 모두 원격 네트워크 URL과 로컬 파일 경로를 기본 지원합니다.
+`ocr plugin install <source>`는 공개 GitHub URL, HTTPS 아카이브 URL, 로컬 디렉터리와 아카이브를 지원합니다. `ocr plugin add <source>`는 같은 패키지 형식을 사용하지만 프로젝트 소스에는 추가 제한이 있습니다.
+
+- 로컬 소스는 대상 저장소 내부로 해석되어야 하며 정규화된 `./` 경로로 기록됩니다. 저장소 내부의 절대 경로는 허용되지만 외부 디렉터리나 아카이브는 거부됩니다.
+- 프로젝트 HTTPS 소스는 쿼리 매개변수가 없는 영구 URL이어야 하며 빈 `?`도 허용되지 않습니다. 전역 `install`은 쿼리를 허용하지만 관리 출력에는 표시하지 않습니다.
+- `add`의 `--repo`는 대상 프로젝트를 지정합니다. 셸의 현재 디렉터리가 다르면 소스에 절대 경로를 사용하세요.
 
 ### 지원되는 소스 유형
 
@@ -92,9 +98,14 @@ URL 또는 로컬 파일 경로에서 플러그인을 다운로드 및 검증하
 - **핵심 원칙**: 설치는 파일 복사 및 매니페스트 유효성 검사만 수행하며, **플러그인 코드를 실행하거나 설치 스크립트를 실행하지 않습니다**.
 
 #### 2. `ocr plugin list`
-설치된 모든 전역 플러그인, 버전, 소스 위치 및 활성화 상태(`[enabled]` / `[disabled]`)를 나열합니다.
+전역에 등록된 플러그인을 `ID`, `VERSION`, `STATE`, `CAPABILITIES` 열로 표시합니다. 소스는 `ocr plugin show <id>` 또는 `ocr plugin list --json`으로 확인합니다. `ocr plugins list`도 동일하게 동작하며, `ocr plugins`만 실행하면 도움말을 표시합니다.
 
 - **플래그**: `--json` (JSON 배열로 출력)
+
+```text
+ID                VERSION  STATE     CAPABILITIES
+review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
+```
 
 #### 3. `ocr plugin show <id>`
 설치된 플러그인의 매니페스트, 스냅샷 디렉터리, 기여 규칙, MCP 서버 및 호스트 요구 사항을 확인합니다.
@@ -126,6 +137,8 @@ URL 또는 로컬 파일 경로에서 플러그인을 다운로드 및 검증하
 
 ---
 
+<a id="project-plugins"></a>
+
 ### 프로젝트 수준 플러그인 관리 서브커맨드
 
 팀 환경이나 CI/CD 파이프라인에서는 모든 참가자가 완전히 동일한 플러그인 버전을 사용하고 실행 권한을 명시적으로 제어할 수 있어야 합니다. 프로젝트 플러그인은 리포지토리 루트의 `.opencodereview/plugins.json`(선언) 및 `.opencodereview/plugins.lock.json`(잠금)을 통해 관리됩니다.
@@ -152,15 +165,16 @@ URL 또는 로컬 파일 경로에서 플러그인을 다운로드 및 검증하
 - **안전성**: 아티팩트를 복사할 뿐 **플러그인 코드를 실행하거나 실행 권한을 임의로 부여하지 않습니다**.
 
 #### 4. `ocr plugin trust`
-현재 프로젝트 잠금 파일에 선언된 MCP 서버 실행 파일에 대해 이 시스템에서의 로컬 실행 권한을 명시적으로 부여합니다.
+현재 머신에서 현재 프로젝트 잠금을 승인합니다. 원격 엔드포인트를 포함한 모든 MCP 서버에 승인이 필요합니다. 규칙만 제공하는 패키지에는 실행 승인이 필요하지 않습니다.
 
 - **플래그**:
   - `--revoke`: 로컬 실행 권한을 취소합니다.
   - `--repo <path>`: 프로젝트 루트 경로.
-- **신뢰 경계 격리**: 신뢰 기록은 리포지토리 외부(`~/.opencodereview/trust`)에 저장되며 리포지토리 경로, 잠금 파일 해시 및 호스트 플랫폼에 암호학적으로 바인딩됩니다. 저장소 설정을 커밋하여 자동으로 권한을 승격할 수 없습니다.
+
+승인 기록은 저장소 밖의 `~/.opencodereview/plugins/projects/<project-hash>/trust-<lock-id>`에 저장되며 정규 프로젝트 경로, 잠금 내용, 호스트 플랫폼에 결합됩니다. 잠금이 바뀌면 다시 승인해야 합니다. `add`, `lock`, `sync`는 승인하지 않습니다. 철회하려면 `ocr plugin trust --revoke`를 사용하세요.
 
 #### 5. `ocr plugin project`
-의존성 선언, 잠금 파일 내용 및 로컬 인증 상태를 읽기 전용으로 검사합니다.
+선언과 잠금의 일치를 검증하고 플랫폼 항목을 포함한 잠금 내용을 표시합니다. 설치 및 승인 상태는 표시하지 않습니다. 설치와 승인은 `ocr plugin preflight --json`으로, MCP 구성과 승인 상태는 `ocr mcp list --json`으로 확인하세요.
 
 #### 6. `ocr plugin preflight`
 리뷰 실행 전 또는 CI 파이프라인에서 사전 검증을 수행합니다. 잠긴 모든 패키지가 설치되었는지, 체크섬이 일치하는지, 호스트 버전 요구 사항을 충족하는지, 실행 신뢰가 부여되었는지 확인합니다.
@@ -241,6 +255,27 @@ ocr review
 
 ---
 
+### GitHub Actions
+
+기존 OCR Action 단계의 `with` 입력에 다음을 추가하세요.
+
+```yaml
+project_plugins: 'true'
+allow_plugin_exec: 'false'
+```
+
+`plugin sync --frozen`과 `preflight --fingerprint`를 지원하는 Action 및 CLI 버전을 고정하세요. 이전 릴리스에서는 이 흐름을 지원하지 않습니다. Action은 모델 자격 증명을 설정하기 전에 잠긴 패키지를 설치합니다. 원격 엔드포인트를 포함한 MCP 선언을 확인한 뒤에만 `allow_plugin_exec: 'true'`를 설정하세요. 해당 실행에만 권한을 부여하며 잠금 파일 자체는 실행 권한이 아닙니다.
+
+규칙, 선언, 잠금 파일 및 저장소 내부 패키지는 신뢰된 정책 체크아웃에 있어야 합니다. 기본 정책은 PR의 base commit이며 댓글 트리거에서는 PR API로 조회합니다. `policy_sha`로 다른 신뢰된 커밋의 전체 SHA를 지정할 수 있습니다. PR head는 검토할 diff만 제공하며 플러그인 정책에는 사용되지 않습니다.
+
+잠금에는 runner의 OS/아키텍처가 포함되어야 합니다. 각 대상 플랫폼에서 `ocr plugin lock`을 실행한 뒤 결과를 커밋하세요. 선언이 같으면 다른 플랫폼 항목이 유지되지만 선언이 바뀌면 무효화됩니다. `.gitattributes`의 `eol=lf` 등으로 체크아웃 간 로컬 패키지 바이트를 동일하게 유지하세요.
+
+각 실행은 새 전용 OCR 홈에서 패키지 내용과 승인을 검증합니다. 네이티브 프로그램은 runner 권한으로 실행되며 모델 자격 증명을 포함한 환경에 접근할 수 있습니다. 공유 캐시에서 로컬 승인 기록을 복원하지 마세요. 정책, 플러그인 식별 정보 또는 실행 권한이 바뀌면 증분 리뷰 체크포인트가 무효화됩니다.
+
+자세한 설정은 [Action 예제](../../examples/github_actions/README.md#project-plugins-in-ci)를 참조하세요.
+
+---
+
 ## 플러그인 패키지 작성 사양
 
 디렉터리 또는 tar.gz 아카이브의 루트에 `ocr-plugin.json`을 배치합니다:
@@ -281,6 +316,24 @@ my-plugin/
 }
 ```
 
+### 규칙 팩 파일
+
+매니페스트의 `rules` 배열은 상대 `.json` 경로를 사용합니다. 각 JSON 파일에는 OCR 형식의 `rules` 배열이 있으며 개별 규칙에서 패키지 내부 Markdown을 참조할 수 있습니다. 규칙 팩에 `include` 또는 `exclude`를 설정할 수 없습니다. 플러그인 규칙은 기존 규칙 구성에 추가됩니다.
+
+```json
+{"rules":[{"path":"**/*","rule":"checks.md"}]}
+```
+
+규칙 JSON 파일은 각각 최대 512 KiB이며 참조 경로는 패키지 내부에 있어야 합니다. [review-checklist 예제](../../examples/ocr-plugins/review-checklist)를 참고하세요.
+
+### 매니페스트 필드
+
+- `schema_version`은 `1`이어야 합니다. 알 수 없는 동작 필드와 중복 JSON 키는 거부됩니다.
+- `id`는 소문자, 숫자, 점, 밑줄, 하이픈으로 최대 64자이며 처음과 끝은 영숫자여야 합니다. Windows 예약 장치 이름은 사용할 수 없습니다.
+- `name`과 `version`은 비어 있을 수 없습니다. 하나 이상의 규칙 팩이나 MCP 서버를 선언해야 합니다.
+- `rules`는 상대 `.json` 경로입니다. 형식은 위의 규칙 팩 설명을 참고하세요.
+- `mcp_servers`의 `stdio`(기본)는 `command`, `args`, `env`(`KEY=VALUE`), `tools` 허용 목록을 사용합니다. `remote`는 HTTP/HTTPS `url`, `headers`, `tools`를 사용합니다. 자격 증명을 전송할 때는 HTTPS를 사용하세요. 패키지 다운로드에는 별도로 HTTPS가 필수입니다.
+
 ### 플레이스홀더 지원
 
 `command`, `args`, `env`에서는 다음 플레이스홀더를 지원합니다:
@@ -308,3 +361,11 @@ tar -czf team-review-1.0.0.tar.gz -C my-plugin .
 3. **실행 권한 변경 안전 게이트**: 전역 플러그인 업데이트 시 MCP 실행 설정 변경이 감지되면 `--accept-permissions`를 통한 명시적 확인이 필요합니다.
 4. **프로젝트 신뢰 격리**: 실행 신뢰는 리포지토리 외부에 보관되며 새로 클론한 프로젝트가 로컬 권한을 무단으로 행사할 수 없습니다.
 5. **CI 베이스 커밋 보호**: GitHub Actions에서 플러그인 선언과 잠금은 항상 PR의 베이스 커밋(신뢰할 수 있는 부모 커밋)에서 로드되어 안전합니다.
+
+<a id="compatibility-and-host-requirements"></a>
+
+## 호환성과 호스트 요구 사항
+
+`requires`는 선택 사항입니다. `ocr_min_version`은 `1.2.0`처럼 완전한 시맨틱 버전이어야 합니다. 비교 가능한 버전이 없는 `dev` 빌드는 이 요구 사항을 충족할 수 없습니다. `features`는 필수 기능이며 이 버전은 `rules`와 `mcp`를 지원합니다. 지원되지 않는 요구 사항은 실행 전에 거부됩니다. 필요하지 않은 버전 제약은 생략하세요.
+
+설명용 메타데이터는 `metadata`에 넣습니다. 알 수 없는 동작 필드와 중복 JSON 키는 거부됩니다. 이전 마켓 메타데이터는 마이그레이션용으로 읽을 수 있지만 카탈로그 설치는 지원하지 않습니다.

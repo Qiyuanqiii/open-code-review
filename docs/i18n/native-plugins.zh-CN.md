@@ -1,14 +1,20 @@
 # 原生 OCR 插件
 
+[English](../native-plugins.md) | [简体中文](native-plugins.zh-CN.md) | [日本語](native-plugins.ja-JP.md) | [한국어](native-plugins.ko-KR.md) | [Русский](native-plugins.ru-RU.md)
+
 OCR 支持通过其安装器、注册中心和运行时加载原生插件，用以提供审查规则（Review Rules）和 MCP 上下文工具。这些插件包以 `ocr-plugin.json` 为清单，与将 OCR 集成到其他编码 Agent 中的集成方案相互独立。
 
-有关模块边界、生命周期图解和代码评审顺序，请参阅[原生插件架构设计](plugin-architecture.md)。
+有关模块边界、生命周期图解和代码评审顺序，请参阅[原生插件架构设计](../plugin-architecture.md)。
 
 ## 支持的安装来源与 URL 输入
 
 使用 OCR 插件时最常见的疑问是：**目前支持哪些来源？输入支持 URL 吗？**
 
-**答案是：完全支持 URL 输入。** 无论是 `ocr plugin install <source>` 还是 `ocr plugin add <source>`，均原生支持远程网络 URL 以及本地文件路径。
+`ocr plugin install <source>` 支持公开 GitHub URL、HTTPS 归档 URL、本地目录和归档。`ocr plugin add <source>` 支持相同的包格式，但项目来源有额外限制：
+
+- 本地来源必须解析到目标仓库内部，并以规范化的 `./` 路径记录。仓库内的绝对路径可以使用；仓库外的目录或归档会被拒绝。
+- 项目 HTTPS 来源必须是没有查询参数的永久 URL，连空的 `?` 也不允许。全局 `install` 接受查询参数，但不会在管理输出中显示它们。
+- `add` 的 `--repo` 指定目标项目。如果 Shell 当前目录与目标项目不同，建议使用绝对来源路径。
 
 ### 支持的来源类型
 
@@ -103,15 +109,15 @@ ocr plugin <command> [flags]
   ```
 
 #### 2. `ocr plugin list`
-列出所有已安装的全局插件、其版本号、来源路径以及启用状态（`[enabled]` 或 `[disabled]`）。
+列出全局安装的插件，文本列为 `ID`、`VERSION`、`STATE` 和 `CAPABILITIES`。来源可通过 `ocr plugin show <id>` 或 `ocr plugin list --json` 查看。`ocr plugins list` 是等价命令；单独运行 `ocr plugins` 只显示帮助。
 
 - **选项**：
   - `--json`：输出 JSON 数组格式的插件列表。
 - **输出示例**：
-  ```text
-  team-review      1.0.0  [enabled]   https://example.com/team-review.tar.gz
-  project-notes    1.2.0  [disabled]  ./examples/ocr-plugins/project-notes
-  ```
+```text
+ID                VERSION  STATE     CAPABILITIES
+review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
+```
 
 #### 3. `ocr plugin show <id>`
 查看已安装插件的详细信息，包括快照存放目录、规则清单、贡献的 MCP Server 以及宿主版本要求。
@@ -142,6 +148,8 @@ ocr plugin <command> [flags]
 注销并删除指定的插件。正在运行的审查任务仍可使用已有的快照执行完毕。
 
 ---
+
+<a id="project-plugins"></a>
 
 ### 项目级插件管理命令
 
@@ -176,15 +184,16 @@ ocr plugin <command> [flags]
 - **安全设计**：`sync` 仅下载和解压快照，**绝不会自动赋予可执行权限或运行插件代码**。
 
 #### 4. `ocr plugin trust`
-在当前机器上对当前项目锁文件中声明的 MCP Server 可执行构件授予本地执行授权。
+在当前机器上授权当前项目的锁定插件。所有声明的 MCP Server 都需要此授权，包括远程端点；纯规则插件无需执行授权。
 
 - **选项**：
   - `--revoke`：撤销当前项目锁文件的本地执行授权。
   - `--repo <path>`：项目根路径。
-- **信任边界隔离**：信任记录存储于用户目录外部（`~/.opencodereview/trust`），严格绑定到当前项目的规范绝对路径、锁文件内容哈希和当前系统平台。仓库无法通过提交配置自我提权。纯规则插件无需授权。
+
+信任记录位于仓库外的 `~/.opencodereview/plugins/projects/<project-hash>/trust-<lock-id>`，绑定项目规范路径、锁文件内容及宿主平台。锁文件改变后需要重新授权；`add`、`lock` 和 `sync` 不会授予信任。使用 `ocr plugin trust --revoke` 撤销授权。
 
 #### 5. `ocr plugin project`
-以只读方式检查项目依赖声明、锁文件详情及本地授权状态，不下载构件，不修改信任。
+校验声明与锁文件是否匹配，并输出锁文件内容，包括平台条目。此命令不报告安装或授权状态。使用 `ocr plugin preflight --json` 验证安装内容与授权，或使用 `ocr mcp list --json` 查看 MCP 配置及授权状态。
 
 - **选项**：`--repo <path>`，`--json`。
 
@@ -267,6 +276,27 @@ ocr review
 
 ---
 
+### GitHub Actions
+
+在现有 OCR Action 步骤的 `with` 输入中显式启用项目插件：
+
+```yaml
+project_plugins: 'true'
+allow_plugin_exec: 'false'
+```
+
+固定使用支持 `plugin sync --frozen` 和 `preflight --fingerprint` 的 Action 与 CLI 版本，旧发布版本无法运行此流程。Action 会在配置模型凭证之前安装已提交的锁定包。检查锁定的 MCP 声明（包括远程端点）后，才可将 `allow_plugin_exec` 设为 `'true'`；它为本次运行授权，锁文件本身不授予执行权限。
+
+规则、插件声明、锁文件和仓库内的插件包必须存在于可信策略检出中。默认策略来自 PR 的 base commit；评论触发时通过 PR API 获取该提交。可用 `policy_sha` 指定其他可信提交的完整 SHA。PR head 只提供待审查差异，不提供插件策略。
+
+锁文件必须包含 CI runner 的系统与架构。分别在所需平台运行 `ocr plugin lock` 并提交结果；声明未变时保留其他平台条目，声明变更会使这些条目失效。通过 `.gitattributes` 的 `eol=lf` 等设置，保持本地插件包跨检出的字节内容一致。
+
+每次启用插件的运行使用新的私有 OCR 用户目录，校验包内容与授权。原生程序拥有 runner 的权限，能访问其环境变量（包括模型凭证）。不要从共享缓存恢复本地信任记录。策略、插件身份或执行权限变化时，增量审查检查点失效。
+
+完整配置见 [Action 示例](../../examples/github_actions/README.md#project-plugins-in-ci)。
+
+---
+
 ## 插件包开发规范
 
 在目录或 tar.gz 归档的根目录下放置 `ocr-plugin.json`：
@@ -307,6 +337,24 @@ my-plugin/
 }
 ```
 
+### 规则包文件
+
+清单的 `rules` 数组只能填写相对 `.json` 路径。各 JSON 文件包含采用 OCR 规则格式的 `rules` 数组，其中单条规则可引用包内 Markdown 文件。规则包不得设置 `include` 或 `exclude`。插件规则追加到现有规则配置中。
+
+```json
+{"rules":[{"path":"**/*","rule":"checks.md"}]}
+```
+
+每个规则 JSON 文件上限为 512 KiB，引用路径必须位于包内。完整示例见 [review-checklist 插件](../../examples/ocr-plugins/review-checklist)。
+
+### 清单字段
+
+- `schema_version` 必须为 `1`；未知操作字段和重复 JSON 键会被拒绝。
+- `id` 最长 64 个字符，使用小写字母、数字、点、下划线或连字符，首尾必须是字母或数字；Windows 保留设备名不可使用。
+- `name` 和 `version` 必须非空。至少声明一个规则包或 MCP Server。
+- `rules` 只接受相对 `.json` 路径，具体格式见上方规则包说明。
+- `mcp_servers` 中的 `stdio`（默认）支持 `command`、`args`、`env`（`KEY=VALUE`）和 `tools` 白名单；`remote` 支持 HTTP 或 HTTPS 的 `url`、`headers` 和 `tools`。发送凭证时应使用 HTTPS；插件包下载另有强制 HTTPS 限制。
+
 ### 占位符支持
 
 在 `mcp_servers` 的 `command`、`args` 和 `env` 中支持以下内置占位符：
@@ -334,3 +382,13 @@ tar -czf team-review-1.0.0.tar.gz -C my-plugin .
 3. **权限变更拦截门禁**：全局插件更新若涉及 MCP 执行配置变动，必须显式附加 `--accept-permissions` 确认。
 4. **项目信任与仓库隔离**：执行信任存储于仓库外部，新克隆的项目不会自动获得执行权限，必须由开发者显式执行 `ocr plugin trust`。
 5. **CI 基线信任保护**：在 GitHub Actions 等 CI 环境中，插件策略始终从 PR 的基准分支（Base Commit）加载，绝不会被不可信的 PR Head 分支所篡改。
+
+<a id="compatibility-and-host-requirements"></a>
+
+## 兼容性与宿主要求
+
+`requires` 为可选项。`ocr_min_version` 必须是 `1.2.0` 这样的完整语义版本；无法比较版本的 `dev` 构建不能满足该约束。`features` 列出所需能力，此版本支持 `rules`、`mcp` 和 `stdio-v1`。未满足的要求会在执行前报错。无需限制版本时应省略约束，不要直接照抄示例版本。
+
+描述性元数据放在 `metadata` 下；未知的操作字段和重复 JSON 键会被拒绝。历史市场元数据可用于迁移，但不再支持目录索引安装。
+
+工作流声明和规则、MCP 可以组合。工作流的项目授权同样绑定锁文件；修改或新增工作流执行声明的全局更新需要 `--accept-permissions`。仅安装或启用不会选用工作流，实际运行需显式指定 `--review-plugin ID`。详见[审查工作流插件](review-workflow-plugins.zh-CN.md)。

@@ -84,7 +84,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session. |
 | `ocr plugin install <url\|path>` | — | Install an OCR native plugin from a URL or local path. |
-| `ocr plugin list` | `ocr plugins` | List installed plugins and their enabled status. |
+| `ocr plugin list` | `ocr plugins list` | List installed plugins and their enabled status. |
 | `ocr plugin show <id>` | — | Inspect an installed plugin and its capabilities. |
 | `ocr plugin update <id>` | — | Refresh a plugin from source (`--accept-permissions`). |
 | `ocr plugin enable <id>` / `disable <id>` | — | Enable or disable an installed plugin. |
@@ -92,7 +92,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin add <source>` | — | Declare and lock a plugin dependency for the project. |
 | `ocr plugin lock` | — | Resolve dependencies and update project lockfile. |
 | `ocr plugin sync --frozen` | — | Install exact locked project plugins without executing code. |
-| `ocr plugin trust` | — | Authorize locked project MCP executables locally (`--revoke`). |
+| `ocr plugin trust` | — | Authorize locked project MCP servers (including remote endpoints) locally (`--revoke`). |
 | `ocr plugin project` | — | Inspect project plugin declaration and lockfile status. |
 | `ocr plugin preflight` | — | Verify locked project plugins and authorization (`--fingerprint`). |
 | `ocr mcp list` | — | Inspect all configured MCP servers without connecting. |
@@ -126,10 +126,10 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. When combined with `--review-plugin`, inspects the workflow manifest without launching the executable. |
-| `--review-plugin <id>` | — | — | Select and execute a custom review workflow from an installed and authorized native plugin. See [Review workflow plugins](../../../../docs/review-workflow-plugins.md). |
+| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). When combined with `--review-plugin`, inspects the workflow manifest without launching the executable. |
+| `--review-plugin <id>` | — | — | Select and execute a custom review workflow from an installed and authorized native plugin. See [Review workflow plugins](https://github.com/alibaba/open-code-review/blob/main/docs/review-workflow-plugins.md). |
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
-| `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
+| `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. Unavailable with `--review-plugin`. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
 | `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
@@ -799,7 +799,7 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 ## `ocr plugin`
 
-Manage OCR native plugins that contribute review rules and MCP tools. For a comprehensive guide covering supported sources and architecture, see [Native OCR plugins](../../../../docs/native-plugins.md).
+Manage OCR native plugins that contribute review rules and MCP tools. For a comprehensive guide covering supported sources and architecture, see [Native OCR plugins](https://github.com/alibaba/open-code-review/blob/main/docs/native-plugins.md).
 
 ### Global plugin management
 
@@ -815,7 +815,7 @@ Manage OCR native plugins that contribute review rules and MCP tools. For a comp
 - `ocr plugin add <source>`: Declare a plugin dependency in `.opencodereview/plugins.json` and lock it.
 - `ocr plugin lock`: Resolve declared dependencies for the host platform and update `.opencodereview/plugins.lock.json`.
 - `ocr plugin sync --frozen`: Deterministically install exact locked snapshots without executing code (`--offline` supported).
-- `ocr plugin trust`: Authorize locked MCP executables locally on this machine (`--revoke` to withdraw).
+- `ocr plugin trust`: Authorize locked MCP servers (including remote endpoints) locally on this machine (`--revoke` to withdraw).
 - `ocr plugin project`: Inspect project declaration and lockfile status without downloading.
 - `ocr plugin preflight`: Verify locked plugin installation and execution authorization (`--fingerprint` prints deterministic identity hash).
 

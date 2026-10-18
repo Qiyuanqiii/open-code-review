@@ -1,5 +1,7 @@
 # Review workflow plugins
 
+[English](review-workflow-plugins.md) | [简体中文](i18n/review-workflow-plugins.zh-CN.md) | [日本語](i18n/review-workflow-plugins.ja-JP.md) | [한국어](i18n/review-workflow-plugins.ko-KR.md) | [Русский](i18n/review-workflow-plugins.ru-RU.md)
+
 For the relationship between package installation, authorization, and runtime
 adapters, see [Native plugin architecture](plugin-architecture.md).
 
@@ -154,8 +156,9 @@ Accepted submissions require explicit `accepted` and `complete` booleans:
 {"version":1,"accepted":true,"complete":true,"report":{"checked":true},"comments":[]}
 ```
 
-The plugin owns the report structure and its completion criteria. `complete:false`
-stops the group as incomplete; `feedback` explains the remaining work. Accepted
+The plugin owns the report structure and its completion criteria. With
+`accepted:true`, `complete:false` stops the group as incomplete; `feedback` is
+saved as the reason, rather than sent back to the model for another attempt. Accepted
 comments still use OCR's normal publication and filtering, including on incomplete
 work. Comments must reference a selected path, contain content, and use the native
 severity/category values supplied at `begin`. Other comment fields are

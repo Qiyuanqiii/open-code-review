@@ -1,6 +1,8 @@
 # レビューワークフロープラグイン（Review Workflow Plugins）
 
-パッケージのインストール、実行権限、およびランタイムアダプターの関係については、[ネイティブプラグインのアーキテクチャ設計](plugin-architecture.md) を参照してください。
+[English](../review-workflow-plugins.md) | [简体中文](review-workflow-plugins.zh-CN.md) | [日本語](review-workflow-plugins.ja-JP.md) | [한국어](review-workflow-plugins.ko-KR.md) | [Русский](review-workflow-plugins.ru-RU.md)
+
+パッケージのインストール、実行権限、およびランタイムアダプターの関係については、[ネイティブプラグインのアーキテクチャ設計](../plugin-architecture.md) を参照してください。
 
 コードレビューにおいて特定の実行順序や完了基準が必要な場合（例えば、変更点を検査した後に、候補となる指摘を別の段階で再検証し、最終的な完了レポートを作成する場合など）に、**レビューワークフロープラグイン** を使用します。パッケージは各段階を宣言し、モデルからの提出物を検証します。OCR ホストは diff、ルール、ツール、およびトークン予算を提供します。
 
@@ -25,7 +27,7 @@ ocr review --review-plugin single-pass --format json --output review.json
 
 ## プロジェクトでの選択と実行権限
 
-リポジトリで管理されるワークフローの場合は、`ocr plugin add <source>` で宣言し、`.opencodereview/plugins.json` と `plugins.lock.json` をコミットした上で、`ocr plugin sync --frozen` で同期インストールします。`--review-plugin <id>` で選択する前に、ロックされたパッケージを確認して `ocr plugin trust` でローカル実行権限を付与してください。`ocr plugin preflight --json` を実行すると、ワークフローを開始したりモデルを呼び出したりすることなく、インストール内容、互換性、ローカル認証状態を検証できます。プロジェクトプラグインが宣言されている場合、ロックされたセットからのみ選択可能です。詳細は [ネイティブ OCR プラグインガイド](native-plugins.ja-JP.md#プロジェクト単位のプラグイン管理コマンド) を参照してください。
+リポジトリで管理されるワークフローの場合は、`ocr plugin add <source>` で宣言し、`.opencodereview/plugins.json` と `plugins.lock.json` をコミットした上で、`ocr plugin sync --frozen` で同期インストールします。`--review-plugin <id>` で選択する前に、ロックされたパッケージを確認して `ocr plugin trust` でローカル実行権限を付与してください。`ocr plugin preflight --json` を実行すると、ワークフローを開始したりモデルを呼び出したりすることなく、インストール内容、互換性、ローカル認証状態を検証できます。プロジェクトプラグインが宣言されている場合、ロックされたセットからのみ選択可能です。詳細は [ネイティブ OCR プラグインガイド](native-plugins.ja-JP.md#project-plugins) を参照してください。
 
 レビューワークフロープラグインは、ステージ計画、プロンプト指示、完了スキーマ、検証、およびステージ間状態を保持します。OCR は diff、ルール、モデル/ツール実行、セッション、トークン計算、コメント処理、出力を担当します。
 
@@ -59,9 +61,15 @@ ocr review --review-plugin PACKAGE_ID --format json --output review.json
 
 プラグインはレビューワークフロー、ルール、MCP を自由に組み合わせられます。ステージ ID は一意の識別子であり、1〜64 個の順序付きステージを宣言できます。
 
+インストール済みスナップショットが、その実行のルールとワークフローの両方を提供します。パッケージを更新しても実行中のスナップショットは変わりません。旧実験形式の `engine`/`prompt` のみを扱うホストは更新が必要です。ホストは旧形式のインストール情報を読み、一覧表示、削除、更新を行えます。管理出力では更新が必要と表示され（JSON の `review.update_required`）、実行案内は表示されません。旧形式を実行しようとすると更新を求めます。
+
+## 互換性
+
+ワークフローは任意の `requires.ocr_min_version` と `requires.features` を宣言できます。例は `["rules", "mcp", "stdio-v1"]` です。[ホスト要件](native-plugins.ja-JP.md#compatibility-and-host-requirements) を参照してください。未対応の要件はプロセス起動前に拒否されます。ワークフロー API は実験段階です。既存の `stdio-v1` は同じ `begin`/`submit` を使い、必須ハンドシェイクや JSON-RPC への移行はありません。未知の応答エンベロープフィールドはエラーです。`report` と完了引数の構造はプラグインが定義します。互換性のないエンベロープ変更には新しいプロトコルまたはメッセージのバージョンが必要です。
+
 ## stdio-v1 プロトコル仕様
 
-OCR はファイルグループごとに 1 つのプロセスを起動し、リポジトリルートを作業ディレクトリとします。プロセスはそのグループの全ステージを通じて状態を保持します。リクエストとレスポンスは 1 行の UTF-8 JSON オブジェクト（最大 4 MiB）です。各レスポンスは `"version": 1` を含み、診断情報は stderr に出力します。
+OCR はファイルグループごとに一つのプロセスを起動し、レビュー対象のリポジトリを作業ディレクトリにします。プロセスはそのグループのステージ間で状態を保持します。要求と応答は一行の UTF-8 JSON オブジェクトで、上限は 4 MiB です。一つの要求に対して応答は必ず一つだけ返し、診断は stderr に出力します。各応答に `"version": 1` が必要です。空でない `error` 文字列は要求を実行できないことを示し、グループを停止します。
 
 ### ステージ開始（`begin`）
 
@@ -77,6 +85,10 @@ OCR はファイルグループごとに 1 つのプロセスを起動し、リ�
 {"version":1,"task":{"instructions":"Inspect the selected code.","input":"Check the public return contract.","completion":{"description":"Submit the result.","parameters":{"type":"object","properties":{"checked":{"type":"boolean"}},"required":["checked"]}}},"report":{"pending":["inspection"]}}
 ```
 
+OCR は instructions と input を通常の diff/ルールのコンテキストに追加し、コンテキスト圧縮後も保持します。`instructions` と `input` は別々のモデルメッセージになるため、どちらも空白以外の文字列が必要です。モデルは OCR のコンテキストツールを引き続き使えます。`task_done` の定義は `completion` から取得します。直接の `code_comment` は渡さず、公開する指摘をプラグインの検証に通します。
+
+プロトコルの要求にモデル認証情報は含めません。ただし実行ファイルは通常のプロセス環境を継承し、そこにはプロバイダーのトークンやプロキシ設定が含まれる場合があります。ユーザー権限で読める設定ファイルにもアクセスできます。このリリースには実行時サンドボックスがないため、信頼する作者のワークフローだけをインストールして選択してください。
+
 ### モデル提出（`submit`）
 
 モデルが `task_done` を呼び出すと、OCR は引数をそのまま転送します：
@@ -91,10 +103,16 @@ OCR はファイルグループごとに 1 つのプロセスを起動し、リ�
 {"version":1,"accepted":true,"complete":true,"report":{"checked":true},"comments":[]}
 ```
 
-モデルの提出に不備があり修正可能な場合は、`accepted:false`、空でない `feedback`、最新の `report` を返し、comments は空にします。OCR はリクエスト許容量内でモデルにフィードバックを返します。
+レポートの構造と完了条件はプラグインが定義します。`accepted:true` と `complete:false` を返すとグループは未完了として停止します。`feedback` は未完了の理由として保存され、モデルの修正を再開しません。受理済みのコメントは未完了の場合も通常の公開・フィルタリングに進みます。コメントは選択されたパスを参照し、空でない内容と `begin` で渡された severity/category の値を使う必要があります。その他のフィールドは `existing_code`、`suggestion_code`、`start_line`、`end_line`、`thinking` です。
+
+モデルが修正できる提出物には `accepted:false`、空でない `feedback`、最新の `report` を返し、コメントは含めません。OCR は既存の要求上限内でフィードバックをモデルに返します。有効な途中結果はプラグイン自身が保持してください。クラッシュ、不正な応答、必須ブール値の欠落は実行を停止し、モデルの誤りとして再試行しません。
 
 ## 完了状態と出力
 
-宣言されたすべてのステージが完了する必要があります。ユーザーがトークン予算を指定した場合、未使用分は後続のステージで共有されます。
+前のステージで問題が見つからなくても、宣言されたすべてのステージを完了する必要があります。`--effort` はプラグインの計画を短縮しません。既存のコンテキスト、ツールラウンド、タイムアウト設定が適用され、グループのタイムアウトは宣言されたステージ数を対象とします。ユーザーがトークン予算を指定すると、未使用の枠を残りのステージで共有します。追加の総トークン制限は設けません。
 
-JSON 出力には `review_plugin` 配列が含まれ、各ステージの完了状態とレポートが記録されます。実行後は `ocr session show SESSION_ID --json` でセッション内のレポートを検査できます。未完了のステージがある場合はカバレッジに記録され、非ゼロの終了ステータスとなります。
+JSON の `review_plugin` は `plugin`、`group`、`stage`、`complete`、任意の `token_limit`、プラグイン定義の `report`、実行時の `error` を持ちます。後でモデルやプロセスが失敗しても、最後のレポートを保持します。完了または中断した各ステージは、テキスト出力時もセッションに `plugin_review` を保存します。`ocr session show SESSION_ID --json` の `review_plugin` 配列で確認できます。応答が `report` を省略すると前のレポートを保持します。必須作業が未完了ならカバレッジに記録され、CLI は非ゼロで終了します。通常レビューの終了動作は変わりません。
+
+ワークフローのレビューは新しい呼び出しが必要です。`--resume` は任意のプロセス状態をまだ復元できません。JSON とセッションの記録は引き続き確認できます。
+
+Python の実装は [single-pass の例](../../examples/ocr-plugins/single-pass) を参照してください。[Behavior Review](https://github.com/Qiyuanqiii/ocr-behavior-review) は三つのステージと証拠の保持を実装した独立した実行ファイルです。

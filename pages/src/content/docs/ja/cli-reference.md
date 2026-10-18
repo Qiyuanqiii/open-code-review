@@ -82,7 +82,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session export [id]` | — | 1つのセッションを自己完結型の HTML ファイルとしてエクスポートします。 |
 | `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | 保存済みのレビューセッションを1つ削除します。 |
 | `ocr plugin install <url\|path>` | — | URL またはローカルパスから OCR ネイティブプラグインをインストールします。 |
-| `ocr plugin list` | `ocr plugins` | インストールされたプラグインと有効化状態を一覧表示します。 |
+| `ocr plugin list` | `ocr plugins list` | インストールされたプラグインと有効化状態を一覧表示します。 |
 | `ocr plugin show <id>` | — | インストールされたプラグインの詳細情報と機能を検査します。 |
 | `ocr plugin update <id>` | — | 元のソースからプラグインを更新します（`--accept-permissions`）。 |
 | `ocr plugin enable <id>` / `disable <id>` | — | プラグインを有効化または無効化します。 |
@@ -90,7 +90,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin add <source>` | — | プロジェクトのプラグイン依存関係を宣言してロックします。 |
 | `ocr plugin lock` | — | 依存関係を解決し、プロジェクトのロックファイルを更新します。 |
 | `ocr plugin sync --frozen` | — | コードを実行せずにロックファイルから正確なプラグインをインストールします。 |
-| `ocr plugin trust` | — | ロックされた MCP 実行ファイルにローカル実行権限を付与します（`--revoke`）。 |
+| `ocr plugin trust` | — | ロックされた MCP サーバー（リモート接続を含む）にローカル実行権限を付与します（`--revoke`）。 |
 | `ocr plugin project` | — | プロジェクトのプラグイン宣言とロック状態を検査します。 |
 | `ocr plugin preflight` | — | プロジェクトのプラグイン検証と実行承認状態を確認します（`--fingerprint`）。 |
 | `ocr mcp list` | — | 接続せずに設定済みの全 MCP サーバーとその承認状態を検査します。 |
@@ -120,10 +120,10 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
-| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--review-plugin` と併用した場合はプロセスを起動せずにワークフローマニフェストのみを検査します。 |
-| `--review-plugin <id>` | — | — | インストールおよび承認済みのネイティブプラグインからレビューワークフローを選択して実行します。[レビューワークフロープラグイン](../../../../docs/review-workflow-plugins.ja-JP.md) を参照。 |
+| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 `--review-plugin` と組み合わせると、実行ファイルを起動せずにワークフローのマニフェストを検査します。 |
+| `--review-plugin <id>` | — | — | インストールおよび承認済みのネイティブプラグインからレビューワークフローを選択して実行します。[レビューワークフロープラグイン](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/review-workflow-plugins.ja-JP.md) を参照。 |
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
-| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
+| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 `--review-plugin` とは併用できません。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
@@ -748,7 +748,7 @@ ocr completion powershell > ocr.ps1
 
 ## `ocr plugin`
 
-レビュー規則や MCP ツールを提供する OCR ネイティブプラグインを管理します。サポートされているソースやアーキテクチャの詳細は、[ネイティブ OCR プラグイン](../../../../docs/native-plugins.ja-JP.md) を参照してください。
+レビュー規則や MCP ツールを提供する OCR ネイティブプラグインを管理します。サポートされているソースやアーキテクチャの詳細は、[ネイティブ OCR プラグイン](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/native-plugins.ja-JP.md) を参照してください。
 
 ### グローバルプラグイン管理
 
@@ -764,7 +764,7 @@ ocr completion powershell > ocr.ps1
 - `ocr plugin add <source>`: `.opencodereview/plugins.json` に依存関係を宣言し、ロックファイルを更新します。
 - `ocr plugin lock`: 現在のプラットフォーム向けに依存関係を解決し、`.opencodereview/plugins.lock.json` を更新します。
 - `ocr plugin sync --frozen`: コードを実行することなく、ロックファイルで指定された厳密なスナップショットをインストールします（`--offline` 対応）。
-- `ocr plugin trust`: 現在のマシン上でロックされた MCP 実行ファイルにローカル実行権限を付与します（`--revoke` で取り消し）。
+- `ocr plugin trust`: 現在のマシン上でロックされた MCP サーバー（リモート接続を含む）にローカル実行権限を付与します（`--revoke` で取り消し）。
 - `ocr plugin project`: プロジェクトの依存関係宣言とロック状態を読み取り専用で検査します。
 - `ocr plugin preflight`: レビュー実行前に依存関係のインストールと実行承認状態を検証します（`--fingerprint` で決定論的指紋を出力）。
 

@@ -138,6 +138,39 @@ func TestReviewTransport(t *testing.T) {
 	}
 }
 
+func TestReviewBeginRequiresSeparateMessages(t *testing.T) {
+	for _, tc := range []struct {
+		mode  string
+		valid bool
+	}{
+		{"begin-valid", true},
+		{"begin-empty-instructions", false},
+		{"begin-blank-instructions", false},
+		{"begin-empty-input", false},
+		{"begin-blank-input", false},
+		{"begin-invalid-schema", false},
+		{"begin-comments", false},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			p := processPlugin(t, tc.mode)
+			c, err := StartReview(ctx, p, p.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			res, err := c.Call(ReviewRequest{Method: "begin", Stage: "inspect"})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, response=%+v error=%v", tc.valid, res, err)
+			}
+			if string(res.Report) != `{"pending":["inspection"]}` {
+				t.Fatalf("begin validation lost the plugin report: %s", res.Report)
+			}
+		})
+	}
+}
+
 func TestReviewCancellationReleasesProcess(t *testing.T) {
 	p := processPlugin(t, "hang")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,6 +203,27 @@ func TestReviewProcess(t *testing.T) {
 	mode := os.Args[i+1]
 	lines := bufio.NewScanner(os.Stdin)
 	for lines.Scan() {
+		if strings.HasPrefix(mode, "begin-") {
+			task := &ReviewTask{Instructions: "Inspect the selected code.", Input: "Check the return contract.", Completion: ReviewCompletion{Parameters: map[string]any{"type": "object"}}}
+			response := ReviewResponse{Version: 1, Task: task, Report: json.RawMessage(`{"pending":["inspection"]}`)}
+			switch mode {
+			case "begin-empty-instructions":
+				task.Instructions = ""
+			case "begin-blank-instructions":
+				task.Instructions = " \t\n"
+			case "begin-empty-input":
+				task.Input = ""
+			case "begin-blank-input":
+				task.Input = " \t\n"
+			case "begin-invalid-schema":
+				task.Completion.Parameters["type"] = "array"
+			case "begin-comments":
+				fmt.Println(`{"version":1,"task":{"instructions":"Inspect code.","input":"Check errors.","completion":{"parameters":{"type":"object"}}},"report":{"pending":["inspection"]},"comments":[{"path":"x"}]}`)
+				continue
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(response)
+			continue
+		}
 		switch mode {
 		case "hang":
 			time.Sleep(time.Hour)

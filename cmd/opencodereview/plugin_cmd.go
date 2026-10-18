@@ -20,8 +20,9 @@ import (
 )
 
 type pluginReviewInfo struct {
-	Protocol string   `json:"protocol"`
-	Stages   []string `json:"stages"`
+	Protocol       string   `json:"protocol"`
+	Stages         []string `json:"stages"`
+	UpdateRequired bool     `json:"update_required,omitempty"`
 }
 
 // pluginInfo omits execution arguments, environment variables and headers,
@@ -59,7 +60,7 @@ func pluginManagementInfo(installed plugin.Installed) pluginInfo {
 	}
 	var review *pluginReviewInfo
 	if m.Review != nil {
-		review = &pluginReviewInfo{Protocol: m.Review.Protocol, Stages: append([]string{}, m.Review.Stages...)}
+		review = &pluginReviewInfo{Protocol: m.Review.Protocol, Stages: append([]string{}, m.Review.Stages...), UpdateRequired: m.Review.RetiredEngine != ""}
 	}
 	return pluginInfo{
 		ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
@@ -91,7 +92,11 @@ func printPluginInstallPreview(out io.Writer, preview pluginInstallPreview, json
 				return err
 			}
 			if p.Review != nil {
-				if _, err := fmt.Fprintf(out, "Review stages: %s\n", pluginText(strings.Join(p.Review.Stages, ", "))); err != nil {
+				message := "Review workflow: update required (retired engine/prompt format).\n"
+				if !p.Review.UpdateRequired {
+					message = fmt.Sprintf("Review stages: %s\n", pluginText(strings.Join(p.Review.Stages, ", ")))
+				}
+				if _, err := fmt.Fprint(out, message); err != nil {
 					return err
 				}
 			}
@@ -163,7 +168,11 @@ func newPluginCmd() *cobra.Command {
 			pluginText(info.ID), pluginText(info.Version), state, pluginText(info.Description), pluginText(info.Source),
 			pluginText(info.Directory), pluginText(strings.Join(info.Rules, ", ")), pluginText(strings.Join(info.MCPServers, ", ")))
 		if err == nil && info.Review != nil {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
+			if info.Review.UpdateRequired {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Review workflow: update required (retired engine/prompt format).\nUpdate with: ocr plugin update %s\n", pluginText(info.ID))
+			} else {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Run once: ocr review --review-plugin %s\n", pluginText(info.ID))
+			}
 		}
 		if err == nil {
 			err = printMCPExecution(cmd.OutOrStdout(), info.MCPExecution)
@@ -208,7 +217,11 @@ func newPluginCmd() *cobra.Command {
 				}
 				capabilities := fmt.Sprintf("%d rule packs, %d MCP servers", len(info.Rules), len(info.MCPServers))
 				if info.Review != nil {
-					capabilities += ", review policy (explicit selection)"
+					if info.Review.UpdateRequired {
+						capabilities += ", review workflow (update required)"
+					} else {
+						capabilities += ", review policy (explicit selection)"
+					}
 				}
 				fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", pluginText(info.ID), pluginText(info.Version), state, capabilities)
 			}

@@ -703,9 +703,10 @@ dispatchLoop:
 				firstPath := group.Diffs[0].NewPath
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + group est %s = projected %s > budget %s) — skipping group %q and remaining\n",
 					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
-				a.recordWarning("token_budget_reached", firstPath,
-					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
-				a.budgetExceeded.Store(true)
+				if a.budgetExceeded.CompareAndSwap(false, true) {
+					a.recordWarning("token_budget_reached", firstPath,
+						fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
+				}
 				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
 				// coverage truncation, not a run-level failure. SetRunFailure would
 				// force terminal_state=failed regardless of coverage, and claim the

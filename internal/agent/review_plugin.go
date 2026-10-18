@@ -53,6 +53,10 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 	stages := p.Manifest.Review.Stages
 	severities, categories := tool.CodeCommentClassifications()
 	for i, stage := range stages {
+		baseline := make(map[string]int, len(g.Diffs))
+		for _, d := range g.Diffs {
+			baseline[d.NewPath] = len(a.args.CommentCollector.CommentsForPath(d.NewPath))
+		}
 		report := PluginReviewReport{Plugin: p.Manifest.ID, Group: groupKey, Stage: stage}
 		if budget := a.args.MaxTokensBudget; budget > 0 {
 			used := a.runner.TotalTokensUsed()
@@ -66,7 +70,10 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 		if beginErr != nil {
 			stageErr = fmt.Errorf("%w: %v", errReviewPlugin, beginErr)
 		} else if budget := a.args.MaxTokensBudget; budget > 0 && a.runner.TotalTokensUsed() >= budget {
-			a.budgetExceeded.Store(true)
+			if a.budgetExceeded.CompareAndSwap(false, true) {
+				a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+					fmt.Sprintf("required %s stage not started: used %d tokens reaches budget %d", stage, a.runner.TotalTokensUsed(), budget))
+			}
 			stageStop = requiredStop(session.FailureBudget, "required "+stage+" stage not started: aggregate token budget exhausted")
 		} else {
 			messages := a.buildMainTaskMessages(a.resolveGroupSystemRule(g.Diffs), a.buildChangeFilesExceptGroup(g.Diffs), buildConcatenatedDiffs(g.Diffs), "", "")
@@ -108,7 +115,10 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 					stageErr = ctx.Err()
 				}
 				if stop == llmloop.StopTokenBudget || (a.args.MaxTokensBudget > 0 && a.runner.TotalTokensUsed() > a.args.MaxTokensBudget) {
-					a.budgetExceeded.Store(true)
+					if a.budgetExceeded.CompareAndSwap(false, true) {
+						a.recordWarning("token_budget_reached", g.Diffs[0].NewPath,
+							fmt.Sprintf("required %s stage reached aggregate token budget: used %d tokens, budget %d", stage, a.runner.TotalTokensUsed(), a.args.MaxTokensBudget))
+					}
 				}
 				if !completed && stageErr == nil {
 					class, reason := classifyMainLoopStop(stop)
@@ -128,7 +138,7 @@ func (a *Agent) executePluginReview(ctx context.Context, g FileGroup) (bool, *su
 		// Accepted findings retain the normal filter even when required work is
 		// incomplete. A filter result cannot close the plugin's remaining work.
 		if accepted != nil && len(accepted.Comments) > 0 && stageErr == nil {
-			a.executeGroupReviewFilter(ctx, g, nil)
+			a.executeGroupReviewFilter(ctx, g, baseline)
 		}
 		if stageErr != nil {
 			report.Error = "required plugin stage failed; see session error"

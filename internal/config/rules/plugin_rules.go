@@ -60,11 +60,7 @@ func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver
 		}
 	}
 	if !projectScoped {
-		load := store.Enabled
-		if reviewID != "" {
-			load = store.List
-		}
-		all, err = load()
+		all, err = store.EnabledWith(reviewID)
 		if err != nil {
 			return nil, fmt.Errorf("load plugins: %w", err)
 		}
@@ -94,6 +90,9 @@ func loadPluginRules(base *composedResolver, repoDir, reviewID string) (Resolver
 		}
 	}
 	if reviewID != "" && selected == nil {
+		if projectScoped {
+			return nil, fmt.Errorf("review plugin %q is not present in the project plugin lock", reviewID)
+		}
 		return nil, fmt.Errorf("review plugin %q is not installed", reviewID)
 	}
 	if !projectScoped {

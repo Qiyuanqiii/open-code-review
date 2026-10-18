@@ -3,6 +3,39 @@
 For the relationship between package installation, authorization, and runtime
 adapters, see [Native plugin architecture](plugin-architecture.md).
 
+Use a workflow when a review needs a specific sequence and completion criteria:
+for example, inspect a change, then verify each candidate finding before accepting
+the result. The package declares those stages and validates the model's submissions;
+OCR supplies the diff, rules, tools and execution budgets.
+
+## Try the single-pass example
+
+From this checkout, with Python 3 available as `python`, install the example and
+preview a review of your working-tree changes:
+
+```sh
+ocr plugin install ./examples/ocr-plugins/single-pass
+ocr review --review-plugin single-pass --preview
+```
+
+With a model provider configured and changes to review, run:
+
+```sh
+ocr review --review-plugin single-pass --format json --output review.json
+```
+
+The example has one stage. It asks the model for findings and validates the
+submission before OCR publishes them. Inspect `review_plugin` in `review.json`
+for the stage's completion status and report. Installation alone does not run
+the package; preview does not start Python or contact the model.
+
+These commands use a user-installed package. If the reviewed repository declares
+project plugins, add the example to that declaration and authorize it using the
+project workflow below. Selecting a global installation does not override the
+project's locked set.
+
+## Project selection and execution
+
 For a repository-managed workflow, declare it with `ocr plugin add SOURCE`,
 commit `.opencodereview/plugins.json` and `plugins.lock.json`, then install using
 `ocr plugin sync --frozen`. Inspect the locked package and run `ocr plugin trust`
@@ -63,7 +96,9 @@ An installed package snapshot supplies both the rules and workflow for the run.
 Updating the package does not change an active run's snapshot. Hosts supporting
 only the earlier `engine`/`prompt` experiment require an upgrade for this protocol.
 The host reads retired `engine`/`prompt` installation metadata so those packages
-can still be listed, removed or updated. Attempting to run one asks for an update.
+can still be listed, removed or updated. Management output marks them as requiring
+an update (`review.update_required` in JSON) and omits the run hint. Attempting to
+run one asks for an update.
 
 ## Compatibility
 
@@ -97,7 +132,9 @@ The plugin returns a task and optionally its initial report:
 ```
 
 OCR appends the instructions and input to its normal diff/rule context and keeps
-them through context compression. The model retains OCR's context tools. Its
+them through context compression. Both `instructions` and `input` must contain
+non-whitespace text because they become separate model messages. The model retains
+OCR's context tools. Its
 `task_done` definition comes from `completion`; direct `code_comment` is withheld
 so publication passes through the plugin's validator. No model credentials are
 sent in protocol requests. The executable inherits the normal process environment,

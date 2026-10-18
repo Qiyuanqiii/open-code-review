@@ -164,6 +164,35 @@ func TestDeterministicEnabledListAndCorruption(t *testing.T) {
 	requireError(t, store.SetEnabled("zebra", true), "existing regular file")
 }
 
+func TestEnabledWithSelectedSnapshot(t *testing.T) {
+	store := NewStore(t.TempDir())
+	ctx := context.Background()
+	for _, id := range []string{"z-enabled", "a-selected", "other"} {
+		item, err := store.Install(ctx, testPackage(t, id, "1"), id == "z-enabled")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "other" {
+			if err := os.Remove(filepath.Join(item.Dir, ManifestFilename)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	items, err := store.EnabledWith("a-selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Manifest.ID != "a-selected" || items[0].Enabled || items[1].Manifest.ID != "z-enabled" || !items[1].Enabled {
+		t.Fatalf("enabled and selected snapshots = %+v", items)
+	}
+	items, err = store.Enabled()
+	if err != nil || len(items) != 1 || items[0].Manifest.ID != "z-enabled" {
+		t.Fatalf("selection changed enabled state: %+v, %v", items, err)
+	}
+	_, err = store.EnabledWith("other")
+	requireError(t, err, `installed plugin "other"`)
+}
+
 func TestFailedUpdatePreservesSnapshotAndState(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore(t.TempDir())

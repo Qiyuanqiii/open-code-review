@@ -159,14 +159,14 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 	}
 }
 
-func (s *Store) list(enabledOnly bool) ([]Installed, error) {
+func (s *Store) list(enabledOnly bool, selectedID string) ([]Installed, error) {
 	value, err := s.readState()
 	if err != nil {
 		return nil, err
 	}
 	items := make([]Installed, 0, len(value.Installed))
 	for _, item := range value.Installed {
-		if enabledOnly && !item.Enabled {
+		if enabledOnly && !item.Enabled && item.Manifest.ID != selectedID {
 			continue
 		}
 		item, err = s.validateSnapshot(item)
@@ -211,8 +211,12 @@ func (s *Store) checkPackagesDir() error {
 	return nil
 }
 
-func (s *Store) List() ([]Installed, error)    { return s.list(false) }
-func (s *Store) Enabled() ([]Installed, error) { return s.list(true) }
+func (s *Store) List() ([]Installed, error)    { return s.list(false, "") }
+func (s *Store) Enabled() ([]Installed, error) { return s.list(true, "") }
+
+// EnabledWith includes one invocation-selected snapshot without enabling it in
+// the store or inspecting unrelated disabled packages.
+func (s *Store) EnabledWith(id string) ([]Installed, error) { return s.list(true, id) }
 
 func (s *Store) Install(ctx context.Context, source string, enable bool) (Installed, error) {
 	prepared, err := s.PrepareInstall(ctx, source, "")

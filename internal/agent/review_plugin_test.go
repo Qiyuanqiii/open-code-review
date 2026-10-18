@@ -8,12 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -27,6 +29,186 @@ type pluginReviewClient struct {
 	retry    bool
 	failAt   int
 	requests []llm.ChatRequest
+}
+
+type pluginStageFilterClient struct {
+	pluginReviewClient
+	filters []llm.ChatRequest
+}
+
+func (c *pluginStageFilterClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	for _, def := range req.Tools {
+		if def.Function.Name == "approve_all_comments" {
+			c.filters = append(c.filters, req)
+			res := agentTaskDoneResponse()
+			call := &res.Choices[0].Message.ToolCalls[0].Function
+			call.Name, call.Arguments = "approve_all_comments", `{}`
+			if len(c.filters) == 2 {
+				call.Name, call.Arguments = "report_incorrect_comments", `{"comment_ids":["c-0"]}`
+			}
+			return res, nil
+		}
+	}
+	return c.pluginReviewClient.CompletionsWithCtx(ctx, req)
+}
+
+func newPluginStageAgent(t *testing.T, client llm.LLMClient, mode string, budget int64) *Agent {
+	t.Helper()
+	a := newManifestFlowAgentWithClient(t, []model.Diff{{NewPath: "good.go", Diff: "+value", Insertions: 1}}, nil, client)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.args.ReviewPlugin = &plugin.Installed{Manifest: plugin.Manifest{SchemaVersion: 1, ID: "custom", Name: "Custom", Version: "1", Review: &plugin.ReviewContribution{Protocol: "stdio-v1", Command: executable, Args: []string{"-test.run=^TestAgentReviewProcess$", "--", "agent-review-helper", mode}, Stages: []string{"inspect", "verify"}}}}
+	a.args.MaxTokensBudget = budget
+	a.args.Tools.Register(&tool.CodeCommentProvider{Collector: a.args.CommentCollector})
+	a.runner = llmloop.NewRunner(llmloop.Deps{LLMClient: client, Model: a.args.Model, Template: a.args.Template, Tools: a.args.Tools, MainToolDefs: a.args.MainToolDefs, CommentCollector: a.args.CommentCollector, Session: a.session, DiffLookup: a.findDiff, AllDiffs: a.allDiffs, NewRequestMeta: a.newRequestMeta, MaxTokensBudget: budget})
+	return a
+}
+
+func TestPluginReviewFiltersOnlyCurrentStage(t *testing.T) {
+	client := &pluginStageFilterClient{}
+	a := newPluginStageAgent(t, client, "stage-findings", 0)
+	a.args.Template.ReviewFilterTask = &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "Filter {{comments}}"}}}
+	a.args.CommentCollector.Add(model.LlmComment{Path: "good.go", Content: "Previously accepted finding"})
+	completed, stop, err := a.executePluginReview(context.Background(), FileGroup{Diffs: a.diffs})
+	if err != nil || !completed || stop != nil || len(client.filters) != 2 {
+		t.Fatalf("completed=%v stop=%+v error=%v filters=%d", completed, stop, err, len(client.filters))
+	}
+	for i, stage := range []string{"inspect", "verify"} {
+		var candidates []struct{ Content string }
+		prompt := client.filters[i].Messages[0].Content.(string)
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(prompt, "Filter ")), &candidates); err != nil {
+			t.Fatal(err)
+		}
+		if len(candidates) != 1 || candidates[0].Content != "Finding in "+stage {
+			t.Fatalf("stage %s re-filtered earlier findings: %+v", stage, candidates)
+		}
+	}
+	comments := a.args.CommentCollector.Comments()
+	if len(comments) != 2 || comments[0].Content != "Previously accepted finding" || comments[1].Content != "Finding in inspect" {
+		t.Fatalf("later filter changed earlier accepted findings: %+v", comments)
+	}
+}
+
+type pluginBudgetClient struct {
+	pluginReviewClient
+	tokens     int64
+	incomplete bool
+}
+
+func (c *pluginBudgetClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	res, err := c.pluginReviewClient.CompletionsWithCtx(ctx, req)
+	if err != nil {
+		return res, err
+	}
+	res.Usage = &llm.UsageInfo{PromptTokens: c.tokens, TotalTokens: c.tokens}
+	if c.incomplete {
+		res.Choices[0].Message.ToolCalls = nil
+	}
+	return res, nil
+}
+
+func TestPluginReviewRecordsAggregateBudgetWarning(t *testing.T) {
+	for _, mode := range []string{"before-stage", "between-stages", "completed-over-budget", "during-stage", "unlimited"} {
+		t.Run(mode, func(t *testing.T) {
+			budget := int64(1000)
+			client := &pluginBudgetClient{tokens: budget}
+			if mode == "during-stage" || mode == "completed-over-budget" {
+				client.tokens++
+				client.incomplete = mode == "during-stage"
+			}
+			if mode == "unlimited" {
+				budget = 0
+			}
+			a := newPluginStageAgent(t, client, "complete", budget)
+			if mode == "before-stage" {
+				a.runner.RecordUsage(&llm.UsageInfo{PromptTokens: budget})
+			}
+			completed, stop, err := a.executePluginReview(context.Background(), FileGroup{Diffs: a.diffs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "unlimited" {
+				if !completed || stop != nil || a.BudgetExceeded() {
+					t.Fatalf("unlimited review stopped: completed=%v stop=%+v", completed, stop)
+				}
+			} else if completed || stop == nil || !stop.required || stop.class != session.FailureBudget || !a.BudgetExceeded() {
+				t.Fatalf("budget stop lost: completed=%v stop=%+v budgetExceeded=%v", completed, stop, a.BudgetExceeded())
+			}
+			var warnings []AgentWarning
+			for _, warning := range a.Warnings() {
+				if warning.Type == "token_budget_reached" {
+					warnings = append(warnings, warning)
+				}
+			}
+			want := 1
+			if mode == "unlimited" {
+				want = 0
+			}
+			if len(warnings) != want || (want > 0 && (warnings[0].File != "good.go" || !strings.Contains(warnings[0].Message, "1000"))) {
+				t.Fatalf("aggregate budget warnings = %+v", warnings)
+			}
+		})
+	}
+}
+
+func TestPluginReviewBudgetWarningSharedWithDispatch(t *testing.T) {
+	for _, lookAheadFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("look-ahead-first=%v", lookAheadFirst), func(t *testing.T) {
+			diffs := makeBudgetDiffs(3)
+			budget := estimateDiffFileTokens(diffs[0]) * 4
+			if lookAheadFirst {
+				budget = 1
+			}
+			client := &pluginBudgetClient{tokens: budget + 1}
+			a := newPluginStageAgent(t, client, "complete", budget)
+			a.diffs = diffs
+			a.args.MaxConcurrency = 1
+			a.args.ReviewPlugin.Manifest.Review.Stages = []string{"inspect"}
+			if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(a.fileGroups) != 3 {
+				t.Fatalf("expected three groups, got %+v", a.fileGroups)
+			}
+			for _, group := range a.fileGroups {
+				if len(group.Diffs) != 1 {
+					t.Fatalf("expected single-file group: %+v", group)
+				}
+			}
+			for _, report := range a.PluginReviewReports() {
+				if report.Group == "f2.go" {
+					t.Fatal("dispatch gate did not stop the final group")
+				}
+			}
+			wantCalls, wantCompleted := 1, 1
+			if lookAheadFirst {
+				wantCalls, wantCompleted = 0, 0
+			}
+			if client.calls != wantCalls || !a.BudgetExceeded() {
+				t.Fatalf("calls=%d want=%d budgetExceeded=%v", client.calls, wantCalls, a.BudgetExceeded())
+			}
+			manifest := finishManifestFlow(t, a)
+			if len(manifest.Coverage.Completed) != wantCompleted || len(manifest.Coverage.Failed) != 3-wantCompleted || manifest.RunFailure != nil {
+				t.Fatalf("budget dispatch changed coverage: %+v", manifest)
+			}
+			for _, item := range manifest.Coverage.Failed {
+				if item.Classification != session.FailureBudget {
+					t.Fatalf("undispatched item lost its budget cause: %+v", item)
+				}
+			}
+			var warnings []AgentWarning
+			for _, warning := range a.Warnings() {
+				if warning.Type == "token_budget_reached" {
+					warnings = append(warnings, warning)
+				}
+			}
+			if len(warnings) != 1 || warnings[0].File != "f0.go" || (lookAheadFirst && !strings.HasPrefix(warnings[0].Message, "stopped dispatch:")) {
+				t.Fatalf("aggregate budget warning must be recorded once: %+v", warnings)
+			}
+		})
+	}
 }
 
 func TestValidatePluginCommentsIdentifiesInvalidFinding(t *testing.T) {
@@ -198,8 +380,11 @@ func TestAgentReviewProcess(t *testing.T) {
 				res.Report = json.RawMessage(`{"saved":"updated-before-error"}`)
 				res.Error = "validator unavailable"
 			}
-			if mode == "finding-incomplete" || mode == "invalid-comment" {
+			if mode == "finding-incomplete" || mode == "invalid-comment" || mode == "stage-findings" {
 				res.Comments = []model.LlmComment{{Path: "good.go", Content: "The value is lost.", ExistingCode: "value", Severity: "medium", Category: "bug"}}
+				if mode == "stage-findings" {
+					res.Comments[0].Content = "Finding in " + req.Stage
+				}
 				if mode == "invalid-comment" {
 					res.Comments[0].Path = "outside.go"
 				}

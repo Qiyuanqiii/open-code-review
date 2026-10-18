@@ -91,6 +91,84 @@ func TestSinglePassExampleRecoversFromInvalidRequests(t *testing.T) {
 	}
 }
 
+func TestSinglePassExampleRejectsInvalidCommentsThroughTransport(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		python, err = exec.LookPath("python3")
+	}
+	if err != nil {
+		t.Skip("Python 3 is required to exercise the bundled review example")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "examples", "ocr-plugins", "single-pass", "review.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plugin.Installed{Dir: filepath.Dir(script), Manifest: plugin.Manifest{SchemaVersion: 1, ID: "example", Name: "Example", Version: "1", Review: &plugin.ReviewContribution{Protocol: "stdio-v1", Command: python, Args: []string{script}, Stages: []string{"review"}}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client, err := plugin.StartReview(ctx, p, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	begin := plugin.ReviewRequest{Method: "begin", Stage: "review", Paths: []string{"main.go"}, Severities: []string{"high"}, Categories: []string{"security"}}
+	if _, err := client.Call(begin); err != nil {
+		t.Fatal(err)
+	}
+	valid := func() map[string]any {
+		return map[string]any{"path": "main.go", "content": "The error is ignored.", "existing_code": "call()", "severity": "high", "category": "security"}
+	}
+	submit := func(t *testing.T, comments []any, complete bool) plugin.ReviewResponse {
+		t.Helper()
+		res, err := client.Call(plugin.ReviewRequest{Method: "submit", Stage: "review", Arguments: map[string]any{"complete": complete, "summary": "Inspection result.", "comments": comments}})
+		if err != nil {
+			t.Fatalf("model submission became a transport failure: %v", err)
+		}
+		return res
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any) any
+	}{
+		{"unknown field", func(c map[string]any) any { c["unexpected"] = true; return c }},
+		{"nonobject", func(map[string]any) any { return "finding" }},
+		{"path type", func(c map[string]any) any { c["path"] = 42; return c }},
+		{"content type", func(c map[string]any) any { c["content"] = []any{}; return c }},
+		{"code type", func(c map[string]any) any { c["existing_code"] = false; return c }},
+		{"missing content", func(c map[string]any) any { delete(c, "content"); return c }},
+		{"empty content", func(c map[string]any) any { c["content"] = " \t"; return c }},
+		{"severity type", func(c map[string]any) any { c["severity"] = 42; return c }},
+		{"category type", func(c map[string]any) any { c["category"] = nil; return c }},
+		{"severity enum", func(c map[string]any) any { c["severity"] = "medium"; return c }},
+		{"category enum", func(c map[string]any) any { c["category"] = "bug"; return c }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := submit(t, []any{tc.edit(valid())}, true)
+			if res.Accepted == nil || *res.Accepted || strings.TrimSpace(res.Feedback) == "" || len(res.Comments) != 0 {
+				t.Fatalf("invalid finding did not produce repair feedback: %+v", res)
+			}
+			res = submit(t, []any{valid()}, true)
+			if res.Accepted == nil || !*res.Accepted || res.Complete == nil || !*res.Complete || len(res.Comments) != 1 || res.Comments[0].Path != "main.go" {
+				t.Fatalf("valid repair was not accepted: %+v", res)
+			}
+		})
+	}
+	begin.Severities, begin.Categories = []string{"low"}, []string{"bug"}
+	if _, err := client.Call(begin); err != nil {
+		t.Fatal(err)
+	}
+	res := submit(t, []any{valid()}, true)
+	if res.Accepted == nil || *res.Accepted {
+		t.Fatalf("submit retained classifications from an earlier begin: %+v", res)
+	}
+	comment := valid()
+	comment["severity"], comment["category"] = "low", "bug"
+	res = submit(t, []any{comment}, false)
+	if res.Accepted == nil || !*res.Accepted || res.Complete == nil || *res.Complete || len(res.Comments) != 1 || res.Feedback != "Inspection result." || string(res.Report) != `{"summary": "Inspection result."}` {
+		t.Fatalf("valid incomplete submission lost findings or report: %+v", res)
+	}
+}
+
 func TestNativePluginExamplePackagesThroughRuntime(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node.js is required to exercise the bundled MCP example")

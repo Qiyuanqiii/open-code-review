@@ -122,6 +122,46 @@ func TestPluginCommandErrorsAreReturnedToCLIAndTUI(t *testing.T) {
 	}
 }
 
+func TestPluginRetiredReviewManagementRequiresUpdate(t *testing.T) {
+	freshOCRHome(t)
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, plugin.ManifestFilename)
+	legacy := `{"schema_version":1,"id":"legacy-review","name":"Legacy review","version":"1","review":{"engine":"old","prompt":"old.md"}}`
+	if err := os.WriteFile(manifestPath, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"install", dir, "--dry-run"}, {"install", dir}} {
+		out := pluginCommandOK(t, args...)
+		if !strings.Contains(out, "update required") || strings.Contains(out, "Run once:") || strings.Contains(out, "Review stages:") {
+			t.Fatalf("retired review advertised as runnable: %s", out)
+		}
+	}
+	for _, args := range [][]string{{"show", "legacy-review"}, {"list"}} {
+		out := pluginCommandOK(t, args...)
+		if !strings.Contains(out, "update required") || strings.Contains(out, "Run once:") || strings.Contains(out, "explicit selection") {
+			t.Fatalf("retired review advertised as runnable: %s", out)
+		}
+	}
+	for _, args := range [][]string{{"show", "legacy-review", "--json"}, {"list", "--json"}, {"install", dir, "--dry-run", "--json"}} {
+		out := pluginCommandOK(t, args...)
+		if !strings.Contains(out, `"update_required": true`) {
+			t.Fatalf("JSON omitted retired review status: %s", out)
+		}
+	}
+	writePluginCommandFixture(t, dir, "2")
+	pluginCommandOK(t, "install", dir)
+	if out := pluginCommandOK(t, "show", "test-review"); !strings.Contains(out, "Run once: ocr review --review-plugin test-review") || strings.Contains(out, "update required") {
+		t.Fatalf("current review lost runnable hint: %s", out)
+	}
+	if out := pluginCommandOK(t, "list"); !strings.Contains(out, "review policy (explicit selection)") {
+		t.Fatalf("current review lost capability: %s", out)
+	}
+	if out := pluginCommandOK(t, "install", dir, "--dry-run"); !strings.Contains(out, "Review stages: inspect") || strings.Contains(out, "update required") {
+		t.Fatalf("current review lost stage preview: %s", out)
+	}
+}
+
 func TestPluginManagementTextStripsTerminalControl(t *testing.T) {
 	if got := pluginText("hello\x1b[31m\n\tworld\x1b[0m"); got != "hello world" {
 		t.Fatalf("unsafe plugin description: %q", got)

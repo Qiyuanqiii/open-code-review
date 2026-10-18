@@ -157,8 +157,8 @@ func (c *ReviewClient) Call(req ReviewRequest) (ReviewResponse, error) {
 		return res, fmt.Errorf("review plugin protocol error (version %d): %s", res.Version, res.Error)
 	}
 	if req.Method == "begin" {
-		if res.Task == nil || strings.TrimSpace(res.Task.Instructions+res.Task.Input) == "" || res.Task.Completion.Parameters["type"] != "object" || len(res.Comments) != 0 {
-			return res, fmt.Errorf("review begin requires task instructions and an object completion schema, without comments")
+		if res.Task == nil || strings.TrimSpace(res.Task.Instructions) == "" || strings.TrimSpace(res.Task.Input) == "" || res.Task.Completion.Parameters["type"] != "object" || len(res.Comments) != 0 {
+			return res, fmt.Errorf("review begin requires nonempty task instructions and input, and an object completion schema, without comments")
 		}
 	} else if req.Method == "submit" {
 		if res.Accepted == nil || (*res.Accepted && res.Complete == nil) || (!*res.Accepted && (strings.TrimSpace(res.Feedback) == "" || len(res.Comments) != 0)) {

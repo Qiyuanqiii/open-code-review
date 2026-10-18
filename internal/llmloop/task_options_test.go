@@ -152,6 +152,44 @@ func TestScopedCompletionPublishesOnce(t *testing.T) {
 	}
 }
 
+func TestScopedCompletionPreservesAcceptedAnchors(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async=%v", async), func(t *testing.T) {
+			r, collector := newThinkingTestRunner(t, &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}})
+			if async {
+				r.deps.CommentWorkerPool = NewCommentWorkerPool(1)
+			}
+			d := &model.Diff{NewPath: "file.go", NewFileContent: "value\nother\nvalue\nlast\n"}
+			r.deps.DiffLookup = func(string) *model.Diff { return d }
+			completed, _, err := r.RunMainTaskWithOptions(context.Background(), nil, "file.go", TaskOptions{
+				Tools: []llm.ToolDef{{Function: llm.FunctionDef{Name: "task_done"}}},
+				Complete: func(map[string]any) ([]model.LlmComment, error) {
+					return []model.LlmComment{
+						{Path: "file.go", Content: "Anchored repeated snippet", ExistingCode: "value", StartLine: 3, EndLine: 3},
+						{Path: "file.go", Content: "Anchored range without snippet", StartLine: 3, EndLine: 4},
+						{Path: "file.go", Content: "Resolve missing anchor", ExistingCode: "other"},
+						{Path: "file.go", Content: "Resolve invalid anchor", ExistingCode: "last", StartLine: 4, EndLine: 2},
+					}, nil
+				},
+			})
+			if err != nil || !completed {
+				t.Fatalf("accepted report was not published: completed=%v error=%v", completed, err)
+			}
+			r.CollectPendingComments()
+			comments := collector.Comments()
+			wantLines := [][2]int{{3, 3}, {3, 4}, {2, 2}, {4, 4}}
+			if len(comments) != len(wantLines) {
+				t.Fatalf("published comments = %+v", comments)
+			}
+			for i, lines := range wantLines {
+				if comments[i].StartLine != lines[0] || comments[i].EndLine != lines[1] {
+					t.Errorf("published comment %q range = %d..%d, want %d..%d", comments[i].Content, comments[i].StartLine, comments[i].EndLine, lines[0], lines[1])
+				}
+			}
+		})
+	}
+}
+
 func TestScopedCompletionRepairAndPublicationFailure(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse(), taskDoneResponseWithArguments(`{"report":"repaired"}`)}}
 	deps := newTestDeps(client)

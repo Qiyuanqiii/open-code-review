@@ -32,6 +32,7 @@ type TaskOptions struct {
 }
 
 type taskOptionsKey struct{}
+type acceptedCommentsKey struct{}
 
 // ErrCompletionUnavailable stops a task when its validator cannot run. Invalid
 // model submissions return ordinary errors and remain eligible for correction.
@@ -124,6 +125,7 @@ func (r *Runner) completeTask(ctx context.Context, taskKey string, args map[stri
 		// This internal publication is authorized by the completion contract;
 		// the model cannot bypass the validator by calling code_comment directly.
 		publishCtx := context.WithValue(ctx, taskOptionsKey{}, (*TaskOptions)(nil))
+		publishCtx = context.WithValue(publishCtx, acceptedCommentsKey{}, true)
 		cp := r.executeToolCall(publishCtx, taskKey, llm.ToolCall{
 			Type: "function", Function: llm.FunctionCall{Name: "code_comment", Arguments: string(data)},
 		}, rec, thinking)

@@ -119,12 +119,23 @@ review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
 
 - **引数**: `<id>`（プラグイン ID）
 - **フラグ**:
+  - `--source <url|path>`: 記録されたソースを変更します。`install` と同じ HTTPS/GitHub URL、ローカルディレクトリ、ZIP/tar.gz アーカイブに対応します。パッケージの ID はインストール済みプラグインと一致する必要があります。
   - `--accept-permissions`: 新規追加または変更された MCP 実行権限を明示的に承認します。
   - `--json`: 更新結果を JSON で出力します。
 - **実行権限の変更検知**: 更新によって**新しい MCP サーバーが追加された場合**、または**既存サーバーのコマンド、引数、環境変数、トランスポートが変更された場合**、OCR は更新を中断してエラー（`PLUGIN_EXECUTION_CHANGED`）を返します。内容を確認後、`--accept-permissions` を付与して明示的に実行する必要があります：
   ```sh
   ocr plugin update <id> --accept-permissions
   ```
+
+ダウンロードトークンが失効した場合やパッケージの配布先が変わった場合は、新しいソースを指定できます：
+
+```sh
+ocr plugin update my-plugin --source "https://plugins.example.com/download.php?token=NEW_TOKEN"
+```
+
+更新が成功すると、以降の `update <id>` はクエリパラメータを含む新しいソースを再利用し、有効/無効状態を維持します。ダウンロード、検証、権限の承認に失敗した場合、以前のパッケージとソースは変更されません。承認が必要な場合は、`--source` と `--accept-permissions` の両方を付けて再実行してください。
+
+HTTPS ダウンロード URL はクエリパラメータを含めることができ、応答が有効なプラグインアーカイブなら拡張子は不要です。完全な URL はローカルに保存されます。管理画面の出力ではクエリパラメータが非表示になりますが、保存時に暗号化されるわけではありません。このコマンドはグローバルにインストールしたプラグインを更新します。プロジェクト依存関係には `plugin add` と `plugin lock` を使います。
 
 #### 5. `ocr plugin enable <id>`
 プラグインを有効化します。レビュー規則と MCP ツールがその後の `ocr review` や `ocr scan` に読み込まれます。

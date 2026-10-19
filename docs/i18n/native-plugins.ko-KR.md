@@ -119,12 +119,23 @@ review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
 
 - **인자**: `<id>` (플러그인 ID)
 - **플래그**:
+  - `--source <url|path>`: 기록된 소스를 변경합니다. `install`과 동일하게 HTTPS/GitHub URL, 로컬 디렉터리, ZIP/tar.gz 아카이브를 지원합니다. 패키지 ID는 설치된 플러그인 ID와 일치해야 합니다.
   - `--accept-permissions`: 추가되거나 변경된 MCP 실행 권한을 명시적으로 수락합니다.
   - `--json`: JSON 결과 출력.
 - **실행 권한 변경 감지**: 업데이트 시 **새로운 MCP 서버가 추가되거나 기존 서버의 명령어, 인자, 환경 변수, 전송 방식이 변경된 경우**, OCR은 업데이트를 중단하고 오류(`PLUGIN_EXECUTION_CHANGED`)를 발생시킵니다. 변경 사항을 확인한 후 `--accept-permissions` 플래그를 붙여 실행해야 합니다:
   ```sh
   ocr plugin update <id> --accept-permissions
   ```
+
+다운로드 토큰이 만료되었거나 패키지 주소가 변경된 경우 새 소스를 지정할 수 있습니다:
+
+```sh
+ocr plugin update my-plugin --source "https://plugins.example.com/download.php?token=NEW_TOKEN"
+```
+
+업데이트에 성공하면 이후 `update <id>`는 쿼리 파라미터를 포함한 새 소스를 재사용하며 활성화/비활성화 상태를 유지합니다. 다운로드, 검증 또는 권한 승인에 실패하면 기존 패키지와 소스 기록을 변경하지 않습니다. 권한 승인이 필요하면 `--source`와 `--accept-permissions`를 함께 지정하여 다시 실행하세요.
+
+HTTPS 다운로드 URL에는 쿼리 파라미터를 포함할 수 있으며, 응답이 유효한 플러그인 아카이브라면 확장자가 없어도 됩니다. 전체 URL은 로컬에 저장됩니다. 쿼리 파라미터는 관리 출력에서 숨겨지지만 저장 시 암호화되지는 않습니다. 이 명령은 전역 설치를 업데이트하며, 프로젝트 의존성은 `plugin add`와 `plugin lock`으로 관리합니다.
 
 #### 5. `ocr plugin enable <id>`
 지정된 플러그인을 활성화합니다. 기여된 리뷰 규칙과 MCP 도구가 후속 `ocr review` 및 `ocr scan` 실행에 로드됩니다.

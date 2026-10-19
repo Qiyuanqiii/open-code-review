@@ -136,12 +136,23 @@ Refreshes an installed plugin from its original recorded source, keeping its cur
 
 - **Arguments**: `<id>` (Plugin ID).
 - **Flags**:
+  - `--source <url|path>`: Replace the recorded source. Accepts the same HTTPS/GitHub URLs and local directories/ZIP/tar.gz archives as `install`; the package must have the installed plugin ID.
   - `--accept-permissions`: Explicitly accept added or modified MCP execution declarations.
   - `--json`: Output JSON result or structured error if permissions changed.
 - **Security Gate**: If the updated package introduces new MCP servers or alters existing server commands, arguments, environment variables, or transport configurations, OCR refuses to apply the update and outputs an error (`PLUGIN_EXECUTION_CHANGED`). The user must review the changes and run:
   ```sh
   ocr plugin update <id> --accept-permissions
   ```
+
+For an expired download token or a moved package, supply a replacement source:
+
+```sh
+ocr plugin update my-plugin --source "https://plugins.example.com/download.php?token=NEW_TOKEN"
+```
+
+After a successful update, later `update <id>` calls reuse the new source, including its query parameters. The enabled/disabled state is preserved. Download, validation, or permission-acceptance failures leave the previous package and recorded source unchanged. If acceptance is required, repeat the command with both `--source` and `--accept-permissions`.
+
+HTTPS download URLs can contain query parameters and need no archive extension, provided the response is a valid plugin archive. The full URL is saved locally; query parameters are hidden in management output, not encrypted in storage. This command updates global installations; project dependencies are managed with `plugin add` and `plugin lock`.
 
 #### 5. `ocr plugin enable <id>`
 Activates a registered plugin. Its review rules will be evaluated and its declared MCP tools will become available in subsequent `ocr review` and `ocr scan` runs.

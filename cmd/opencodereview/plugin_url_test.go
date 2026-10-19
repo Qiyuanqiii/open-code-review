@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -66,9 +68,14 @@ func TestPluginURLCommandPreviewInstallAndUpdate(t *testing.T) {
 	t.Setenv("PATH", "")
 	var mu sync.Mutex
 	archive := pluginURLArchive(t, "url-review", "1.0")
+	token := "private-query"
 	server := usePluginURLServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
+		if r.URL.Query().Get("token") != token {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		_, _ = w.Write(archive)
 	}))
 	source := server.URL + "/plugin.zip?token=private-query"
@@ -99,6 +106,41 @@ func TestPluginURLCommandPreviewInstallAndUpdate(t *testing.T) {
 	output = pluginCommandOK(t, "update", "url-review", "--json")
 	if err := json.Unmarshal([]byte(output), &installed); err != nil || !installed.Enabled || installed.Version != "2.0" || installed.SHA256 == preview.Plugins[0].SHA256 {
 		t.Fatalf("update = %s, error = %v", output, err)
+	}
+	updated = pluginURLArchive(t, "url-review", "3.0")
+	mu.Lock()
+	archive, token = updated, "private-rotated"
+	mu.Unlock()
+	for _, args := range [][]string{
+		{"update", "url-review", "--json"},
+		{"update", "url-review", "--source", server.URL + "/file.php?token=private-expired", "--json"},
+	} {
+		out, err := runPluginCommand(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "HTTP 403") || strings.Contains(out+err.Error(), "private-") {
+			t.Fatalf("expired URL update = %s, %v", out, err)
+		}
+		output = pluginCommandOK(t, "show", "url-review", "--json")
+		if err := json.Unmarshal([]byte(output), &installed); err != nil || installed.Version != "2.0" || installed.Source != server.URL+"/plugin.zip" || !installed.Enabled {
+			t.Fatalf("failed download changed installed plugin: %s, %v", output, err)
+		}
+	}
+	replacement := server.URL + "/file.php?token=private-rotated"
+	output = pluginCommandOK(t, "update", "url-review", "--source", replacement, "--json")
+	if err := json.Unmarshal([]byte(output), &installed); err != nil || installed.Version != "3.0" || !installed.Enabled || installed.Source != server.URL+"/file.php" || strings.Contains(output, "private-") {
+		t.Fatalf("replacement URL update = %s, %v", output, err)
+	}
+	updated = pluginURLArchive(t, "url-review", "4.0")
+	mu.Lock()
+	archive = updated
+	mu.Unlock()
+	output = pluginCommandOK(t, "update", "url-review", "--json")
+	if err := json.Unmarshal([]byte(output), &installed); err != nil || installed.Version != "4.0" || installed.Source != server.URL+"/file.php" || strings.Contains(output, "private-") {
+		t.Fatalf("replacement URL was not reused: %s, %v", output, err)
+	}
+	for _, source := range []string{"", " \t"} {
+		if _, err := runPluginCommand(context.Background(), []string{"update", "url-review", "--source", source}); err == nil || !strings.Contains(err.Error(), "--source must not be empty") {
+			t.Fatalf("empty source = %v", err)
+		}
 	}
 }
 
@@ -150,6 +192,17 @@ func TestPluginArchiveURLCommandSelectsPackage(t *testing.T) {
 	output = pluginCommandOK(t, "list", "--json")
 	if err := json.Unmarshal([]byte(output), &installed); err != nil || len(installed) != 1 || installed[0].ID != "second" || !installed[0].Enabled {
 		t.Fatalf("selected archive install = %s, %v", output, err)
+	}
+	pluginCommandOK(t, "remove", "second")
+	local := filepath.Join(t.TempDir(), "plugin.zip")
+	if err := os.WriteFile(local, pluginURLArchive(t, "second", "0"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pluginCommandOK(t, "install", local, "--enable")
+	output = pluginCommandOK(t, "update", "second", "--source", source, "--json")
+	var updated pluginInfo
+	if err := json.Unmarshal([]byte(output), &updated); err != nil || updated.ID != "second" || updated.Version != "1" || updated.Source != source || !updated.Enabled {
+		t.Fatalf("update selected a different package: %s, %v", output, err)
 	}
 }
 

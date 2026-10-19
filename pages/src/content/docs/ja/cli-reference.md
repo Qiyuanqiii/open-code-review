@@ -84,7 +84,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin install <url\|path>` | — | URL またはローカルパスから OCR ネイティブプラグインをインストールします。 |
 | `ocr plugin list` | `ocr plugins list` | インストールされたプラグインと有効化状態を一覧表示します。 |
 | `ocr plugin show <id>` | — | インストールされたプラグインの詳細情報と機能を検査します。 |
-| `ocr plugin update <id>` | — | 元のソースからプラグインを更新します（`--accept-permissions`）。 |
+| `ocr plugin update <id>` | — | 元のソースからプラグインを更新します（`--source`, `--accept-permissions`）。 |
 | `ocr plugin enable <id>` / `disable <id>` | — | プラグインを有効化または無効化します。 |
 | `ocr plugin remove <id>` | — | プラグインの登録を解除して削除します。 |
 | `ocr plugin add <source>` | — | プロジェクトのプラグイン依存関係を宣言してロックします。 |
@@ -755,7 +755,7 @@ ocr completion powershell > ocr.ps1
 - `ocr plugin install <url|path>`: パブリック GitHub URL、リモート HTTPS アーカイブ（`.tar.gz`/`.zip`）、またはローカルディレクトリ/アーカイブからインストールします。フラグ: `--enable`（インストール後に有効化）、`--dry-run`（保存せずに検査プレビュー）、`--plugin <id>`（複数パッケージから選択）、`--json`。
 - `ocr plugin list`: インストールされているグローバルプラグイン一覧と有効化状態を表示します。
 - `ocr plugin show <id>`: プラグインの詳細情報、スナップショットパス、規則、MCP サーバーを表示します（認証情報は自動的に除外）。
-- `ocr plugin update <id>`: 記録された元のソースからプラグインを更新します。MCP 実行設定の変更がある場合は `--accept-permissions` が必要です。
+- `ocr plugin update <id>`: 記録されたソースから更新します。`--source <url|path>` でソースを変更できます。成功時は新しいソースを保存して有効/無効状態を維持し、失敗時は以前のパッケージとソースを保持します。MCP 実行設定の変更には `--accept-permissions` が必要です。
 - `ocr plugin enable <id>` / `disable <id>`: プラグインを有効化または無効化します。
 - `ocr plugin remove <id>`: プラグインの登録を解除して削除します。
 

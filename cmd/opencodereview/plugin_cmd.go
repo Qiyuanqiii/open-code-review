@@ -285,10 +285,14 @@ func newPluginCmd() *cobra.Command {
 	install.Flags().BoolVar(&dryRun, "dry-run", false, "download and inspect the source without installing or enabling plugins")
 	command.AddCommand(install)
 	var acceptPermissions bool
+	var updateSource string
 	update := &cobra.Command{
 		Use: "update <id>", Short: "Refresh a plugin; changed execution declarations require explicit acceptance", Args: exactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, args []string, store *plugin.Store) error {
-			installed, err := store.UpdateWithOptions(cmd.Context(), args[0], plugin.UpdateOptions{AcceptPermissions: acceptPermissions})
+			if cmd.Flags().Changed("source") && strings.TrimSpace(updateSource) == "" {
+				return fmt.Errorf("--source must not be empty")
+			}
+			installed, err := store.UpdateWithOptions(cmd.Context(), args[0], plugin.UpdateOptions{Source: updateSource, AcceptPermissions: acceptPermissions})
 			if err != nil {
 				var changed *plugin.ExecutionChangesError
 				if jsonOutput && errors.As(err, &changed) {
@@ -301,6 +305,7 @@ func newPluginCmd() *cobra.Command {
 			return printInstalled(cmd, installed)
 		}),
 	}
+	update.Flags().StringVar(&updateSource, "source", "", "replace the recorded source with a URL or local path after a successful update")
 	update.Flags().BoolVar(&acceptPermissions, "accept-permissions", false, "accept added or changed MCP and workflow execution declarations")
 	command.AddCommand(update)
 	for _, action := range []string{"enable", "disable", "remove"} {

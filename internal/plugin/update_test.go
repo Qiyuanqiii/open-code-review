@@ -59,6 +59,49 @@ func TestUpdateExecutionAcceptance(t *testing.T) {
 	}
 }
 
+func TestUpdateSourceReplacement(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			ctx := context.Background()
+			store := NewStore(t.TempDir())
+			old, err := store.Install(ctx, testPackage(t, "example", "1"), enabled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := testPackage(t, "example", "2")
+			next := testManifest("example", "2")
+			next.MCPServers = map[string]MCPServer{"notes": {Command: "never-execute-me"}}
+			writeTestJSON(t, filepath.Join(source, ManifestFilename), next)
+			statePath := filepath.Join(store.root, "state.json")
+			before, err := os.ReadFile(statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, rejected := range []struct{ source, message string }{
+				{testPackage(t, "another", "2"), "does not match selected"},
+				{source, "--accept-permissions"},
+			} {
+				_, err := store.UpdateWithOptions(ctx, "example", UpdateOptions{Source: rejected.source})
+				requireError(t, err, rejected.message)
+				after, err := os.ReadFile(statePath)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("rejected replacement changed state: %v", err)
+				}
+			}
+			updated, err := store.UpdateWithOptions(ctx, "example", UpdateOptions{Source: source, AcceptPermissions: true})
+			if err != nil || updated.Manifest.Version != "2" || updated.Enabled != enabled || updated.Source != source || updated.Dir == old.Dir {
+				t.Fatalf("source replacement = %+v, %v", updated, err)
+			}
+			next.Version = "3"
+			writeTestJSON(t, filepath.Join(source, ManifestFilename), next)
+			updated, err = store.Update(ctx, "example")
+			if err != nil || updated.Manifest.Version != "3" || updated.Source != source || updated.Enabled != enabled {
+				t.Fatalf("recorded replacement source was not reused: %+v, %v", updated, err)
+			}
+		})
+	}
+}
+
 func TestExecutionDeclarationChanges(t *testing.T) {
 	for _, test := range []struct {
 		field string

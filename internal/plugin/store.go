@@ -245,7 +245,11 @@ func (s *Store) UpdateWithOptions(ctx context.Context, id string, options Update
 	if !ok {
 		return Installed{}, fmt.Errorf("plugin %q is not installed", id)
 	}
-	prepared, err := s.prepareInstall(ctx, old.Source, old.PluginID)
+	source, pluginID := old.Source, old.PluginID
+	if options.Source != "" {
+		source, pluginID = options.Source, id
+	}
+	prepared, err := s.prepareInstall(ctx, source, pluginID)
 	if err != nil {
 		return Installed{}, err
 	}

@@ -85,7 +85,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin install <url\|path>` | — | URL 또는 로컬 경로에서 OCR 네이티브 플러그인을 설치합니다. |
 | `ocr plugin list` | `ocr plugins list` | 설치된 플러그인 목록과 활성화 상태를 나열합니다. |
 | `ocr plugin show <id>` | — | 설치된 플러그인의 상세 정보와 기여 기능을 검사합니다. |
-| `ocr plugin update <id>` | — | 원래 소스에서 플러그인을 업데이트합니다(`--accept-permissions`). |
+| `ocr plugin update <id>` | — | 원래 소스에서 플러그인을 업데이트합니다(`--source`, `--accept-permissions`). |
 | `ocr plugin enable <id>` / `disable <id>` | — | 설치된 플러그인을 활성화하거나 비활성화합니다. |
 | `ocr plugin remove <id>` | — | 설치된 플러그인 등록을 해제하고 삭제합니다. |
 | `ocr plugin add <source>` | — | 프로젝트의 플러그인 의존성을 선언하고 잠금 파일에 기록합니다. |
@@ -785,7 +785,7 @@ PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세�
 - `ocr plugin install <url|path>`: 공개 GitHub URL, 원격 HTTPS 아카이브(`.tar.gz`/`.zip`) 또는 로컬 디렉터리/아카이브에서 설치합니다. 플래그: `--enable`(설치 후 활성화), `--dry-run`(저장 없이 미리보기 검사), `--plugin <id>`(다중 플러그인 소스에서 선택), `--json`.
 - `ocr plugin list`: 설치된 전역 플러그인 목록, 버전 및 활성화 상태를 표시합니다.
 - `ocr plugin show <id>`: 플러그인 세부 정보, 스냅샷 경로, 규칙 및 MCP 서버를 표시합니다(인증 정보 자동 마스킹).
-- `ocr plugin update <id>`: 원래 소스에서 플러그인을 업데이트합니다. MCP 실행 구성이 변경된 경우 `--accept-permissions` 플래그가 필요합니다.
+- `ocr plugin update <id>`: 기록된 소스에서 업데이트하거나 `--source <url|path>`로 소스를 변경합니다. 성공하면 새 소스를 저장하고 활성화 상태를 유지하며, 실패하면 기존 패키지와 소스를 유지합니다. MCP 실행 구성이 변경되면 `--accept-permissions`가 필요합니다.
 - `ocr plugin enable <id>` / `disable <id>`: 지정된 플러그인을 활성화하거나 비활성화합니다.
 - `ocr plugin remove <id>`: 플러그인 등록을 해제하고 삭제합니다.
 

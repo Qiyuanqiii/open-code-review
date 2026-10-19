@@ -304,6 +304,8 @@ allow_plugin_exec: 'false'
 
 每次启用插件的运行使用新的私有 OCR 用户目录，校验包内容与授权。原生程序拥有 runner 的权限，能访问其环境变量（包括模型凭证）。不要从共享缓存恢复本地信任记录。策略、插件身份或执行权限变化时，增量审查检查点失效。
 
+CI 集成测试使用真实 Git 提交和新构建的 OCR 二进制，执行 Action 的策略解析脚本及准备插件的 shell 步骤。测试模拟 fork PR 和评论事件，验证安装的是 base 版本规则、MCP 授权得到执行，并拒绝 PR head 检出或被替换的声明／锁文件。无需真实 GitHub API 或模型凭证；参见[测试命令](../../examples/github_actions/README.md#testing-project-plugin-policy)。
+
 完整配置见 [Action 示例](../../examples/github_actions/README.md#project-plugins-in-ci)。
 
 ---
@@ -364,7 +366,11 @@ my-plugin/
 - `id` 最长 64 个字符，使用小写字母、数字、点、下划线或连字符，首尾必须是字母或数字；Windows 保留设备名不可使用。
 - `name` 和 `version` 必须非空。至少声明一个规则包或 MCP Server。
 - `rules` 只接受相对 `.json` 路径，具体格式见上方规则包说明。
-- `mcp_servers` 中的 `stdio`（默认）支持 `command`、`args`、`env`（`KEY=VALUE`）和 `tools` 白名单；`remote` 支持 HTTP 或 HTTPS 的 `url`、`headers` 和 `tools`。发送凭证时应使用 HTTPS；插件包下载另有强制 HTTPS 限制。
+- `mcp_servers` 中的 `stdio`（默认）支持 `command`、`args`、`env`（`KEY=VALUE`）和 `tools` 白名单；`remote` 支持 HTTPS `url`、`headers` 和 `tools`，本机开发例外见下文。
+
+远程 MCP URL 必须使用 HTTPS。只有本机开发场景允许 HTTP，主机必须是 `localhost` 或回环 IP 字面量（如 `127.0.0.1`、`[::1]`）；使用局域网地址或通配监听地址的 HTTP 端点均不允许。重定向必须保持原来的协议、主机和端口，避免凭证随连接降级或转发至其他来源。这些检查同时适用于插件清单和手动 MCP 配置建立的连接。已有的非回环 HTTP 端点需要迁移到 HTTPS。插件包下载仍强制要求 HTTPS，包括本机地址。
+
+旧版本已经安装、含 HTTP MCP 端点的全局插件仍可通过 `plugin list`、`disable`、`remove` 和 `update` 管理。已启用的非回环 HTTP 插件必须先禁用或更新为使用 HTTPS 的包，才能加载插件进行审查。新安装、重新启用和项目 sync/preflight 仍执行传输策略检查；更新时若 MCP URL 改变，仍需 `--accept-permissions`。
 
 ### 占位符支持
 

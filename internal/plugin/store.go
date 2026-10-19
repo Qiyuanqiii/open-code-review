@@ -84,7 +84,7 @@ func (s *Store) readState() (state, error) {
 		if id != item.Manifest.ID {
 			return result, fmt.Errorf("plugin state id %q does not match manifest", id)
 		}
-		if err := item.Manifest.Validate(); err != nil {
+		if err := item.Manifest.validate(false); err != nil {
 			return result, fmt.Errorf("plugin state %q: %w", id, err)
 		}
 		if err := safeRelativePath(item.Dir); err != nil || filepath.ToSlash(filepath.Dir(item.Dir)) != "packages" {
@@ -169,7 +169,7 @@ func (s *Store) list(enabledOnly bool) ([]Installed, error) {
 		if enabledOnly && !item.Enabled {
 			continue
 		}
-		item, err = s.validateSnapshot(item)
+		item, err = s.validateSnapshotWithPolicy(item, enabledOnly)
 		if err != nil {
 			return nil, err
 		}
@@ -180,6 +180,10 @@ func (s *Store) list(enabledOnly bool) ([]Installed, error) {
 }
 
 func (s *Store) validateSnapshot(item Installed) (Installed, error) {
+	return s.validateSnapshotWithPolicy(item, true)
+}
+
+func (s *Store) validateSnapshotWithPolicy(item Installed, requireSecureRemote bool) (Installed, error) {
 	if err := s.checkPackagesDir(); err != nil {
 		return item, err
 	}
@@ -188,7 +192,12 @@ func (s *Store) validateSnapshot(item Installed) (Installed, error) {
 	if err != nil {
 		return item, err
 	}
-	manifest, err := inspectPackage(context.Background(), item.Dir)
+	root, err := openPackageRoot(item.Dir)
+	if err != nil {
+		return item, fmt.Errorf("installed plugin %q: %w", item.Manifest.ID, err)
+	}
+	defer root.Close()
+	manifest, err := inspectPackageContents(context.Background(), root, requireSecureRemote)
 	if err != nil {
 		return item, fmt.Errorf("installed plugin %q: %w", item.Manifest.ID, err)
 	}

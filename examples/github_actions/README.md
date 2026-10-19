@@ -61,7 +61,7 @@ the runner's OS/architecture. Enable frozen installation in the workflow:
 |-------|---------|--------|
 | `policy_sha` | PR base SHA | Full trusted commit SHA supplying rules and plugin configuration; also resolved from the PR for comment-triggered runs. |
 | `project_plugins` | `'false'` | Install the committed project lock with `sync --frozen`, then verify contents, compatibility, and execution authorization. |
-| `allow_plugin_exec` | `'false'` | Authorize the trusted lock's MCP/workflow contributions for this run. Requires `project_plugins: 'true'`. |
+| `allow_plugin_exec` | `'false'` | Authorize the trusted lock's MCP contributions for this run. Requires `project_plugins: 'true'`. |
 
 Choose an Action and CLI release containing these commands; the version above
 is a placeholder, not a published release. Plugin preparation runs before model
@@ -80,6 +80,34 @@ incremental checkpoints and trigger a full review.
 
 See [project plugins](../../docs/native-plugins.md#project-plugins) for lock
 generation, local preflight, offline installation, and authorization.
+
+### Testing project plugin policy
+
+The CI workflow runs an integration test on Linux and Windows using real Git
+commits and the OCR binary built from the current source. Run it locally with
+Go, Node.js, Git and Bash installed:
+
+```sh
+go build -o ./dist/ocr ./cmd/opencodereview
+OCR_TEST_BINARY="$PWD/dist/ocr" npm run test:project-plugins-integration
+```
+
+In PowerShell (with Git Bash on `PATH`):
+
+```powershell
+go build -o ./dist/ocr.exe ./cmd/opencodereview
+$env:OCR_TEST_BINARY = (Resolve-Path ./dist/ocr.exe).Path
+npm run test:project-plugins-integration
+```
+
+The test executes the policy-resolution script and preparation shell step from
+`action.yml`. Simulated fork `pull_request`, `pull_request_target`, and
+`issue_comment` events select a trusted commit, then frozen installation and
+preflight verify its actual rules and MCP authorization. Different PR-head
+declarations, locks, and package contents must not become active. It also checks
+explicit policy overrides and rejects a mismatched checkout or changed policy
+files. GitHub event delivery and API responses are simulated; no live GitHub
+token, model credentials, or plugin server execution is needed.
 
 ## Running on a self-hosted runner
 

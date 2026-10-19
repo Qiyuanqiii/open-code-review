@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/alibaba/open-code-review/internal/mcp"
 )
 
 const ManifestFilename = "ocr-plugin.json"
@@ -59,6 +61,10 @@ func reservedName(name string) bool {
 
 // Validate checks the manifest contract independently of its on-disk package.
 func (m Manifest) Validate() error {
+	return m.validate(true)
+}
+
+func (m Manifest) validate(requireSecureRemote bool) error {
 	if m.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported plugin schema_version %d (expected 1)", m.SchemaVersion)
 	}
@@ -100,9 +106,16 @@ func (m Manifest) Validate() error {
 				return fmt.Errorf("MCP server %q: stdio requires command and cannot include url or headers", name)
 			}
 		case "remote":
-			u, err := url.Parse(server.URL)
-			if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
-				return fmt.Errorf("MCP server %q: remote requires an HTTP(S) URL without credentials or fragment", name)
+			if requireSecureRemote {
+				if err := mcp.ValidateRemoteURL(server.URL); err != nil {
+					return fmt.Errorf("MCP server %q: %w", name, err)
+				}
+			} else {
+				// Older installations must remain inspectable, updatable and removable.
+				u, err := url.Parse(server.URL)
+				if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
+					return fmt.Errorf("MCP server %q: remote requires an HTTP(S) URL without credentials or fragment", name)
+				}
 			}
 			if server.Command != "" || len(server.Args) > 0 || len(server.Env) > 0 {
 				return fmt.Errorf("MCP server %q: remote cannot include command, args or env", name)
@@ -132,11 +145,15 @@ func (m Manifest) Validate() error {
 
 // ParseManifest rejects unsupported fields, including nested setup hooks.
 func ParseManifest(data []byte) (Manifest, error) {
+	return parseManifest(data, true)
+}
+
+func parseManifest(data []byte, requireSecureRemote bool) (Manifest, error) {
 	var m Manifest
 	if err := decodeStrict(data, &m); err != nil {
 		return m, fmt.Errorf("parse plugin manifest: %w", err)
 	}
-	return m, m.Validate()
+	return m, m.validate(requireSecureRemote)
 }
 
 func decodeStrict(data []byte, value any) error {

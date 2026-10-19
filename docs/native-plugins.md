@@ -312,6 +312,8 @@ The lock must contain the runner's OS/architecture. Run `ocr plugin lock` on eac
 
 Each enabled run uses a fresh private OCR home and verifies package contents and authorization. Native programs run with the runner's permissions and can access its environment, including model credentials. Do not restore local trust records from a shared cache. Changed policy, plugin identity, or execution permission invalidates incremental-review checkpoints.
 
+CI integration coverage runs the Action policy-resolution script and preparation shell step with real Git commits and a freshly built OCR binary. It simulates fork PR and comment events, verifies the installed base-version rules and MCP authorization, and rejects a PR-head checkout or substituted declaration/lock. It requires no live GitHub API or model credentials; see the [test command](../examples/github_actions/README.md#testing-project-plugin-policy).
+
 See the [complete Action configuration](../examples/github_actions/README.md#project-plugins-in-ci).
 
 ---
@@ -374,12 +376,16 @@ Each rule JSON file is limited to 512 KiB. Paths must stay inside the package. U
 - `rules`: Array of relative `.json` rule-pack paths; individual rules can reference package-local Markdown files.
 - `mcp_servers`: Map of MCP server configurations.
   - `stdio`: Supports `command`, `args`, `env` (`KEY=VALUE`), and `tools` allowlist.
-  - `remote`: Supports `url` (HTTP or HTTPS), `headers`, and `tools`. Prefer HTTPS when sending credentials; package-download URLs require HTTPS separately.
+  - `remote`: Supports an HTTPS `url`, `headers`, and `tools`, with the local-development exception described below.
   - Placeholders supported in `command`, `args`, and `env`:
     - `${plugin_dir}`: Absolute path to the installed package snapshot directory.
     - `${os}`: Operating system name (`linux`, `darwin`, `windows`).
     - `${arch}`: Architecture name (`amd64`, `arm64`).
     - `${exe}`: `.exe` on Windows; empty string on Unix.
+
+Remote MCP URLs require HTTPS. HTTP is allowed only for local development at `localhost` or a literal loopback IP such as `127.0.0.1` or `[::1]`; HTTP endpoints on private LAN addresses or wildcard listen addresses are rejected. Redirects must retain the original scheme, host and port, so credentials cannot follow a downgrade or move to another origin. These checks apply both to plugin manifests and to connections from manual MCP configuration. Existing non-loopback HTTP endpoints must be moved to HTTPS. Package-download URLs still require HTTPS, including local hosts.
+
+Previously installed global plugins with HTTP MCP endpoints remain available to `plugin list`, `disable`, `remove`, and `update`. An enabled non-loopback HTTP plugin must be disabled or updated to an HTTPS-capable package before loading plugins for review. New installation, re-enabling, and project sync/preflight still enforce the transport policy; updating a changed MCP URL requires `--accept-permissions`.
 
 ### Packaging for Distribution
 

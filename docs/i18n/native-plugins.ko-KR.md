@@ -283,6 +283,8 @@ allow_plugin_exec: 'false'
 
 각 실행은 새 전용 OCR 홈에서 패키지 내용과 승인을 검증합니다. 네이티브 프로그램은 runner 권한으로 실행되며 모델 자격 증명을 포함한 환경에 접근할 수 있습니다. 공유 캐시에서 로컬 승인 기록을 복원하지 마세요. 정책, 플러그인 식별 정보 또는 실행 권한이 바뀌면 증분 리뷰 체크포인트가 무효화됩니다.
 
+CI 통합 테스트는 실제 Git 커밋과 새로 빌드한 OCR 바이너리로 Action의 정책 해석 스크립트와 플러그인 준비 shell 단계를 실행합니다. fork PR 및 댓글 이벤트를 모의하고 base 버전 규칙의 설치와 MCP 권한 검사를 검증하며, PR head 체크아웃이나 교체된 선언·잠금 파일을 거부합니다. 실제 GitHub API나 모델 자격 증명은 필요하지 않습니다. [테스트 명령](../../examples/github_actions/README.md#testing-project-plugin-policy)을 참고하세요.
+
 자세한 설정은 [Action 예제](../../examples/github_actions/README.md#project-plugins-in-ci)를 참조하세요.
 
 ---
@@ -343,7 +345,11 @@ my-plugin/
 - `id`는 소문자, 숫자, 점, 밑줄, 하이픈으로 최대 64자이며 처음과 끝은 영숫자여야 합니다. Windows 예약 장치 이름은 사용할 수 없습니다.
 - `name`과 `version`은 비어 있을 수 없습니다. 하나 이상의 규칙 팩이나 MCP 서버를 선언해야 합니다.
 - `rules`는 상대 `.json` 경로입니다. 형식은 위의 규칙 팩 설명을 참고하세요.
-- `mcp_servers`의 `stdio`(기본)는 `command`, `args`, `env`(`KEY=VALUE`), `tools` 허용 목록을 사용합니다. `remote`는 HTTP/HTTPS `url`, `headers`, `tools`를 사용합니다. 자격 증명을 전송할 때는 HTTPS를 사용하세요. 패키지 다운로드에는 별도로 HTTPS가 필수입니다.
+- `mcp_servers`의 `stdio`(기본)는 `command`, `args`, `env`(`KEY=VALUE`), `tools` 허용 목록을 사용합니다. `remote`는 HTTPS `url`, `headers`, `tools`를 사용하며 로컬 개발 예외는 아래에 설명합니다.
+
+원격 MCP URL은 HTTPS를 사용해야 합니다. HTTP는 로컬 개발 시 `localhost` 또는 `127.0.0.1`, `[::1]` 같은 루프백 IP 리터럴에만 허용됩니다. 사설 LAN 주소와 와일드카드 수신 주소를 사용하는 HTTP 엔드포인트는 거부됩니다. 리디렉션은 원래의 스킴, 호스트, 포트를 유지해야 하므로 자격 증명이 HTTP 다운그레이드나 다른 출처로의 이동에 따라 전송되지 않습니다. 이 검사는 플러그인 매니페스트와 수동 MCP 설정의 연결에 모두 적용됩니다. 기존의 비루프백 HTTP 엔드포인트는 HTTPS로 전환해야 합니다. 패키지 다운로드는 로컬 호스트를 포함해 계속 HTTPS가 필수입니다.
+
+이전에 설치한 HTTP MCP 엔드포인트를 포함하는 전역 플러그인은 계속 `plugin list`, `disable`, `remove`, `update`로 관리할 수 있습니다. 활성화된 비루프백 HTTP 플러그인은 검토용 플러그인을 로드하기 전에 비활성화하거나 HTTPS 지원 패키지로 업데이트해야 합니다. 새 설치, 재활성화 및 프로젝트 sync/preflight에는 전송 정책 검사가 계속 적용됩니다. 업데이트 시 MCP URL이 변경되면 `--accept-permissions`가 필요합니다.
 
 ### 플레이스홀더 지원
 

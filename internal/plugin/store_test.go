@@ -6,6 +6,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,76 @@ func TestEmptyStoreReadOnly(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 	if _, err := DefaultStore(); err == nil {
 		t.Fatal("expected missing home error")
+	}
+}
+
+func TestLegacyRemoteHTTPPluginsRemainManageable(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		for _, action := range []string{"remove", "update"} {
+			t.Run(fmt.Sprintf("enabled=%t/%s", enabled, action), func(t *testing.T) {
+				ctx := context.Background()
+				store := NewStore(t.TempDir())
+				source := testPackage(t, "legacy", "1")
+				manifest := testManifest("legacy", "1")
+				manifest.MCPServers = map[string]MCPServer{"remote": {Type: "remote", URL: "https://example.com/mcp"}}
+				writeTestJSON(t, filepath.Join(source, ManifestFilename), manifest)
+				installed, err := store.Install(ctx, source, enabled)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Recreate the registry and snapshot written by the previous HTTP-capable host.
+				stored, err := store.readState()
+				if err != nil {
+					t.Fatal(err)
+				}
+				item := stored.Installed["legacy"]
+				manifest.MCPServers["remote"] = MCPServer{Type: "remote", URL: "http://example.com/mcp"}
+				item.Manifest = manifest
+				writeTestJSON(t, filepath.Join(installed.Dir, ManifestFilename), manifest)
+				item.ContentSHA256, err = packageDigest(ctx, installed.Dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored.Installed["legacy"] = item
+				if err := store.writeState(stored); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Install(ctx, testPackage(t, "healthy", "1"), true); err != nil {
+					t.Fatalf("legacy metadata blocked an unrelated install: %v", err)
+				}
+				if items, err := store.List(); err != nil || len(items) != 2 {
+					t.Fatalf("List = %v, %v", items, err)
+				}
+				if enabled {
+					_, err := store.Enabled()
+					requireError(t, err, "requires HTTPS")
+				}
+				if err := store.SetEnabled("legacy", false); err != nil {
+					t.Fatal(err)
+				}
+				if items, err := store.Enabled(); err != nil || len(items) != 1 || items[0].Manifest.ID != "healthy" {
+					t.Fatalf("disabled legacy plugin blocked healthy plugins: %v, %v", items, err)
+				}
+				requireError(t, store.SetEnabled("legacy", true), "requires HTTPS")
+				if action == "remove" {
+					if err := store.Remove("legacy"); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					manifest.Version = "2"
+					manifest.MCPServers["remote"] = MCPServer{Type: "remote", URL: "https://example.com/mcp"}
+					writeTestJSON(t, filepath.Join(source, ManifestFilename), manifest)
+					_, err := store.Update(ctx, "legacy")
+					requireError(t, err, "--accept-permissions")
+					if _, err := store.UpdateWithOptions(ctx, "legacy", UpdateOptions{AcceptPermissions: true}); err != nil {
+						t.Fatal(err)
+					}
+					if err := store.SetEnabled("legacy", true); err != nil {
+						t.Fatalf("HTTPS migration failed: %v", err)
+					}
+				}
+			})
+		}
 	}
 }
 

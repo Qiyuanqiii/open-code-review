@@ -68,6 +68,8 @@ func TestMCPManifestValidation(t *testing.T) {
 		{Type: "stdio", Command: "mcp-server"},
 		{Type: "remote", URL: "https://example.com/mcp", Headers: map[string]string{"Authorization": "Bearer ${TOKEN}"}},
 		{Type: "remote", URL: "http://localhost:8080/mcp"},
+		{Type: "remote", URL: "http://127.0.0.1:8080/mcp"},
+		{Type: "remote", URL: "http://[::1]:8080/mcp"},
 	} {
 		m := testManifest("example", "1")
 		m.Rules = nil
@@ -80,6 +82,9 @@ func TestMCPManifestValidation(t *testing.T) {
 		{}, {Type: "unsupported"}, {Command: "node", URL: "https://example.com"},
 		{Command: "node", Headers: map[string]string{"A": "B"}},
 		{Type: "remote"}, {Type: "remote", URL: "ftp://example.com"},
+		{Type: "remote", URL: "http://example.com/mcp"},
+		{Type: "remote", URL: "http://192.168.1.2/mcp"},
+		{Type: "remote", URL: "http://localhost.example.com/mcp"},
 		{Type: "remote", URL: "https://user:pass@example.com"},
 		{Type: "remote", URL: "https://example.com/#fragment"},
 		{Type: "remote", URL: "https://example.com", Command: "node"},
@@ -115,6 +120,26 @@ func TestStrictJSONContract(t *testing.T) {
 	} {
 		if _, err := ParseManifest([]byte(data)); err == nil {
 			t.Fatalf("invalid JSON contract accepted: %s", data)
+		}
+	}
+}
+
+func TestLegacyHTTPValidationRetainsManifestChecks(t *testing.T) {
+	m := testManifest("legacy", "1")
+	m.MCPServers = map[string]MCPServer{"remote": {Type: "remote", URL: "http://example.com/mcp"}}
+	if err := m.validate(false); err != nil {
+		t.Fatalf("legacy HTTP metadata rejected: %v", err)
+	}
+	for _, server := range []MCPServer{
+		{Type: "remote", URL: "ftp://example.com/mcp"},
+		{Type: "remote", URL: "http://user:pass@example.com/mcp"},
+		{Type: "remote", URL: "http://example.com/mcp#fragment"},
+		{Type: "remote", URL: "http://example.com/mcp", Command: "node"},
+		{Type: "remote", URL: "http://example.com/mcp", Headers: map[string]string{"A": "bad\r\nheader"}},
+	} {
+		m.MCPServers["remote"] = server
+		if err := m.validate(false); err == nil {
+			t.Fatalf("invalid legacy metadata accepted: %+v", server)
 		}
 	}
 }

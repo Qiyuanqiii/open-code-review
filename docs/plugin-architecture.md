@@ -84,9 +84,19 @@ flowchart TB
   plugins. An empty project declaration selects no packaged plugins.
 
 Manual MCP configuration and existing project/user rule files keep their current
-behavior. The project declaration selects the packaged contributions only.
+selection behavior. The project declaration selects the packaged contributions only.
 Native executable contributions have the user's or runner's permissions; the
 installation and trust mechanisms do not sandbox their runtime behavior.
+
+`internal/mcp/endpoint.go` shares the remote URL policy between plugin manifest
+validation and MCP connections, including manually configured servers. HTTPS is
+required except for explicit localhost/loopback development endpoints. The HTTP
+client permits only same-origin redirects, preserving scheme, host, and port
+before the header transport can attach credentials to another request.
+Registry reads and management listings validate the previous HTTP(S) schema
+so legacy HTTP plugins can still be disabled, removed, or upgraded. Package
+installation, activation and project verification enforce the new policy;
+management reads still check snapshot paths, files and manifest identity.
 
 ### Read-only management
 
@@ -120,6 +130,12 @@ execution through the trusted workflow's `allow_plugin_exec` input, and obtains
 a verified fingerprint before review. Model credentials are configured after
 plugin preparation. Personal global packages and old trust records are not
 inherited into this home.
+
+`project-plugins.integration.test.js` executes the Action's policy-resolution
+script and preparation shell step with a freshly built OCR binary and real Git
+commits. Simulated fork/comment events verify base-version rules, separate MCP
+authorization, and rejection of PR-head checkouts or substituted policy files.
+The Linux and Windows CI jobs run it after building the CLI.
 
 Local resume identity includes selected manifests, package contents, and rule
 text. Executable contributions also retain observable install paths in that

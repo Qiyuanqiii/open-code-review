@@ -84,6 +84,10 @@ func inspectPackage(ctx context.Context, directory string) (Manifest, error) {
 }
 
 func inspectPackageRoot(ctx context.Context, root *os.Root) (Manifest, error) {
+	return inspectPackageContents(ctx, root, true)
+}
+
+func inspectPackageContents(ctx context.Context, root *os.Root, requireSecureRemote bool) (Manifest, error) {
 	var m Manifest
 	count := 0
 	var total int64
@@ -138,7 +142,7 @@ func inspectPackageRoot(ctx context.Context, root *os.Root) (Manifest, error) {
 	if err != nil {
 		return m, fmt.Errorf("read %s: %w", ManifestFilename, err)
 	}
-	m, err = ParseManifest(data)
+	m, err = parseManifest(data, requireSecureRemote)
 	if err != nil {
 		return m, err
 	}

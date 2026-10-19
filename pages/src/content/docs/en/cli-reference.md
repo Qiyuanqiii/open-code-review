@@ -86,7 +86,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr plugin install <url\|path>` | — | Install an OCR native plugin from a URL or local path. |
 | `ocr plugin list` | `ocr plugins list` | List installed plugins and their enabled status. |
 | `ocr plugin show <id>` | — | Inspect an installed plugin and its capabilities. |
-| `ocr plugin update <id>` | — | Refresh a plugin from source (`--accept-permissions`). |
+| `ocr plugin update <id>` | — | Refresh a plugin from source (`--source`, `--accept-permissions`). |
 | `ocr plugin enable <id>` / `disable <id>` | — | Enable or disable an installed plugin. |
 | `ocr plugin remove <id>` | — | Unregister and remove an installed plugin. |
 | `ocr plugin add <source>` | — | Declare and lock a plugin dependency for the project. |
@@ -805,7 +805,7 @@ Manage OCR native plugins that contribute review rules and MCP tools. For a comp
 - `ocr plugin install <url|path>`: Install from a public GitHub URL, remote HTTPS archive (`.tar.gz`/`.zip`), or local directory/archive. Flags: `--enable` (enable after install), `--dry-run` (preview without saving), `--plugin <id>` (select plugin from multi-plugin source), `--json`.
 - `ocr plugin list`: List installed global plugins, version, and enabled status.
 - `ocr plugin show <id>`: Show plugin details, snapshot path, rules, and MCP servers (sensitive credentials redacted).
-- `ocr plugin update <id>`: Update plugin from recorded source. If MCP execution configurations change, requires `--accept-permissions`.
+- `ocr plugin update <id>`: Update from the recorded source, or use `--source <url|path>` to replace it. A successful update saves the new source and preserves the enabled state; failure keeps the previous package and source. MCP execution changes require `--accept-permissions`.
 - `ocr plugin enable <id>` / `disable <id>`: Enable or disable a plugin for subsequent reviews.
 - `ocr plugin remove <id>`: Unregister a plugin.
 

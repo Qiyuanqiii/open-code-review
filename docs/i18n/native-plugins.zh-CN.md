@@ -131,12 +131,23 @@ review-checklist  1.0.0    disabled  1 rule packs, 0 MCP servers
 
 - **参数**：`<id>`（插件 ID）。
 - **选项**：
+  - `--source <url|path>`：更换记录的来源。与 `install` 一样，支持 HTTPS/GitHub URL 和本地目录、ZIP、tar.gz 归档；新包的插件 ID 必须与已安装的插件一致。
   - `--accept-permissions`：显式确认接受新增或修改的 MCP 执行权限声明。
   - `--json`：输出更新结果 JSON。
 - **安全拦截门禁**：如果新版本中**新增了 MCP Server**，或者**修改了现有 Server 的命令、参数、环境变量或通信协议**，OCR 会主动中断更新并报错（`PLUGIN_EXECUTION_CHANGED`），提示具体的变更项。用户确认安全后，必须附加 `--accept-permissions` 标志完成更新：
   ```sh
   ocr plugin update <id> --accept-permissions
   ```
+
+下载令牌过期或包地址迁移时，可以指定新的来源：
+
+```sh
+ocr plugin update my-plugin --source "https://plugins.example.com/download.php?token=NEW_TOKEN"
+```
+
+更新成功后，后续 `update <id>` 会复用新来源，包括 URL 查询参数，并保留启用/禁用状态。下载、校验或权限确认失败时，原有插件和来源记录均保持不变。若提示需要确认权限，重试时须同时带上 `--source` 和 `--accept-permissions`。
+
+HTTPS 下载地址可以包含查询参数，也不必以归档扩展名结尾，但响应必须是有效的插件压缩包。完整 URL 会保存在本机；管理输出隐藏查询参数，存储时不会加密。此命令更新全局安装，项目依赖使用 `plugin add` 和 `plugin lock` 管理。
 
 #### 5. `ocr plugin enable <id>`
 启用指定的插件。其贡献的评审规则将在后续审查中追加，声明的 MCP Server 工具将被注入到审查运行时。

@@ -12,6 +12,7 @@ import (
 )
 
 type UpdateOptions struct {
+	Source            string
 	AcceptPermissions bool
 }
 

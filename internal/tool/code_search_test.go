@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -808,6 +809,86 @@ func TestGitGrep_NonASCIIPath(t *testing.T) {
 			}
 			if want := "File: " + nonASCIIPath + "\n"; !strings.Contains(result, want) {
 				t.Errorf("expected %q in result, got: %s", want, result)
+			}
+		})
+	}
+}
+
+func TestCodeSearchProvider_Execute_SpecialCharacterPaths(t *testing.T) {
+	paths := []string{"colon:file.go", "colon:42:file.go", "quote\"file.go", "tab\tfile.go", "line\nfile.go"}
+	slices.Sort(paths)
+	const content = "package main\nneedle:first\nneedle:second\n"
+	var want strings.Builder
+	for _, path := range paths {
+		fmt.Fprintf(&want, "File: %s\nMatch lines: 2\n2|needle:first\n3|needle:second\n\n", path)
+	}
+
+	for _, mode := range []string{"workspace", "commit", "plain_directory"} {
+		t.Run(mode, func(t *testing.T) {
+			if runtime.GOOS == "windows" && mode != "commit" {
+				t.Skip("these filenames cannot be created on Windows")
+			}
+			dir := t.TempDir()
+			if mode != "plain_directory" {
+				dir = setupTestRepo(t)
+			}
+			git := func(input string, args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				cmd.Stdin = strings.NewReader(input)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			if mode != "plain_directory" {
+				git("", "config", "grep.column", "true")
+			}
+			fr := FileReader{RepoDir: dir, Mode: ModeWorkspace}
+			if mode == "commit" {
+				// Populate the tree without requiring platform-specific filenames on disk.
+				blob := git(content, "hash-object", "-w", "--stdin")
+				var entries strings.Builder
+				for _, path := range paths {
+					fmt.Fprintf(&entries, "100644 blob %s\t%s\x00", blob, path)
+				}
+				tree := git(entries.String(), "mktree", "-z")
+				fr.Mode, fr.Ref = ModeCommit, git("", "commit-tree", tree, "-m", "add special-character paths")
+			} else {
+				for _, path := range paths {
+					if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "workspace" {
+					git("", "add", ".")
+				}
+			}
+
+			for _, withRunner := range []bool{false, true} {
+				t.Run(fmt.Sprintf("runner=%t", withRunner), func(t *testing.T) {
+					reader := fr
+					if withRunner {
+						reader.Runner = gitcmd.New(1)
+					}
+					got, err := NewCodeSearch(&reader).Execute(context.Background(), map[string]any{
+						"search_text": "needle:",
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got != want.String() {
+						t.Fatalf("Execute() = %q, want %q", got, want.String())
+					}
+					for _, path := range paths {
+						read, err := NewFileRead(&reader).Execute(context.Background(), map[string]any{"file_path": path})
+						if err != nil || !strings.Contains(read, "2|needle:first\n3|needle:second\n") {
+							t.Errorf("file_read(%q) = %q, %v", path, read, err)
+						}
+					}
+				})
 			}
 		})
 	}

@@ -129,6 +129,10 @@ func ListSessions(repoDir string) ([]Summary, error) {
 		if err != nil {
 			continue
 		}
+		// The storage encoding maps both /a-b and /a/b to the same directory.
+		if !sameRepoPath(summary.RepoDir, repoDir) {
+			continue
+		}
 		summaries = append(summaries, *summary)
 	}
 	sort.Slice(summaries, func(i, j int) bool {

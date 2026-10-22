@@ -903,22 +903,56 @@ func TestRunSessionExport_WritesFile(t *testing.T) {
 	}
 }
 
-// TestRunSessionExport_DefaultsToNewest pins the no-argument form. A successful
-// `ocr review` never prints its session id, so requiring one would push every
-// CI archive step through `--format json`.
-func TestRunSessionExport_DefaultsToNewest(t *testing.T) {
+// TestRunSessionExport_DefaultsToNewestForRepository pins the no-argument form.
+// A successful `ocr review` never prints its session id, so requiring one would
+// push every CI archive step through `--format json`.
+func TestRunSessionExport_DefaultsToNewestForRepository(t *testing.T) {
 	setTestHome(t, t.TempDir())
-	repoDir := t.TempDir()
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "project-app")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	older := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "old"})
 	older.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", nil)
 	older.Finalize()
 
-	time.Sleep(1100 * time.Millisecond) // StartTime is persisted at second resolution
-
 	newer := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "new"})
 	newer.RecordReviewItemDone("b.go", "b.go", "b.go", "fp-b", nil)
 	newer.Finalize()
+
+	otherRepo := filepath.Join(base, "project", "app")
+	if err := os.MkdirAll(otherRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := session.New(otherRepo, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "unrelated"})
+	other.RecordReviewItemDone("other.go", "other.go", "other.go", "fp-other", []model.LlmComment{{Path: "other.go", Content: "finding from another repository"}})
+	other.Finalize()
+
+	for i, saved := range []*session.SessionHistory{older, newer, other} {
+		path, err := session.SessionFilePath(saved.RepoDir, saved.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.SplitN(string(raw), "\n", 2)
+		var start map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &start); err != nil {
+			t.Fatal(err)
+		}
+		start["timestamp"] = time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC).Format(time.RFC3339)
+		first, err := json.Marshal(start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(string(first)+"\n"+lines[1]), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	body, err := exportTo(t, repoDir, "")
 	if err != nil {
@@ -929,6 +963,9 @@ func TestRunSessionExport_DefaultsToNewest(t *testing.T) {
 	}
 	if strings.Contains(body, older.SessionID) {
 		t.Errorf("export contains the older session id %s", older.SessionID)
+	}
+	if strings.Contains(body, other.SessionID) || strings.Contains(body, "finding from another repository") {
+		t.Error("export contains a session from another repository")
 	}
 }
 

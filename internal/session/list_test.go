@@ -4,6 +4,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,6 +22,73 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
+	}
+}
+
+func TestListSessions_SeparatesRepositoriesWithSameEncodedPath(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	base := t.TempDir()
+	repos := []string{filepath.Join(base, "project-app"), filepath.Join(base, "project", "app")}
+	ids := make([]string, len(repos))
+	for i, repo := range repos {
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = writeTestSession(t, repo, "main", "feature", nil, 0, 0, true)
+	}
+
+	for _, archived := range []bool{false, true} {
+		if archived {
+			for _, repo := range repos {
+				if err := os.Remove(repo); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		for i, repo := range repos {
+			got, err := ListSessions(repo)
+			if err != nil {
+				t.Fatalf("ListSessions(%q): %v", repo, err)
+			}
+			if len(got) != 1 || got[0].SessionID != ids[i] {
+				t.Errorf("ListSessions(%q), archived=%v = %+v; want only %s", repo, archived, got, ids[i])
+			}
+		}
+	}
+}
+
+func TestListSessions_KeepsEquivalentRepositories(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	base := t.TempDir()
+	repo := filepath.Join(base, "project", "app")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "project-app")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	id := writeTestSession(t, alias, "main", "feature", nil, 0, 0, true)
+	got, err := ListSessions(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SessionID != id {
+		t.Fatalf("ListSessions = %+v; want session %s recorded through the alias", got, id)
+	}
+}
+
+func TestListSessions_KeepsSessionsWithoutRecordedRepository(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repo := t.TempDir()
+	id := "legacy-without-cwd"
+	seedSession(t, repo, id)
+	got, err := ListSessions(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SessionID != id {
+		t.Fatalf("ListSessions = %+v; want legacy session %s", got, id)
 	}
 }
 

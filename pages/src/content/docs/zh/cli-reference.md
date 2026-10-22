@@ -436,6 +436,9 @@ ocr session comments --severity critical,high --category bug,security <session-i
 （两个会话都有）、**resolved**（仅出现在 before 会话）、**not reviewed**
 （出现在 before 会话，但 after 会话没有评审该文件，因此不计为已解决）。
 
+如果 after 会话没有完成记录，before 中未匹配的问题会归为 **not reviewed**；
+已完成但没有运行清单的旧版会话仍沿用将未匹配问题归为 **resolved** 的兼容行为。
+
 匹配依据是文件路径、类别和问题代码片段，而不是行号，所以仅仅是行号发生偏移
 的问题仍然算作 persisting。如果 after 会话的运行清单记录了文件重命名，匹配前
 会先将旧路径映射到新路径。

@@ -735,6 +735,72 @@ func TestRunSessionCompare_UnreviewedFilesAreNotResolved(t *testing.T) {
 	}
 }
 
+func TestRunSessionCompare_AbortedAfterRunIsNotResolved(t *testing.T) {
+	kept := model.LlmComment{Path: "a.go", StartLine: 40, EndLine: 40, Category: "bug", ExistingCode: "x := 1", Content: "still here"}
+	missing := model.LlmComment{Path: "a.go", StartLine: 70, EndLine: 70, Category: "bug", ExistingCode: "y := 2", Content: "not rechecked"}
+	added := model.LlmComment{Path: "b.go", StartLine: 3, EndLine: 3, Category: "bug", ExistingCode: "z := 3", Content: "new finding"}
+	for _, tt := range []struct {
+		name           string
+		after          []model.LlmComment
+		wantNew        int
+		wantPersisting int
+		wantText       string
+	}{
+		{name: "session start only", wantText: "0 new, 0 persisting, 0 resolved"},
+		{name: "saved findings", after: []model.LlmComment{kept, added}, wantNew: 1, wantPersisting: 1, wantText: "1 new, 1 persisting, 0 resolved"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			repoDir := t.TempDir()
+			opts := session.SessionOptions{ReviewMode: session.ReviewModeCommit, DiffCommit: "abc123"}
+			before := newCompareSession(t, repoDir, opts, []model.LlmComment{kept, missing})
+			before.Finalize()
+			after := newCompareSession(t, repoDir, opts, tt.after)
+			after.Finalize()
+			summary, err := session.LoadSummary(repoDir, after.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(summary.FilePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Keep durable records but remove session_end to model an interrupted run.
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			if err := os.WriteFile(summary.FilePath, []byte(strings.Join(lines[:len(lines)-1], "\n")+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			useCompareRepo(t, repoDir, true)
+			out := captureStdout(t, func() {
+				if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+					t.Fatalf("runSessionCompare: %v", err)
+				}
+			})
+			var result session.CompareResult
+			if err := json.Unmarshal([]byte(out), &result); err != nil {
+				t.Fatalf("unmarshal: %v (out=%q)", err, out)
+			}
+			if len(result.Resolved) != 0 || len(result.NotReviewed) != 2-tt.wantPersisting {
+				t.Errorf("resolved = %+v, not_reviewed = %+v; want unmatched findings not reviewed", result.Resolved, result.NotReviewed)
+			}
+			if len(result.New) != tt.wantNew || len(result.Persisting) != tt.wantPersisting {
+				t.Errorf("new = %+v, persisting = %+v", result.New, result.Persisting)
+			}
+
+			sessionCompareJSON = false
+			out = captureStdout(t, func() {
+				if err := runSessionCompare(before.SessionID, after.SessionID); err != nil {
+					t.Fatalf("runSessionCompare: %v", err)
+				}
+			})
+			if !strings.Contains(out, tt.wantText) || !strings.Contains(out, "not counted as resolved") {
+				t.Errorf("text output = %q, want %q and the not-reviewed explanation", out, tt.wantText)
+			}
+		})
+	}
+}
+
 // TestSessionCompareCmd_HelpRoutes mirrors the parent-command routing checks:
 // `session compare --help` must resolve through the session command tree.
 func TestSessionCompareCmd_HelpRoutes(t *testing.T) {

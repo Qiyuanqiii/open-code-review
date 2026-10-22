@@ -199,10 +199,15 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 
 	// Same call shape as the CLI: the after manifest supplies reviewed paths and
 	// old-to-new mappings for renamed files.
+	afterManifest := av.Summary.RunManifest
+	if av.Summary.Aborted && afterManifest == nil {
+		// Keep unknown coverage distinct from a completed legacy session.
+		afterManifest = &session.RunManifest{}
+	}
 	result := session.Compare(
 		toLlmComments(bv.Comments),
 		toLlmComments(av.Comments),
-		av.Summary.RunManifest,
+		afterManifest,
 	)
 
 	name := filepath.Base(av.Summary.CWD)

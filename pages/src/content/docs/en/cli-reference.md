@@ -463,6 +463,10 @@ after session), **persisting** (in both), **resolved** (only in the before
 session) and **not reviewed** (in the before session, in files the after
 session never looked at, so they are not counted as resolved).
 
+If the after session has no completion record, unmatched before findings are
+**not reviewed**; completed legacy sessions without a manifest retain the
+**resolved** fallback.
+
 Findings are matched on path, category and the offending snippet, not on line
 numbers, so a finding that only moved down the file still counts as
 persisting. When the after session's manifest records a file rename, the old

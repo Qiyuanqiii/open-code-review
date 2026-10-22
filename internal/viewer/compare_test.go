@@ -187,6 +187,11 @@ func compareFixture(t *testing.T) string {
 	// b.go, so a.go carries no verdict.
 	writeCompareSession(t, repoDir, "partial", "commit",
 		splitCoverage([]string{"a.go", "b.go"}, []string{"b.go"}))
+	writeJSONL(t, filepath.Join(repoDir, "aborted.jsonl"),
+		`{"type":"session_start","timestamp":"2025-03-01T09:00:00Z","cwd":"/home/user/project","reviewMode":"commit"}`)
+	writeJSONL(t, filepath.Join(repoDir, "aborted-checkpoint.jsonl"),
+		`{"type":"session_start","timestamp":"2025-03-01T09:00:00Z","cwd":"/home/user/project","reviewMode":"commit"}`,
+		`{"type":"review_item_done","filePath":"a.go","comments":[`+kept+`,`+added+`]}`)
 	// A session recorded in a different working directory. Written from literal
 	// lines because writeCompareSession hardcodes one cwd for all six of its
 	// call sites.
@@ -250,6 +255,16 @@ func TestHandleCompare(t *testing.T) {
 			name:  "legacy after run reports unmatched findings as resolved",
 			query: "before=s1&after=legacy", status: http.StatusOK,
 			contains: []string{"Resolved (2)", "Not reviewed (0)"},
+		},
+		{
+			name:  "aborted after run does not resolve findings",
+			query: "before=s1&after=aborted", status: http.StatusOK,
+			contains: []string{"New (0)", "Persisting (0)", "Resolved (0)", "Not reviewed (2)"},
+		},
+		{
+			name:  "aborted after run retains saved findings without resolving unmatched ones",
+			query: "before=s1&after=aborted-checkpoint", status: http.StatusOK,
+			contains: []string{"New (1)", "Persisting (1)", "Resolved (0)", "Not reviewed (1)"},
 		},
 		{
 			name: "self compare is all persisting", query: "before=s1&after=s1", status: http.StatusOK,

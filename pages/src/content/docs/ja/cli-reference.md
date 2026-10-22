@@ -438,6 +438,10 @@ ocr session comments --severity critical,high --category bug,security <session-i
 **not reviewed**（before セッションにあり、after セッションがそのファイルを
 レビューしていないため解決済みとは数えないもの）。
 
+after セッションに完了記録がない場合、before の未一致の指摘は **not reviewed**
+になります。完了済みでマニフェストのない旧形式のセッションでは、未一致の指摘を
+**resolved** とする従来の動作を維持します。
+
 照合はパス・カテゴリ・該当コード片で行い、行番号は使いません。そのため行が
 ずれただけの指摘は persisting のままになります。after セッションのランマニフェストに
 ファイル名変更が記録されている場合、照合前に旧パスを新パスへ対応付けます。
